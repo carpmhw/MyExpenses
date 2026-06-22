@@ -1,0 +1,618 @@
+@MyExpenses.Api_HostAddress = http://localhost:5000
+@token = <your-jwt-token-here>
+
+### ========================================
+###  Auth Endpoints
+### ========================================
+
+### GET /api/auth/status - 檢查認證狀態
+GET {{MyExpenses.Api_HostAddress}}/api/auth/status
+Accept: application/json
+
+### POST /api/auth/register - 註冊首個使用者
+POST {{MyExpenses.Api_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "displayName": "Test User"
+}
+
+### POST /api/auth/login - 登入
+POST {{MyExpenses.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+
+### POST /api/auth/2fa/login - 雙因子驗證登入（需先取得 tempToken）
+POST {{MyExpenses.Api_HostAddress}}/api/auth/2fa/login
+Content-Type: application/json
+
+{
+  "tempToken": "<temp-token>",
+  "code": "123456"
+}
+
+### POST /api/auth/2fa/recovery-login - 使用備用碼登入
+POST {{MyExpenses.Api_HostAddress}}/api/auth/2fa/recovery-login
+Content-Type: application/json
+
+{
+  "tempToken": "<temp-token>",
+  "recoveryCode": "ABCD-EFGH-IJKL"
+}
+
+### PUT /api/auth/profile - 更新顯示名稱（需登入）
+PUT {{MyExpenses.Api_HostAddress}}/api/auth/profile
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "displayName": "New Display Name"
+}
+
+### PUT /api/auth/password - 變更密碼（需登入）
+PUT {{MyExpenses.Api_HostAddress}}/api/auth/password
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "currentPassword": "password123",
+  "newPassword": "newpassword456"
+}
+
+### POST /api/auth/logout-all - 所有裝置登出（需登入）
+POST {{MyExpenses.Api_HostAddress}}/api/auth/logout-all
+Authorization: Bearer {{token}}
+
+### POST /api/auth/2fa/setup - 設定 TOTP 雙因子驗證（需登入）
+POST {{MyExpenses.Api_HostAddress}}/api/auth/2fa/setup
+Authorization: Bearer {{token}}
+
+### POST /api/auth/2fa/verify - 驗證 2FA 設定（需登入）
+POST {{MyExpenses.Api_HostAddress}}/api/auth/2fa/verify
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "code": "123456"
+}
+
+### POST /api/auth/2fa/disable - 停用雙因子驗證（需登入）
+POST {{MyExpenses.Api_HostAddress}}/api/auth/2fa/disable
+Authorization: Bearer {{token}}
+
+### GET /api/auth/2fa/recovery-codes - 重新產生備用碼（需登入）
+GET {{MyExpenses.Api_HostAddress}}/api/auth/2fa/recovery-codes
+Authorization: Bearer {{token}}
+
+### POST /api/auth/api-tokens - 建立 API Token（需登入）
+POST {{MyExpenses.Api_HostAddress}}/api/auth/api-tokens
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "My API Token",
+  "scopes": ["read", "write"]
+}
+
+### GET /api/auth/api-tokens - 列出所有 API Token（需登入）
+GET {{MyExpenses.Api_HostAddress}}/api/auth/api-tokens
+Authorization: Bearer {{token}}
+
+### DELETE /api/auth/api-tokens/{id} - 撤銷 API Token（需登入）
+DELETE {{MyExpenses.Api_HostAddress}}/api/auth/api-tokens/1
+Authorization: Bearer {{token}}
+
+
+### ========================================
+###  Category Endpoints
+### ========================================
+
+### GET /api/categories - 分頁列表
+GET {{MyExpenses.Api_HostAddress}}/api/categories?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/categories?all=true - 全部列表
+GET {{MyExpenses.Api_HostAddress}}/api/categories?all=true
+Accept: application/json
+
+### GET /api/categories/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/categories/1
+Accept: application/json
+
+### POST /api/categories - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/categories
+Content-Type: application/json
+
+{
+  "name": "測試分類",
+  "type": "Expense",
+  "icon": "Tag",
+  "color": "#FF5733",
+  "sortOrder": 50
+}
+
+### PUT /api/categories/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/categories/1
+Content-Type: application/json
+
+{
+  "name": "更新分類",
+  "type": "Expense",
+  "icon": "Tag",
+  "color": "#33FF57",
+  "sortOrder": 51
+}
+
+### DELETE /api/categories/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/categories/1
+
+### POST /api/categories/restore-defaults - 恢復預設分類
+POST {{MyExpenses.Api_HostAddress}}/api/categories/restore-defaults
+Content-Type: application/json
+
+
+### ========================================
+###  Transaction Endpoints
+### ========================================
+
+### GET /api/transactions - 分頁列表（支援篩選）
+GET {{MyExpenses.Api_HostAddress}}/api/transactions?page=1&pageSize=20&type=Expense
+Accept: application/json
+
+### GET /api/transactions?limit=5 - 最近 5 筆
+GET {{MyExpenses.Api_HostAddress}}/api/transactions?limit=5
+Accept: application/json
+
+### GET /api/transactions?categoryId=1&startDate=2026-01-01&endDate=2026-12-31
+GET {{MyExpenses.Api_HostAddress}}/api/transactions?categoryId=1&startDate=2026-01-01&endDate=2026-12-31
+Accept: application/json
+
+### GET /api/transactions/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/transactions/1
+Accept: application/json
+
+### POST /api/transactions - 新增（使用 CategoryId）
+POST {{MyExpenses.Api_HostAddress}}/api/transactions
+Content-Type: application/json
+
+{
+  "type": "Expense",
+  "amount": 150.00,
+  "date": "2026-06-21",
+  "description": "午餐",
+  "categoryId": 1,
+  "paymentMethodId": 1,
+  "notes": "與同事聚餐"
+}
+
+### POST /api/transactions - 新增（使用 CategoryCode）
+POST {{MyExpenses.Api_HostAddress}}/api/transactions
+Content-Type: application/json
+
+{
+  "type": "Expense",
+  "amount": 80.00,
+  "date": "2026-06-21",
+  "description": "捷運",
+  "categoryCode": "transport",
+  "paymentMethodCode": "easy-card"
+}
+
+### POST /api/transactions - 新增（使用 Category 名稱）
+POST {{MyExpenses.Api_HostAddress}}/api/transactions
+Content-Type: application/json
+
+{
+  "type": "Expense",
+  "amount": 300.00,
+  "date": "2026-06-21",
+  "description": "超市購物",
+  "category": "生活",
+  "paymentMethod": "現金"
+}
+
+### PUT /api/transactions/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/transactions/1
+Content-Type: application/json
+
+{
+  "type": "Expense",
+  "amount": 200.00,
+  "date": "2026-06-21",
+  "description": "午餐（更新）",
+  "categoryId": 1,
+  "notes": "更新備註"
+}
+
+### DELETE /api/transactions/{id} - 軟刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/transactions/1
+
+### POST /api/transactions/{id}/undo - 還原軟刪除
+POST {{MyExpenses.Api_HostAddress}}/api/transactions/1/undo
+
+
+### ========================================
+###  Payment Method Endpoints
+### ========================================
+
+### GET /api/payment-methods - 分頁列表
+GET {{MyExpenses.Api_HostAddress}}/api/payment-methods?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/payment-methods?all=true - 全部列表
+GET {{MyExpenses.Api_HostAddress}}/api/payment-methods?all=true
+Accept: application/json
+
+### GET /api/payment-methods/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/payment-methods/1
+Accept: application/json
+
+### POST /api/payment-methods - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/payment-methods
+Content-Type: application/json
+
+{
+  "name": "測試支付",
+  "icon": "Wallet",
+  "color": "#FF5733",
+  "sortOrder": 10
+}
+
+### PUT /api/payment-methods/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/payment-methods/1
+Content-Type: application/json
+
+{
+  "name": "更新支付",
+  "icon": "CreditCard",
+  "color": "#33FF57",
+  "sortOrder": 11
+}
+
+### DELETE /api/payment-methods/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/payment-methods/1
+
+### POST /api/payment-methods/restore-defaults - 恢復預設支付方式
+POST {{MyExpenses.Api_HostAddress}}/api/payment-methods/restore-defaults
+Content-Type: application/json
+
+
+### ========================================
+###  Bank Account Endpoints
+### ========================================
+
+### GET /api/bank-accounts - 分頁列表
+GET {{MyExpenses.Api_HostAddress}}/api/bank-accounts?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/bank-accounts/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/bank-accounts/1
+Accept: application/json
+
+### POST /api/bank-accounts - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/bank-accounts
+Content-Type: application/json
+
+{
+  "bankName": "中國信託",
+  "accountNumber": "123-456-789",
+  "balance": 100000.00,
+  "accountType": "Checking"
+}
+
+### PUT /api/bank-accounts/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/bank-accounts/1
+Content-Type: application/json
+
+{
+  "bankName": "國泰世華",
+  "accountNumber": "987-654-321",
+  "balance": 50000.00,
+  "accountType": "Savings"
+}
+
+### DELETE /api/bank-accounts/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/bank-accounts/1
+
+
+### ========================================
+###  Credit Card Endpoints
+### ========================================
+
+### GET /api/credit-cards - 分頁列表
+GET {{MyExpenses.Api_HostAddress}}/api/credit-cards?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/credit-cards/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/credit-cards/1
+Accept: application/json
+
+### POST /api/credit-cards - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/credit-cards
+Content-Type: application/json
+
+{
+  "bankName": "台新銀行",
+  "lastFourDigits": "1234",
+  "statementDay": 15,
+  "dueDay": 25,
+  "creditLimit": 200000.00
+}
+
+### PUT /api/credit-cards/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/credit-cards/1
+Content-Type: application/json
+
+{
+  "bankName": "玉山銀行",
+  "lastFourDigits": "5678",
+  "statementDay": 10,
+  "dueDay": 20,
+  "creditLimit": 150000.00
+}
+
+### DELETE /api/credit-cards/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/credit-cards/1
+
+
+### ========================================
+###  Credit Card Bill Endpoints
+### ========================================
+
+### GET /api/credit-card-bills - 列表（支援篩選）
+GET {{MyExpenses.Api_HostAddress}}/api/credit-card-bills
+Accept: application/json
+
+### GET /api/credit-card-bills?cardId=1&isPaid=false
+GET {{MyExpenses.Api_HostAddress}}/api/credit-card-bills?cardId=1&isPaid=false
+Accept: application/json
+
+### GET /api/credit-card-bills/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/credit-card-bills/1
+Accept: application/json
+
+### POST /api/credit-card-bills - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/credit-card-bills
+Content-Type: application/json
+
+{
+  "cardId": 1,
+  "period": "2026-06",
+  "totalAmount": 5000.00,
+  "paidAmount": 0,
+  "dueDate": "2026-07-10",
+  "isPaid": false
+}
+
+### PUT /api/credit-card-bills/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/credit-card-bills/1
+Content-Type: application/json
+
+{
+  "cardId": 1,
+  "period": "2026-06",
+  "totalAmount": 4800.00,
+  "paidAmount": 4800.00,
+  "dueDate": "2026-07-10",
+  "isPaid": true
+}
+
+### DELETE /api/credit-card-bills/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/credit-card-bills/1
+
+
+### ========================================
+###  Installment Endpoints
+### ========================================
+
+### GET /api/installments - 分頁列表（支援篩選）
+GET {{MyExpenses.Api_HostAddress}}/api/installments?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/installments?cardId=1&status=Active
+GET {{MyExpenses.Api_HostAddress}}/api/installments?cardId=1&status=Active
+Accept: application/json
+
+### GET /api/installments/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/installments/1
+Accept: application/json
+
+### POST /api/installments - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/installments
+Content-Type: application/json
+
+{
+  "cardId": 1,
+  "totalAmount": 12000.00,
+  "periods": 6,
+  "description": "iPhone 分期"
+}
+
+### PUT /api/installments/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/installments/1
+Content-Type: application/json
+
+{
+  "totalAmount": 6000.00,
+  "periods": 3,
+  "description": "iPhone 分期（更新）",
+  "cardId": 1
+}
+
+### DELETE /api/installments/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/installments/1
+
+### PATCH /api/installments/{id}/payments/{paymentId} - 切換繳款狀態
+PATCH {{MyExpenses.Api_HostAddress}}/api/installments/1/payments/1
+Content-Type: application/json
+
+
+### ========================================
+###  Stock Endpoints
+### ========================================
+
+### GET /api/stocks/lookup - 查詢股票（TWSE）
+GET {{MyExpenses.Api_HostAddress}}/api/stocks/lookup?symbol=2330
+Accept: application/json
+
+### GET /api/stocks - 分頁列表
+GET {{MyExpenses.Api_HostAddress}}/api/stocks?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/stocks/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/stocks/1
+Accept: application/json
+
+### POST /api/stocks - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/stocks
+Content-Type: application/json
+
+{
+  "name": "台積電",
+  "symbol": "2330",
+  "shares": 1000,
+  "buyPrice": 600.00,
+  "currentPrice": 650.00,
+  "broker": "元大證券"
+}
+
+### PUT /api/stocks/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/stocks/1
+Content-Type: application/json
+
+{
+  "name": "台積電",
+  "symbol": "2330",
+  "shares": 2000,
+  "buyPrice": 600.00,
+  "currentPrice": 700.00,
+  "broker": "元大證券"
+}
+
+### DELETE /api/stocks/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/stocks/1
+
+
+### ========================================
+###  Withdrawal Endpoints
+### ========================================
+
+### GET /api/withdrawals - 分頁列表（支援日期篩選）
+GET {{MyExpenses.Api_HostAddress}}/api/withdrawals?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/withdrawals?startDate=2026-01-01&endDate=2026-12-31
+GET {{MyExpenses.Api_HostAddress}}/api/withdrawals?startDate=2026-01-01&endDate=2026-12-31
+Accept: application/json
+
+### GET /api/withdrawals/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/withdrawals/1
+Accept: application/json
+
+### POST /api/withdrawals - 新增
+POST {{MyExpenses.Api_HostAddress}}/api/withdrawals
+Content-Type: application/json
+
+{
+  "amount": 5000.00,
+  "date": "2026-06-21",
+  "description": "ATM 提款",
+  "bankAccountId": 1
+}
+
+### PUT /api/withdrawals/{id} - 更新
+PUT {{MyExpenses.Api_HostAddress}}/api/withdrawals/1
+Content-Type: application/json
+
+{
+  "amount": 10000.00,
+  "date": "2026-06-21",
+  "description": "櫃檯提款",
+  "bankAccountId": 1
+}
+
+### DELETE /api/withdrawals/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/withdrawals/1
+
+
+### ========================================
+###  Report Endpoints
+### ========================================
+
+### GET /api/reports/income-expense-trend - 收入支出趨勢
+GET {{MyExpenses.Api_HostAddress}}/api/reports/income-expense-trend
+Accept: application/json
+
+### GET /api/reports/income-expense-trend?dateStart=2026-01-01&dateEnd=2026-12-31
+GET {{MyExpenses.Api_HostAddress}}/api/reports/income-expense-trend?dateStart=2026-01-01&dateEnd=2026-12-31
+Accept: application/json
+
+### GET /api/reports/category-distribution - 支出分類分佈
+GET {{MyExpenses.Api_HostAddress}}/api/reports/category-distribution
+Accept: application/json
+
+### GET /api/reports/net-worth - 資產負債總覽
+GET {{MyExpenses.Api_HostAddress}}/api/reports/net-worth
+Accept: application/json
+
+### GET /api/reports/installment-forecast - 分期付款預測
+GET {{MyExpenses.Api_HostAddress}}/api/reports/installment-forecast?months=6
+Accept: application/json
+
+### GET /api/reports/monthly-summary - 月報摘要
+GET {{MyExpenses.Api_HostAddress}}/api/reports/monthly-summary
+Accept: application/json
+
+### GET /api/reports/monthly-summary?year=2026&month=6
+GET {{MyExpenses.Api_HostAddress}}/api/reports/monthly-summary?year=2026&month=6
+Accept: application/json
+
+
+### ========================================
+###  Snapshot Endpoints
+### ========================================
+
+### POST /api/snapshots - 建立淨值快照
+POST {{MyExpenses.Api_HostAddress}}/api/snapshots
+Content-Type: application/json
+
+### GET /api/snapshots - 分頁列表
+GET {{MyExpenses.Api_HostAddress}}/api/snapshots?page=1&pageSize=20
+Accept: application/json
+
+### GET /api/snapshots/{id} - 單筆查詢
+GET {{MyExpenses.Api_HostAddress}}/api/snapshots/1
+Accept: application/json
+
+### DELETE /api/snapshots/{id} - 刪除
+DELETE {{MyExpenses.Api_HostAddress}}/api/snapshots/1
+
+### GET /api/snapshots/{id1}/compare/{id2} - 比較兩個快照
+GET {{MyExpenses.Api_HostAddress}}/api/snapshots/1/compare/2
+Accept: application/json
+
+### GET /api/snapshots/trend - 趨勢資料
+GET {{MyExpenses.Api_HostAddress}}/api/snapshots/trend
+Accept: application/json
+
+### GET /api/snapshots/auto-schedule - 查詢自動快照排程
+GET {{MyExpenses.Api_HostAddress}}/api/snapshots/auto-schedule
+Accept: application/json
+
+### PUT /api/snapshots/auto-schedule - 更新自動快照排程
+PUT {{MyExpenses.Api_HostAddress}}/api/snapshots/auto-schedule
+Content-Type: application/json
+
+{
+  "isEnabled": true,
+  "frequency": "Weekly",
+  "dayOfWeek": 1,
+  "dayOfMonth": null,
+  "timeOfDay": "08:00"
+}

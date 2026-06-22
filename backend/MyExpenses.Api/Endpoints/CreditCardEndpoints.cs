@@ -1,0 +1,68 @@
+using Microsoft.EntityFrameworkCore;
+using MyExpenses.Api.Data;
+using MyExpenses.Api.Models;
+
+namespace MyExpenses.Api.Endpoints;
+
+public static class CreditCardEndpoints
+{
+    public static void MapCreditCardEndpoints(this WebApplication app)
+    {
+        var group = app.MapGroup("/api/credit-cards");
+
+        group.MapGet("/", async (int? page, int? pageSize, AppDbContext db) =>
+        {
+            var query = db.CreditCards.AsQueryable();
+
+            var total = await query.CountAsync();
+            var p = page ?? 1;
+            var ps = pageSize ?? 20;
+
+            var items = await query
+                .OrderByDescending(c => c.CreatedAt)
+                .Skip((p - 1) * ps)
+                .Take(ps)
+                .ToListAsync();
+
+            return Results.Ok(new { items, total, page = p, pageSize = ps });
+        });
+
+        group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
+            await db.CreditCards.FindAsync(id) is CreditCard c ? Results.Ok(c) : Results.NotFound());
+
+        group.MapPost("/", async (CreditCard card, AppDbContext db) =>
+        {
+            card.CreatedAt = DateTime.UtcNow;
+            card.UpdatedAt = DateTime.UtcNow;
+            db.CreditCards.Add(card);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/credit-cards/{card.Id}", card);
+        });
+
+        group.MapPut("/{id:int}", async (int id, CreditCard input, AppDbContext db) =>
+        {
+            var card = await db.CreditCards.FindAsync(id);
+            if (card is null) return Results.NotFound();
+
+            card.BankName = input.BankName;
+            card.LastFourDigits = input.LastFourDigits;
+            card.StatementDay = input.StatementDay;
+            card.DueDay = input.DueDay;
+            card.CreditLimit = input.CreditLimit;
+            card.UpdatedAt = DateTime.UtcNow;
+
+            await db.SaveChangesAsync();
+            return Results.Ok(card);
+        });
+
+        group.MapDelete("/{id:int}", async (int id, AppDbContext db) =>
+        {
+            var card = await db.CreditCards.FindAsync(id);
+            if (card is null) return Results.NotFound();
+
+            db.CreditCards.Remove(card);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+    }
+}
