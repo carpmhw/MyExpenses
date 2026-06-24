@@ -87,8 +87,8 @@ function goToSettings() {
   >
     <!-- Brand -->
     <div class="flex items-center gap-3 px-3 py-6">
-      <div class="w-9 h-9 bg-accent-primary rounded-xl flex items-center justify-center shrink-0">
-        <span class="text-white font-bold text-lg">$</span>
+      <div class="w-9 h-9 shrink-0">
+        <img src="/favicon.svg" alt="MyExpenses Logo" class="w-full h-full" />
       </div>
       <div v-if="!isTablet" class="flex flex-col">
         <span class="text-text-on-dark font-bold text-sm">MyExpenses</span>

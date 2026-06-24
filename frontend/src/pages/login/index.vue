@@ -142,9 +142,7 @@ function goBackToLogin() {
   <div class="min-h-screen bg-bg-app flex items-center justify-center p-4">
     <div class="w-full max-w-sm">
       <div class="text-center mb-8">
-        <div class="w-14 h-14 bg-accent-primary rounded-xl flex items-center justify-center mx-auto mb-4">
-          <span class="text-white font-bold text-2xl">$</span>
-        </div>
+        <img src="/favicon.svg" alt="MyExpenses Logo" class="w-14 h-14 mx-auto mb-4" />
         <h1 class="text-2xl font-bold text-text-primary">MyExpenses</h1>
         <p class="text-text-secondary text-sm mt-1">個人記帳</p>
       </div>

@@ -19,10 +19,12 @@ public static class AuthEndpoints
         var jwtSecret = app.Configuration["Jwt:Secret"] ?? "placeholder-key-replace-in-production";
         var jwtIssuer = app.Configuration["Jwt:Issuer"];
         var jwtAudience = app.Configuration["Jwt:Audience"];
+        var cookieSecure = app.Configuration.GetValue<bool?>("Auth:CookieSecure") ?? !app.Environment.IsDevelopment();
 
         var publicGroup = app.MapGroup("/api/auth").AllowAnonymous();
         var protectedGroup = app.MapGroup("/api/auth").RequireAuthorization();
 
+        // 設定登入後的瀏覽器 session cookie，並讓 HTTP-only 部署可透過設定覆寫 Secure 屬性。
         void SetSessionCookie(HttpContext httpContext, IDataProtectionProvider dataProtection, int userId, long jwtExp)
         {
             var protector = dataProtection.CreateProtector("MyExpenses.Session");
@@ -32,7 +34,7 @@ public static class AuthEndpoints
             {
                 HttpOnly = true,
                 SameSite = SameSiteMode.Lax,
-                Secure = !app.Environment.IsDevelopment(),
+                Secure = cookieSecure,
                 MaxAge = TimeSpan.FromMinutes(1440)
             });
         }
@@ -419,7 +421,7 @@ public static class AuthEndpoints
                 Expires = DateTimeOffset.UnixEpoch,
                 HttpOnly = true,
                 SameSite = SameSiteMode.Lax,
-                Secure = !app.Environment.IsDevelopment(),
+                Secure = cookieSecure,
                 Path = "/"
             });
             return Results.Ok(new { message = "Logged out" });

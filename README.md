@@ -11,6 +11,8 @@
 
 ## 快速開始
 
+預設部署方式會啟動前端與後端兩個容器：
+
 ```bash
 git clone <repo-url> MyExpenses
 cd MyExpenses
@@ -19,6 +21,18 @@ docker compose up -d
 
 前端：`http://localhost`
 後端 API：`http://localhost:5000`
+
+也可以使用單一 image 部署選項，對外只開 nginx 的 `80`，並由 nginx 將 `/api` 代理到容器內的後端：
+
+```bash
+docker compose -f docker-compose.single.yml up -d
+```
+
+單一 image 部署：
+
+- 前端：`http://localhost`
+- 後端 API：`http://localhost/api/...`
+- 後端 `5000` 僅供容器內部使用，不會發布到 host
 
 開發模式（需要 .NET 10 SDK 和 Node.js）：
 
@@ -45,6 +59,7 @@ npm run dev
 | `Jwt__Issuer` | JWT 發行者 | `MyExpenses` |
 | `Jwt__Audience` | JWT 受眾 | `MyExpenses` |
 | `Jwt__ExpiryMinutes` | Token 有效時間（分鐘） | `1440` |
+| `Auth__CookieSecure` | Session Cookie 是否加上 `Secure`；HTTP 部署需設為 `false`，HTTPS 部署建議維持 `true` | Production 預設 `true`；`Dockerfile.single` 預設 `false` |
 | `TimeZone__Default` | 預設時區 | `Asia/Taipei` |
 | `TZ` | Docker 容器時區 | `Asia/Taipei` |
 
@@ -54,6 +69,14 @@ npm run dev
 |------|------|------|
 | `MYEXPENSES_API_URL` | 後端 API 位址 | 否（預設 `http://localhost:5000`） |
 | `MYEXPENSES_API_TOKEN` | API Token（格式 `oc_xxx`） | 是 |
+
+使用單一 image 部署時，MCP 應透過 nginx 入口呼叫 API：
+
+```bash
+MYEXPENSES_API_URL=http://localhost
+```
+
+不要在 `MYEXPENSES_API_URL` 加上 `/api`，MCP server 會自行附加 `/api/...` 路徑。
 
 ## MCP 整合
 
