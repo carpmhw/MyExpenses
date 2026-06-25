@@ -44,8 +44,10 @@ function formatDate(dateStr: string) {
 
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
+  const accountNumber = form.value.accountNumber?.trim() ?? ''
   if (!form.value.bankName?.trim()) errs.bankName = '請填寫銀行名稱'
-  if (!form.value.accountNumber?.trim()) errs.accountNumber = '請填寫帳號'
+  if (!accountNumber) errs.accountNumber = '請填寫帳號後五碼'
+  else if (!/^\d{5}$/.test(accountNumber)) errs.accountNumber = '帳號後五碼必須為 5 位數字'
   return errs
 })
 
@@ -197,8 +199,8 @@ watch(() => pagination.page.value, () => fetchList())
           <Input v-model="form.bankName" :error="formErrors.bankName" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">帳號</label>
-          <Input v-model="form.accountNumber" :error="formErrors.accountNumber" />
+          <label class="block text-sm font-medium text-text-primary mb-1">帳號後五碼</label>
+          <Input v-model="form.accountNumber" :maxlength="5" :error="formErrors.accountNumber" />
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">餘額</label>

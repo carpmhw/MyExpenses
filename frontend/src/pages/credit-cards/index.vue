@@ -39,8 +39,10 @@ const columns = [
 
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
+  const lastFourDigits = form.value.lastFourDigits?.trim() ?? ''
   if (!form.value.bankName?.trim()) errs.bankName = '請填寫發卡銀行'
-  if (!form.value.lastFourDigits?.trim()) errs.lastFourDigits = '請填寫卡號後四碼'
+  if (!lastFourDigits) errs.lastFourDigits = '請填寫卡號後四碼'
+  else if (!/^\d{4}$/.test(lastFourDigits)) errs.lastFourDigits = '卡號後四碼必須為 4 位數字'
   return errs
 })
 

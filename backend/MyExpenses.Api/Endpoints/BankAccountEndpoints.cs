@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -32,6 +33,12 @@ public static class BankAccountEndpoints
 
         group.MapPost("/", async (BankAccount account, AppDbContext db) =>
         {
+            var validationResults = new List<ValidationResult>();
+            if (!Validator.TryValidateObject(account, new ValidationContext(account), validationResults, true))
+            {
+                return Results.BadRequest(new { error = validationResults[0].ErrorMessage });
+            }
+
             var now = DateTime.UtcNow;
             account.CreatedAt = now;
             account.UpdatedAt = now;
@@ -44,6 +51,12 @@ public static class BankAccountEndpoints
         {
             var account = await db.BankAccounts.FindAsync(id);
             if (account is null) return Results.NotFound();
+
+            var validationResults = new List<ValidationResult>();
+            if (!Validator.TryValidateObject(input, new ValidationContext(input), validationResults, true))
+            {
+                return Results.BadRequest(new { error = validationResults[0].ErrorMessage });
+            }
 
             account.BankName = input.BankName;
             account.AccountNumber = input.AccountNumber;

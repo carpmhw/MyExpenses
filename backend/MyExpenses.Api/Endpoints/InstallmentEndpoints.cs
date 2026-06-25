@@ -1,6 +1,9 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Models.Requests;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -10,7 +13,7 @@ public static class InstallmentEndpoints
     {
         var group = app.MapGroup("/api/installments");
 
-        group.MapGet("/", async (int? page, int? pageSize, int? cardId, DateTime? dateStart, DateTime? dateEnd, string? status, AppDbContext db) =>
+        group.MapGet("/", async (int? page, int? pageSize, int? cardId, DateOnly? dateStart, DateOnly? dateEnd, string? status, AppDbContext db) =>
         {
             var query = db.Installments
                 .Include(i => i.Transaction)
@@ -30,18 +33,18 @@ public static class InstallmentEndpoints
                 if (hasExplicitStatus)
                 {
                     if (dateStart.HasValue)
-                        query = query.Where(i => i.CreatedAt >= dateStart.Value);
+                        query = query.Where(i => i.PurchaseDate >= dateStart.Value);
                     if (dateEnd.HasValue)
-                        query = query.Where(i => i.CreatedAt <= dateEnd.Value.AddDays(1));
+                        query = query.Where(i => i.PurchaseDate <= dateEnd.Value);
                 }
                 else
                 {
                     if (dateStart.HasValue && dateEnd.HasValue)
-                        query = query.Where(i => (i.CreatedAt >= dateStart.Value && i.CreatedAt <= dateEnd.Value.AddDays(1)) || i.Status == InstallmentStatus.Active);
+                        query = query.Where(i => (i.PurchaseDate >= dateStart.Value && i.PurchaseDate <= dateEnd.Value) || i.Status == InstallmentStatus.Active);
                     else if (dateStart.HasValue)
-                        query = query.Where(i => i.CreatedAt >= dateStart.Value || i.Status == InstallmentStatus.Active);
+                        query = query.Where(i => i.PurchaseDate >= dateStart.Value || i.Status == InstallmentStatus.Active);
                     else
-                        query = query.Where(i => i.CreatedAt <= dateEnd!.Value.AddDays(1) || i.Status == InstallmentStatus.Active);
+                        query = query.Where(i => i.PurchaseDate <= dateEnd!.Value || i.Status == InstallmentStatus.Active);
                 }
             }
 
@@ -53,7 +56,8 @@ public static class InstallmentEndpoints
             var ps = pageSize ?? 20;
 
             var items = await query
-                .OrderByDescending(i => i.CreatedAt)
+                .OrderByDescending(i => i.PurchaseDate)
+                .ThenByDescending(i => i.CreatedAt)
                 .Skip((p - 1) * ps)
                 .Take(ps)
                 .ToListAsync();
@@ -74,6 +78,9 @@ public static class InstallmentEndpoints
 
         group.MapPost("/", async (Installment installment, AppDbContext db) =>
         {
+            if (installment.PurchaseDate == default)
+                return Results.BadRequest(new { error = "請選擇刷卡日期" });
+
             installment.CreatedAt = DateTime.UtcNow;
             installment.RemainingPeriods = installment.Periods;
             installment.Status = InstallmentStatus.Active;
@@ -95,7 +102,7 @@ public static class InstallmentEndpoints
 
                 DateOnly? dueDate = null;
                 if (card is not null)
-                    dueDate = CalcDueDate(installment.CreatedAt, card.StatementDay, card.DueDay, p);
+                    dueDate = InstallmentScheduleCalculator.CalculateDueDate(installment.PurchaseDate, card.StatementDay, card.DueDay, p);
 
                 db.InstallmentPayments.Add(new InstallmentPayment
                 {
@@ -126,6 +133,9 @@ public static class InstallmentEndpoints
 
             if (installment is null) return Results.NotFound();
 
+            if (input.PurchaseDate == default)
+                return Results.BadRequest(new { error = "請選擇刷卡日期" });
+
             var hasPaidPayments = installment.Payments.Any(p => p.IsPaid);
 
             if (hasPaidPayments)
@@ -134,11 +144,16 @@ public static class InstallmentEndpoints
                     return Results.BadRequest(new { error = "已有繳款記錄，不可修改總金額" });
                 if (input.Periods != installment.Periods)
                     return Results.BadRequest(new { error = "已有繳款記錄，不可修改期數" });
+                if (input.CardId != installment.CardId)
+                    return Results.BadRequest(new { error = "已有繳款記錄，不可修改信用卡" });
+                if (input.PurchaseDate != installment.PurchaseDate)
+                    return Results.BadRequest(new { error = "已有繳款記錄，不可修改刷卡日期" });
             }
 
             installment.TotalAmount = input.TotalAmount;
             installment.Periods = input.Periods;
             installment.PerPeriod = Math.Floor(input.TotalAmount / input.Periods);
+            installment.PurchaseDate = input.PurchaseDate;
             installment.Description = input.Description;
             installment.CardId = input.CardId;
 
@@ -169,7 +184,7 @@ public static class InstallmentEndpoints
 
                     DateOnly? dueDate = null;
                     if (card is not null)
-                        dueDate = CalcDueDate(installment.CreatedAt, card.StatementDay, card.DueDay, periodIndex);
+                        dueDate = InstallmentScheduleCalculator.CalculateDueDate(installment.PurchaseDate, card.StatementDay, card.DueDay, periodIndex);
 
                     db.InstallmentPayments.Add(new InstallmentPayment
                     {
@@ -206,15 +221,21 @@ public static class InstallmentEndpoints
             return Results.NoContent();
         });
 
-        group.MapPatch("/{id:int}/payments/{paymentId:int}", async (int id, int paymentId, AppDbContext db) =>
+        group.MapPatch("/{id:int}/payments/{paymentId:int}", async (int id, int paymentId, [FromBody] MarkInstallmentPaymentRequest? request, AppDbContext db) =>
         {
             var payment = await db.InstallmentPayments
                 .FirstOrDefaultAsync(p => p.Id == paymentId && p.InstallmentId == id);
 
             if (payment is null) return Results.NotFound();
 
-            payment.IsPaid = !payment.IsPaid;
-            payment.PaidDate = payment.IsPaid ? DateTime.UtcNow : null;
+            try
+            {
+                InstallmentPaymentMarker.TogglePaid(payment, request?.PaidDate);
+            }
+            catch (ArgumentException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
 
             await db.SaveChangesAsync();
 
@@ -233,17 +254,5 @@ public static class InstallmentEndpoints
 
             return Results.Ok(payment);
         });
-    }
-
-    private static DateOnly CalcDueDate(DateTime createdAt, int statementDay, int dueDay, int periodIndex)
-    {
-        var offset = createdAt.Day > statementDay ? 1 : 0;
-        var targetMonth = createdAt.Month + offset + periodIndex - 1;
-
-        var year = createdAt.Year + (targetMonth - 1) / 12;
-        var month = ((targetMonth - 1) % 12) + 1;
-        var day = Math.Min(dueDay, DateTime.DaysInMonth(year, month));
-
-        return new DateOnly(year, month, day);
     }
 }

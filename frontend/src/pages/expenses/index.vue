@@ -260,6 +260,7 @@ async function save() {
           totalAmount: transaction.amount,
           periods: installmentPeriods.value,
           perPeriod,
+          purchaseDate: transaction.date.slice(0, 10),
           description: transaction.description || '',
         })
         toast.success('交易與分期已建立')

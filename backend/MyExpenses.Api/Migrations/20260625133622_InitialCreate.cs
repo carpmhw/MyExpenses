@@ -280,6 +280,7 @@ namespace MyExpenses.Api.Migrations
                     Periods = table.Column<int>(type: "INTEGER", nullable: false),
                     PerPeriod = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
                     RemainingPeriods = table.Column<int>(type: "INTEGER", nullable: false),
+                    PurchaseDate = table.Column<DateOnly>(type: "TEXT", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
                     Status = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false),
                     Description = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true)
@@ -359,6 +360,11 @@ namespace MyExpenses.Api.Migrations
                 name: "IX_Installments_CardId",
                 table: "Installments",
                 column: "CardId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Installments_PurchaseDate",
+                table: "Installments",
+                column: "PurchaseDate");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Installments_TransactionId",

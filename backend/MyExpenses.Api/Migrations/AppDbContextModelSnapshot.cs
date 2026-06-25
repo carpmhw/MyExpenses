@@ -264,6 +264,9 @@ namespace MyExpenses.Api.Migrations
                     b.Property<int>("Periods")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateOnly>("PurchaseDate")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("RemainingPeriods")
                         .HasColumnType("INTEGER");
 
@@ -281,6 +284,8 @@ namespace MyExpenses.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CardId");
+
+                    b.HasIndex("PurchaseDate");
 
                     b.HasIndex("TransactionId");
 

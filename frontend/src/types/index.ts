@@ -32,6 +32,7 @@ export interface Installment {
   perPeriod: number
   remainingPeriods: number
   status: InstallmentStatus
+  purchaseDate: string
   createdAt: string
   description: string | null
   transaction: Transaction | null

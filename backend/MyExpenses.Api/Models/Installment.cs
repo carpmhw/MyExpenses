@@ -15,6 +15,8 @@ public class Installment
     public int Periods { get; set; }
     public decimal PerPeriod { get; set; }
     public int RemainingPeriods { get; set; }
+    /// <summary>刷卡日期（不包含時間）</summary>
+    public DateOnly PurchaseDate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public InstallmentStatus Status { get; set; } = InstallmentStatus.Active;
     public string? Description { get; set; }

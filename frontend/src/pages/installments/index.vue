@@ -68,6 +68,7 @@ const form = ref({
   totalAmount: 0,
   periods: 3,
   perPeriod: 0,
+  purchaseDate: new Date().toISOString().slice(0, 10),
   description: '',
 })
 
@@ -80,10 +81,11 @@ const deletingId = ref<number | null>(null)
 const paymentConfirmOpen = ref(false)
 const payingPaymentId = ref<number | null>(null)
 const markingAsPaid = ref(true)
+const paidDate = ref(new Date().toISOString().slice(0, 10))
 
 const columns = [
   { key: 'seq', label: '序號' },
-  { key: 'createdAt', label: '建立日期' },
+  { key: 'purchaseDate', label: '刷卡日期' },
   { key: 'description', label: '描述' },
   { key: 'card', label: '信用卡' },
   { key: 'totalAmount', label: '總金額', align: 'right' as const },
@@ -130,6 +132,7 @@ const formErrors = computed(() => {
   if (!form.value.totalAmount || form.value.totalAmount <= 0) errs.totalAmount = '總金額必須大於零'
   if (!form.value.periods || form.value.periods < 1) errs.periods = '期數必須大於 0'
   if (!form.value.cardId) errs.cardId = '請選擇信用卡'
+  if (!form.value.purchaseDate) errs.purchaseDate = '請選擇刷卡日期'
   if (!form.value.description?.trim()) errs.description = '請填寫交易描述'
   return errs
 })
@@ -186,6 +189,7 @@ function openCreate() {
     totalAmount: 0,
     periods: 3,
     perPeriod: 0,
+    purchaseDate: new Date().toISOString().slice(0, 10),
     description: '',
   }
   modalOpen.value = true
@@ -199,6 +203,7 @@ function openEdit(item: Installment) {
     totalAmount: item.totalAmount,
     periods: item.periods,
     perPeriod: item.perPeriod,
+    purchaseDate: item.purchaseDate?.slice(0, 10) || new Date().toISOString().slice(0, 10),
     description: item.description || '',
   }
   modalOpen.value = true
@@ -255,6 +260,7 @@ function openSchedule(item: Installment) {
 function confirmMarkPayment(paymentId: number, isPaid: boolean) {
   payingPaymentId.value = paymentId
   markingAsPaid.value = !isPaid
+  paidDate.value = new Date().toISOString().slice(0, 10)
   paymentConfirmOpen.value = true
 }
 
@@ -264,10 +270,15 @@ async function doMarkPayment() {
   const id = scheduleInstallment.value.id
   const paymentId = payingPaymentId.value
 
+  if (markingAsPaid.value && !paidDate.value) {
+    toast.error('請選擇實際繳款日')
+    return
+  }
+
   saving.value = true
 
   try {
-    await api.installments.markPayment(id, paymentId)
+    await api.installments.markPayment(id, paymentId, markingAsPaid.value ? paidDate.value : undefined)
     paymentConfirmOpen.value = false
     payingPaymentId.value = null
     toast.success(markingAsPaid.value ? '已標記為已繳款' : '已取消繳款標記')
@@ -438,7 +449,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
         </template>
         <tr v-for="(item, idx) in installments" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
-          <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[100px]">{{ formatDate(item.createdAt) }}</td>
+          <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[100px]">{{ formatDate(item.purchaseDate) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm">{{ item.description }}</td>
           <td class="py-3 px-4 text-text-primary text-sm">{{ getCardDisplay(item) }}</td>
           <td class="py-3 px-4 text-text-primary font-bold text-sm w-[130px] text-right">{{ formatMoney(item.totalAmount) }}</td>
@@ -549,6 +560,17 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           <p v-if="hasPaidPayments" class="mt-1 text-xs text-amber-500">已有繳款記錄，不可修改</p>
           <p v-else-if="formErrors.cardId" class="mt-1 text-xs text-red-500">{{ formErrors.cardId }}</p>
         </div>
+        <div>
+          <label class="block text-sm font-medium text-text-primary mb-1">刷卡日期</label>
+          <input
+            v-model="form.purchaseDate"
+            type="date"
+            :disabled="hasPaidPayments"
+            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+          <p v-if="hasPaidPayments" class="mt-1 text-xs text-amber-500">已有繳款記錄，不可修改</p>
+          <p v-else-if="formErrors.purchaseDate" class="mt-1 text-xs text-red-500">{{ formErrors.purchaseDate }}</p>
+        </div>
         <div class="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>
           <Button type="submit" :loading="saving">儲存</Button>
@@ -623,7 +645,15 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
     />
 
     <Modal :open="paymentConfirmOpen" :title="markingAsPaid ? '標記已繳款' : '取消已繳款'" size="sm" @update:open="paymentConfirmOpen = $event">
-      <p class="text-sm text-text-secondary mb-6">{{ markingAsPaid ? '確定要將此期標記為已繳款？' : '確定要取消此期的已繳款標記？' }}</p>
+      <p class="text-sm text-text-secondary mb-4">{{ markingAsPaid ? '確定要將此期標記為已繳款？' : '確定要取消此期的已繳款標記？' }}</p>
+      <div v-if="markingAsPaid" class="mb-6">
+        <label class="block text-sm font-medium text-text-primary mb-1">實際繳款日</label>
+        <input
+          v-model="paidDate"
+          type="date"
+          class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+        />
+      </div>
       <div class="flex justify-end gap-3">
         <Button variant="ghost" type="button" @click="paymentConfirmOpen = false">取消</Button>
         <Button type="button" :loading="saving" @click="doMarkPayment">確認</Button>

@@ -94,8 +94,11 @@ export const api = {
       request<Installment>(`/installments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: number) =>
       request<void>(`/installments/${id}`, { method: 'DELETE' }),
-    markPayment: (id: number, paymentId: number) =>
-      request<InstallmentPayment>(`/installments/${id}/payments/${paymentId}`, { method: 'PATCH' }),
+    markPayment: (id: number, paymentId: number, paidDate?: string) =>
+      request<InstallmentPayment>(`/installments/${id}/payments/${paymentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(paidDate ? { paidDate } : {}),
+      }),
   },
 
   creditCards: {

@@ -59,8 +59,10 @@ public class AppDbContext : DbContext
             e.ToTable("Installments");
             e.Property(i => i.TotalAmount).HasColumnType("decimal(18,2)").IsRequired();
             e.Property(i => i.PerPeriod).HasColumnType("decimal(18,2)").IsRequired();
+            e.Property(i => i.PurchaseDate).HasColumnType("TEXT").IsRequired();
             e.Property(i => i.Description).HasMaxLength(500);
             e.Property(i => i.Status).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(i => i.PurchaseDate);
             e.HasOne(i => i.Transaction)
                 .WithMany()
                 .HasForeignKey(i => i.TransactionId)

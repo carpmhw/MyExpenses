@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -32,6 +33,12 @@ public static class CreditCardEndpoints
 
         group.MapPost("/", async (CreditCard card, AppDbContext db) =>
         {
+            var validationResults = new List<ValidationResult>();
+            if (!Validator.TryValidateObject(card, new ValidationContext(card), validationResults, true))
+            {
+                return Results.BadRequest(new { error = validationResults[0].ErrorMessage });
+            }
+
             card.CreatedAt = DateTime.UtcNow;
             card.UpdatedAt = DateTime.UtcNow;
             db.CreditCards.Add(card);
@@ -43,6 +50,12 @@ public static class CreditCardEndpoints
         {
             var card = await db.CreditCards.FindAsync(id);
             if (card is null) return Results.NotFound();
+
+            var validationResults = new List<ValidationResult>();
+            if (!Validator.TryValidateObject(input, new ValidationContext(input), validationResults, true))
+            {
+                return Results.BadRequest(new { error = validationResults[0].ErrorMessage });
+            }
 
             card.BankName = input.BankName;
             card.LastFourDigits = input.LastFourDigits;
