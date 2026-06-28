@@ -10,11 +10,14 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Input from '../../components/ui/Input.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
+import { createLatestRequestGuard } from '../../utils/latestRequest'
 import { usePagination } from '../../composables/usePagination'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 
 const accounts = ref<BankAccount[]>([])
+const totalBalance = ref(0)
+const bankNameFilter = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const pagination = usePagination(1, 15)
@@ -26,6 +29,7 @@ const form = ref({ bankName: '', accountNumber: '', balance: 0, accountType: '' 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
 const snapshotLoading = ref(false)
+const listRequestGuard = createLatestRequestGuard()
 
 const columns = [
   { key: 'seq', label: '序號' },
@@ -51,14 +55,18 @@ const formErrors = computed(() => {
   return errs
 })
 
+// Fetches bank accounts for the current page and bank name filter.
 async function fetchList() {
+  const requestId = listRequestGuard.next()
   loading.value = true
   try {
-    const result = await api.bankAccounts.list({ page: pagination.page.value, pageSize: pagination.pageSize.value })
+    const result = await api.bankAccounts.list({ page: pagination.page.value, pageSize: pagination.pageSize.value, bankName: bankNameFilter.value })
+    if (!listRequestGuard.isLatest(requestId)) return
     accounts.value = result.items
     pagination.total.value = result.total
+    totalBalance.value = result.totalBalance
   } finally {
-    loading.value = false
+    if (listRequestGuard.isLatest(requestId)) loading.value = false
   }
 }
 
@@ -135,6 +143,14 @@ async function takeSnapshot() {
 onMounted(fetchList)
 
 watch(() => pagination.page.value, () => fetchList())
+// Resets filtered searches to the first page so counts and totals stay aligned.
+watch(bankNameFilter, () => {
+  if (pagination.page.value !== 1) {
+    pagination.page.value = 1
+    return
+  }
+  fetchList()
+})
 </script>
 
 <template>
@@ -150,7 +166,31 @@ watch(() => pagination.page.value, () => fetchList())
       </div>
     </div>
 
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <Card>
+        <div class="flex items-center gap-4">
+          <div class="w-11 h-11 rounded-xl bg-emerald-500 dark:bg-emerald-700 flex items-center justify-center">
+            <Icon name="wallet" :size="22" class="text-white" />
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary">總計金額</p>
+            <p class="text-xl font-bold text-text-primary">{{ formatMoney(totalBalance) }}</p>
+            <p class="text-xs text-text-tertiary mt-1">符合目前篩選條件</p>
+          </div>
+        </div>
+      </Card>
+    </div>
+
     <Card>
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <span class="text-sm font-medium text-text-primary">銀行名稱</span>
+        <input
+          v-model="bankNameFilter"
+          type="text"
+          placeholder="輸入銀行名稱關鍵字"
+          class="w-full sm:w-64 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary placeholder:text-text-tertiary"
+        />
+      </div>
       <DataTable :columns="columns" :loading="loading" :items="accounts">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無銀行帳戶資料</div>
@@ -162,7 +202,7 @@ watch(() => pagination.page.value, () => fetchList())
           <td class="py-3 px-4 text-text-primary font-medium">{{ item.bankName }}</td>
           <td class="py-3 px-4 text-text-secondary font-mono w-[130px]">{{ item.accountNumber.slice(-5) }}</td>
           <td class="py-3 px-4 text-text-primary font-bold text-sm w-[140px] text-right">{{ formatMoney(item.balance) }}</td>
-          <td class="py-3 px-4 text-text-secondary w-[100px]">{{ item.accountType }}</td>
+          <td class="py-3 px-4 text-text-secondary w-[250px] whitespace-nowrap">{{ item.accountType }}</td>
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button

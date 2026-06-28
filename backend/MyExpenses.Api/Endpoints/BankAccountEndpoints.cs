@@ -11,22 +11,8 @@ public static class BankAccountEndpoints
     {
         var group = app.MapGroup("/api/bank-accounts");
 
-        group.MapGet("/", async (int? page, int? pageSize, AppDbContext db) =>
-        {
-            var query = db.BankAccounts.AsQueryable();
-
-            var total = await query.CountAsync();
-            var p = page ?? 1;
-            var ps = pageSize ?? 20;
-
-            var items = await query
-                .OrderByDescending(a => a.CreatedAt)
-                .Skip((p - 1) * ps)
-                .Take(ps)
-                .ToListAsync();
-
-            return Results.Ok(new { items, total, page = p, pageSize = ps });
-        });
+        group.MapGet("/", async (int? page, int? pageSize, string? bankName, AppDbContext db) =>
+            Results.Ok(await ListBankAccountsAsync(page, pageSize, bankName, db)));
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
             await db.BankAccounts.FindAsync(id) is BankAccount a ? Results.Ok(a) : Results.NotFound());
@@ -78,4 +64,30 @@ public static class BankAccountEndpoints
             return Results.NoContent();
         });
     }
+
+    /// <summary>Lists bank accounts with optional bank name filtering, pagination, and filtered balance totals.</summary>
+    public static async Task<BankAccountListResponse> ListBankAccountsAsync(int? page, int? pageSize, string? bankName, AppDbContext db)
+    {
+        var query = db.BankAccounts.AsQueryable();
+        var trimmedBankName = bankName?.Trim();
+        if (!string.IsNullOrEmpty(trimmedBankName))
+        {
+            query = query.Where(a => a.BankName.Contains(trimmedBankName));
+        }
+
+        var total = await query.CountAsync();
+        var totalBalance = await query.Select(a => (decimal?)a.Balance).SumAsync() ?? 0m;
+        var p = page ?? 1;
+        var ps = pageSize ?? 20;
+
+        var items = await query
+            .OrderByDescending(a => a.CreatedAt)
+            .Skip((p - 1) * ps)
+            .Take(ps)
+            .ToListAsync();
+
+        return new BankAccountListResponse(items, total, p, ps, totalBalance);
+    }
 }
+
+public sealed record BankAccountListResponse(IReadOnlyList<BankAccount> Items, int Total, int Page, int PageSize, decimal TotalBalance);

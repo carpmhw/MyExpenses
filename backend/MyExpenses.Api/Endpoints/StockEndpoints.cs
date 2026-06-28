@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -72,20 +73,7 @@ public static class StockEndpoints
         });
 
         group.MapGet("/", async (int page, int pageSize, AppDbContext db) =>
-        {
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 20;
-
-            var query = db.Stocks.AsQueryable();
-            var total = await query.CountAsync();
-            var items = await query
-                .OrderBy(s => s.Id)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            return Results.Ok(new { items, total, page, pageSize });
-        });
+            Results.Ok(await ListStocksAsync(page, pageSize, db)));
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
             await db.Stocks.FindAsync(id) is Stock s ? Results.Ok(s) : Results.NotFound());
@@ -126,6 +114,53 @@ public static class StockEndpoints
         });
     }
 
+    /// <summary>Returns paginated stocks with all-holding valuation totals calculated before pagination.</summary>
+    public static async Task<StockListResponse> ListStocksAsync(int page, int pageSize, AppDbContext db)
+    {
+        if (page <= 0) page = 1;
+        if (pageSize <= 0) pageSize = 20;
+
+        var query = db.Stocks.AsQueryable();
+        var total = await query.CountAsync();
+        var allStocks = await query.OrderBy(s => s.Id).ToListAsync();
+        var allItems = allStocks.Select(ToStockListItem).ToList();
+        var items = allItems
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return new StockListResponse(
+            items,
+            total,
+            page,
+            pageSize,
+            allItems.Sum(s => s.EstimatedNetSellValue),
+            allItems.Sum(s => s.EstimatedGainLoss));
+    }
+
+    /// <summary>Maps a stock entity to an API row that includes estimated valuation fields.</summary>
+    private static StockListItem ToStockListItem(Stock stock)
+    {
+        var valuation = StockValuationCalculator.Calculate(stock);
+        return new StockListItem(
+            stock.Id,
+            stock.Name,
+            stock.Symbol,
+            stock.InstrumentType,
+            stock.Shares,
+            stock.BuyPrice,
+            stock.CurrentPrice,
+            stock.Broker,
+            stock.LastPriceUpdate,
+            valuation.GrossMarketValue,
+            valuation.BuyCommission,
+            valuation.SellCommission,
+            valuation.SecuritiesTransactionTax,
+            valuation.EstimatedNetSellValue,
+            valuation.EstimatedGainLoss);
+    }
+
+    /// <summary>Updates stored stock prices when refreshed TWSE cache entries match local symbols.</summary>
     private static async Task UpdateMatchingStocksFromCache(AppDbContext db)
     {
         var stocks = await db.Stocks.ToListAsync();
@@ -142,3 +177,28 @@ public static class StockEndpoints
         await db.SaveChangesAsync();
     }
 }
+
+public sealed record StockListResponse(
+    IReadOnlyList<StockListItem> Items,
+    int Total,
+    int Page,
+    int PageSize,
+    decimal TotalEstimatedNetSellValue,
+    decimal TotalEstimatedGainLoss);
+
+public sealed record StockListItem(
+    int Id,
+    string Name,
+    string Symbol,
+    StockInstrumentType InstrumentType,
+    decimal Shares,
+    decimal BuyPrice,
+    decimal CurrentPrice,
+    string? Broker,
+    DateTime? LastPriceUpdate,
+    decimal GrossMarketValue,
+    decimal BuyCommission,
+    decimal SellCommission,
+    decimal SecuritiesTransactionTax,
+    decimal EstimatedNetSellValue,
+    decimal EstimatedGainLoss);

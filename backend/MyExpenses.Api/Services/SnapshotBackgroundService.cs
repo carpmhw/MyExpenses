@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
-using MyExpenses.Api.Models;
 
 namespace MyExpenses.Api.Services;
 
@@ -15,6 +14,7 @@ public class SnapshotBackgroundService : BackgroundService
         _logger = logger;
     }
 
+    /// <summary>Runs the periodic snapshot schedule loop until the host shuts down.</summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Snapshot background service started");
@@ -34,6 +34,7 @@ public class SnapshotBackgroundService : BackgroundService
         }
     }
 
+    /// <summary>Creates an automatic snapshot when the configured schedule is due.</summary>
     private async Task CheckAndRunSnapshot(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -68,43 +69,7 @@ public class SnapshotBackgroundService : BackgroundService
         var bankAccounts = await db.BankAccounts.ToListAsync(ct);
         var stocks = await db.Stocks.ToListAsync(ct);
 
-        var bankDetails = bankAccounts.Select(b => new BankDetail
-        {
-            BankName = b.BankName,
-            AccountNumber = b.AccountNumber,
-            AccountType = b.AccountType,
-            Balance = b.Balance,
-        }).ToList();
-
-        var totalBankBalance = bankDetails.Sum(b => b.Balance);
-
-        var stockDetails = stocks.Select(s => new StockDetail
-        {
-            Name = s.Name,
-            Symbol = s.Symbol,
-            Shares = s.Shares,
-            BuyPrice = s.BuyPrice,
-            CurrentPrice = s.CurrentPrice,
-            MarketValue = s.CurrentPrice * s.Shares,
-            GainLoss = (s.CurrentPrice - s.BuyPrice) * s.Shares,
-        }).ToList();
-
-        var totalStockValue = stockDetails.Sum(s => s.MarketValue);
-        var totalStockCost = stockDetails.Sum(s => s.BuyPrice * s.Shares);
-        var totalNetWorth = totalBankBalance + totalStockValue;
-
-        var snapshot = new SnapshotBatch
-        {
-            Name = $"自動快照 {now:yyyy-MM-dd HH:mm}",
-            SnapshotDate = now,
-            Notes = "系統自動建立",
-            TotalNetWorth = totalNetWorth,
-            TotalBankBalance = totalBankBalance,
-            TotalStockValue = totalStockValue,
-            TotalStockCost = totalStockCost,
-            BankDetails = bankDetails,
-            StockDetails = stockDetails,
-        };
+        var snapshot = FinancialSnapshotBuilder.Build($"自動快照 {now:yyyy-MM-dd HH:mm}", "系統自動建立", now, bankAccounts, stocks);
 
         db.SnapshotBatches.Add(snapshot);
         config.LastRunAt = now;

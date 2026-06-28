@@ -54,9 +54,11 @@ export interface CreditCard {
   id: number
   bankName: string
   lastFourDigits: string
+  cardNetwork: string | null
   statementDay: number
   dueDay: number
   creditLimit: number
+  notes: string | null
   createdAt: string
   updatedAt: string
 }
@@ -82,15 +84,36 @@ export interface BankAccount {
   updatedAt: string
 }
 
+export interface BankAccountListResponse extends PaginatedResponse<BankAccount> {
+  totalBalance: number
+}
+
+export type StockInstrumentType = 'Stock' | 'StockEtf' | 'BondEtf'
+
 export interface Stock {
   id: number
   name: string
   symbol: string
+  instrumentType: StockInstrumentType
   shares: number
   buyPrice: number
   currentPrice: number
   broker: string | null
   lastPriceUpdate: string | null
+}
+
+export interface StockListItem extends Stock {
+  grossMarketValue: number
+  buyCommission: number
+  sellCommission: number
+  securitiesTransactionTax: number
+  estimatedNetSellValue: number
+  estimatedGainLoss: number
+}
+
+export interface StockListResponse extends PaginatedResponse<StockListItem> {
+  totalEstimatedNetSellValue: number
+  totalEstimatedGainLoss: number
 }
 
 export interface PaymentMethod {
@@ -131,7 +154,7 @@ export interface NetWorth {
   totalLiabilities: number
   netWorth: number
   bankAccounts: { bankName: string; accountNumber: string; balance: number }[]
-  stocks: { name: string; symbol: string; shares: number; currentPrice: number; marketValue: number }[]
+  stocks: { name: string; symbol: string; instrumentType: StockInstrumentType; shares: number; currentPrice: number; grossMarketValue: number; estimatedNetSellValue: number }[]
 }
 
 export interface ForecastPayment {
@@ -164,6 +187,7 @@ export interface BankDetail {
 export interface StockDetail {
   name: string
   symbol: string
+  instrumentType: StockInstrumentType
   shares: number
   buyPrice: number
   currentPrice: number

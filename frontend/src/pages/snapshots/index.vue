@@ -10,6 +10,7 @@ import Modal from '../../components/ui/Modal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
+import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../../utils/snapshot'
 import { usePagination } from '../../composables/usePagination'
 import { Line } from 'vue-chartjs'
 import {
@@ -32,6 +33,9 @@ const toast = inject<{ success: (m: string) => void; error: (m: string) => void 
 const snapshots = ref<SnapshotBatch[]>([])
 const loading = ref(false)
 const pagination = usePagination(1, 15)
+const defaultSnapshotRange = createDefaultSnapshotDateRange()
+const dateStart = ref(defaultSnapshotRange.dateStart)
+const dateEnd = ref(defaultSnapshotRange.dateEnd)
 
 const selectedIds = ref<number[]>([])
 const detailSnapshot = ref<SnapshotBatch | null>(null)
@@ -62,7 +66,7 @@ const columns = [
   { key: 'name', label: '名稱' },
   { key: 'totalNetWorth', label: '總淨值', align: 'right' as const },
   { key: 'totalBankBalance', label: '銀行總額', align: 'right' as const },
-  { key: 'totalStockValue', label: '股票總值', align: 'right' as const },
+  { key: 'totalStockValue', label: '股票預估賣出淨值', align: 'right' as const },
 ]
 
 function formatDate(dateStr: string) {
@@ -113,7 +117,7 @@ const trendChartData = computed(() => ({
       tension: 0.3,
     },
     {
-      label: '股票總值',
+      label: '股票預估賣出淨值',
       data: trendData.value.map(t => t.totalStockValue),
       borderColor: '#F59E0B',
       backgroundColor: 'rgba(245, 158, 11, 0.1)',
@@ -144,7 +148,12 @@ const trendChartOptions = {
 async function fetchList() {
   loading.value = true
   try {
-    const result = await api.snapshots.list({ page: pagination.page.value, pageSize: pagination.pageSize.value })
+    const result = await api.snapshots.list({
+      page: pagination.page.value,
+      pageSize: pagination.pageSize.value,
+      dateStart: dateStart.value,
+      dateEnd: dateEnd.value,
+    })
     snapshots.value = result.items
     pagination.total.value = result.total
   } finally {
@@ -154,10 +163,40 @@ async function fetchList() {
 
 async function fetchTrend() {
   try {
-    trendData.value = await api.snapshots.trend()
+    trendData.value = await api.snapshots.trend({ dateStart: dateStart.value, dateEnd: dateEnd.value })
   } catch {
     // trend data is optional
   }
+}
+
+// Keeps the snapshot date range valid before it is used in list and trend requests.
+function normalizeSnapshotDateRange() {
+  const normalized = coerceSnapshotDateRange({ dateStart: dateStart.value, dateEnd: dateEnd.value })
+
+  if (normalized.changed) {
+    dateStart.value = normalized.dateStart
+    dateEnd.value = normalized.dateEnd
+    if (normalized.reason === 'range-too-long') {
+      toast.error('日期區間最多只能查詢 5 年，已自動調整起日')
+    } else {
+      toast.error('迄日不能小於起日，已調整為起日')
+    }
+    return false
+  }
+
+  return true
+}
+
+// Reloads snapshot list and trend data using the current shared date range.
+async function refreshSnapshotsForDateRange() {
+  if (!normalizeSnapshotDateRange()) return
+
+  if (pagination.page.value !== 1) {
+    pagination.page.value = 1
+  } else {
+    await fetchList()
+  }
+  await fetchTrend()
 }
 
 function showDetail(snapshot: SnapshotBatch) {
@@ -226,6 +265,7 @@ onMounted(() => {
 })
 
 watch(() => pagination.page.value, () => fetchList())
+watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
 </script>
 
 <template>
@@ -251,6 +291,28 @@ watch(() => pagination.page.value, () => fetchList())
         </button>
       </div>
     </div>
+
+    <Card class="mb-6">
+      <div class="flex flex-col sm:flex-row sm:items-end gap-4">
+        <div>
+          <label class="block text-sm font-medium text-text-primary mb-1">起日</label>
+          <input
+            v-model="dateStart"
+            type="date"
+            class="w-full sm:w-44 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text-primary mb-1">迄日</label>
+          <input
+            v-model="dateEnd"
+            type="date"
+            class="w-full sm:w-44 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          />
+        </div>
+        <p class="text-xs text-text-secondary sm:pb-2">預設顯示最近一年快照，列表與趨勢圖會套用相同區間。</p>
+      </div>
+    </Card>
 
     <Card class="mb-6">
       <div class="p-4">
@@ -338,11 +400,11 @@ watch(() => pagination.page.value, () => fetchList())
             <p class="text-lg font-bold text-blue-600">{{ formatMoney(detailSnapshot.totalBankBalance) }}</p>
           </div>
           <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-            <p class="text-xs text-text-secondary">股票總值</p>
+            <p class="text-xs text-text-secondary">股票預估賣出淨值</p>
             <p class="text-lg font-bold text-amber-600">{{ formatMoney(detailSnapshot.totalStockValue) }}</p>
           </div>
           <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-            <p class="text-xs text-text-secondary">股票成本</p>
+            <p class="text-xs text-text-secondary">股票估算成本</p>
             <p class="text-lg font-bold text-text-primary">{{ formatMoney(detailSnapshot.totalStockCost) }}</p>
           </div>
         </div>
@@ -378,8 +440,8 @@ watch(() => pagination.page.value, () => fetchList())
                   <th class="text-left py-2 px-2 text-text-secondary font-medium">名稱</th>
                   <th class="text-left py-2 px-2 text-text-secondary font-medium">代號</th>
                   <th class="text-right py-2 px-2 text-text-secondary font-medium">股數</th>
-                  <th class="text-right py-2 px-2 text-text-secondary font-medium">市值</th>
-                  <th class="text-right py-2 px-2 text-text-secondary font-medium">損益</th>
+                  <th class="text-right py-2 px-2 text-text-secondary font-medium">預估賣出淨值</th>
+                  <th class="text-right py-2 px-2 text-text-secondary font-medium">預估損益</th>
                 </tr>
               </thead>
               <tbody>

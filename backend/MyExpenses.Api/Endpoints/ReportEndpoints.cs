@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -69,39 +70,7 @@ public static class ReportEndpoints
         });
 
         group.MapGet("/net-worth", async (AppDbContext db) =>
-        {
-            var bankAccounts = await db.BankAccounts.ToListAsync();
-            var stocks = await db.Stocks.ToListAsync();
-
-            var totalBankBalance = bankAccounts.Sum(b => b.Balance);
-            var totalStockValue = stocks.Sum(s => s.Shares * s.CurrentPrice);
-            var totalAssets = totalBankBalance + totalStockValue;
-
-            var unpaidInstallments = await db.InstallmentPayments
-                .Where(p => !p.IsPaid)
-                .SumAsync(p => p.Amount);
-
-            return Results.Ok(new
-            {
-                TotalAssets = totalAssets,
-                TotalLiabilities = unpaidInstallments,
-                NetWorth = totalAssets - unpaidInstallments,
-                BankAccounts = bankAccounts.Select(b => new
-                {
-                    b.BankName,
-                    b.AccountNumber,
-                    b.Balance
-                }),
-                Stocks = stocks.Select(s => new
-                {
-                    s.Name,
-                    s.Symbol,
-                    s.Shares,
-                    s.CurrentPrice,
-                    MarketValue = s.Shares * s.CurrentPrice
-                })
-            });
-        });
+            Results.Ok(await GetNetWorthAsync(db)));
 
         group.MapGet("/installment-forecast", async (int? months, AppDbContext db) =>
         {
@@ -169,4 +138,65 @@ public static class ReportEndpoints
             });
         });
     }
+
+    /// <summary>Builds the net-worth report using estimated net sell value for stock assets.</summary>
+    public static async Task<NetWorthReportResponse> GetNetWorthAsync(AppDbContext db)
+    {
+        var bankAccounts = await db.BankAccounts.ToListAsync();
+        var stocks = await db.Stocks.ToListAsync();
+
+        var bankRows = bankAccounts
+            .Select(b => new NetWorthBankAccountRow(b.BankName, b.AccountNumber, b.Balance))
+            .ToList();
+        var stockRows = stocks.Select(ToNetWorthStockRow).ToList();
+        var totalBankBalance = bankRows.Sum(b => b.Balance);
+        var totalStockValue = stockRows.Sum(s => s.EstimatedNetSellValue);
+        var totalAssets = totalBankBalance + totalStockValue;
+
+        var unpaidInstallments = await db.InstallmentPayments
+            .Where(p => !p.IsPaid)
+            .SumAsync(p => p.Amount);
+
+        return new NetWorthReportResponse(
+            totalAssets,
+            unpaidInstallments,
+            totalAssets - unpaidInstallments,
+            bankRows,
+            stockRows);
+    }
+
+    /// <summary>Maps a stock holding to a net-worth report row with estimated value fields.</summary>
+    private static NetWorthStockRow ToNetWorthStockRow(Stock stock)
+    {
+        var valuation = StockValuationCalculator.Calculate(stock);
+        return new NetWorthStockRow(
+            stock.Name,
+            stock.Symbol,
+            stock.InstrumentType,
+            stock.Shares,
+            stock.CurrentPrice,
+            valuation.GrossMarketValue,
+            valuation.EstimatedNetSellValue);
+    }
 }
+
+public sealed record NetWorthReportResponse(
+    decimal TotalAssets,
+    decimal TotalLiabilities,
+    decimal NetWorth,
+    IReadOnlyList<NetWorthBankAccountRow> BankAccounts,
+    IReadOnlyList<NetWorthStockRow> Stocks);
+
+public sealed record NetWorthBankAccountRow(
+    string BankName,
+    string AccountNumber,
+    decimal Balance);
+
+public sealed record NetWorthStockRow(
+    string Name,
+    string Symbol,
+    StockInstrumentType InstrumentType,
+    decimal Shares,
+    decimal CurrentPrice,
+    decimal GrossMarketValue,
+    decimal EstimatedNetSellValue);

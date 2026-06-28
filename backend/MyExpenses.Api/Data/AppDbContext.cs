@@ -89,7 +89,9 @@ public class AppDbContext : DbContext
             e.ToTable("CreditCards");
             e.Property(c => c.BankName).HasMaxLength(100).IsRequired();
             e.Property(c => c.LastFourDigits).HasMaxLength(4).IsRequired();
+            e.Property(c => c.CardNetwork).HasMaxLength(50);
             e.Property(c => c.CreditLimit).HasColumnType("decimal(18,2)");
+            e.Property(c => c.Notes).HasMaxLength(200);
         });
 
         modelBuilder.Entity<CreditCardBill>(e =>
@@ -118,6 +120,7 @@ public class AppDbContext : DbContext
             e.ToTable("Stocks");
             e.Property(s => s.Name).HasMaxLength(100).IsRequired();
             e.Property(s => s.Symbol).HasMaxLength(20).IsRequired();
+            e.Property(s => s.InstrumentType).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(s => s.Shares).HasColumnType("decimal(18,4)");
             e.Property(s => s.BuyPrice).HasColumnType("decimal(18,2)");
             e.Property(s => s.CurrentPrice).HasColumnType("decimal(18,2)");
@@ -168,6 +171,7 @@ public class AppDbContext : DbContext
                 s.ToJson();
                 s.Property(d => d.Name).HasMaxLength(100);
                 s.Property(d => d.Symbol).HasMaxLength(20);
+                s.Property(d => d.InstrumentType).HasConversion<string>().HasMaxLength(20);
                 s.Property(d => d.Shares).HasColumnType("decimal(18,4)");
                 s.Property(d => d.BuyPrice).HasColumnType("decimal(18,2)");
                 s.Property(d => d.CurrentPrice).HasColumnType("decimal(18,2)");

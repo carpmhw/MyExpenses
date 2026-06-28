@@ -1,82 +1,35 @@
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
 public static class SnapshotEndpoints
 {
+    private const int MaximumSnapshotRangeYears = 5;
+
     public static void MapSnapshotEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/snapshots");
 
         group.MapPost("/", async (AppDbContext db) =>
         {
-            var bankAccounts = await db.BankAccounts.ToListAsync();
-            var stocks = await db.Stocks.ToListAsync();
-
-            var bankDetails = bankAccounts.Select(b => new BankDetail
-            {
-                BankName = b.BankName,
-                AccountNumber = b.AccountNumber,
-                AccountType = b.AccountType,
-                Balance = b.Balance,
-            }).ToList();
-
-            var totalBankBalance = bankDetails.Sum(b => b.Balance);
-
-            var stockDetails = stocks.Select(s => new StockDetail
-            {
-                Name = s.Name,
-                Symbol = s.Symbol,
-                Shares = s.Shares,
-                BuyPrice = s.BuyPrice,
-                CurrentPrice = s.CurrentPrice,
-                MarketValue = s.CurrentPrice * s.Shares,
-                GainLoss = (s.CurrentPrice - s.BuyPrice) * s.Shares,
-            }).ToList();
-
-            var totalStockValue = stockDetails.Sum(s => s.MarketValue);
-            var totalStockCost = stockDetails.Sum(s => s.BuyPrice * s.Shares);
-            var totalNetWorth = totalBankBalance + totalStockValue;
-
-            var now = DateTime.UtcNow;
-            var name = $"快照 {now:yyyy-MM-dd HH:mm}";
-
-            var snapshot = new SnapshotBatch
-            {
-                Name = name,
-                SnapshotDate = now,
-                Notes = null,
-                TotalNetWorth = totalNetWorth,
-                TotalBankBalance = totalBankBalance,
-                TotalStockValue = totalStockValue,
-                TotalStockCost = totalStockCost,
-                BankDetails = bankDetails,
-                StockDetails = stockDetails,
-            };
-
-            db.SnapshotBatches.Add(snapshot);
-            await db.SaveChangesAsync();
+            var snapshot = await CreateSnapshotAsync(db);
 
             return Results.Created($"/api/snapshots/{snapshot.Id}", snapshot);
         });
 
-        group.MapGet("/", async (int? page, int? pageSize, AppDbContext db) =>
+        group.MapGet("/", async (int? page, int? pageSize, DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db) =>
         {
-            var query = db.SnapshotBatches.AsQueryable();
-
-            var total = await query.CountAsync();
-            var p = page ?? 1;
-            var ps = pageSize ?? 20;
-
-            var items = await query
-                .OrderByDescending(s => s.SnapshotDate)
-                .Skip((p - 1) * ps)
-                .Take(ps)
-                .ToListAsync();
-
-            return Results.Ok(new { items, total, page = p, pageSize = ps });
+            try
+            {
+                return Results.Ok(await ListSnapshotsAsync(page, pageSize, dateStart, dateEnd, db));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
         });
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
@@ -206,23 +159,16 @@ public static class SnapshotEndpoints
             });
         });
 
-        group.MapGet("/trend", async (AppDbContext db) =>
+        group.MapGet("/trend", async (DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db) =>
         {
-            var snapshots = await db.SnapshotBatches
-                .OrderBy(s => s.SnapshotDate)
-                .Select(s => new
-                {
-                    id = s.Id,
-                    date = s.SnapshotDate,
-                    name = s.Name,
-                    totalNetWorth = s.TotalNetWorth,
-                    totalBankBalance = s.TotalBankBalance,
-                    totalStockValue = s.TotalStockValue,
-                    totalStockCost = s.TotalStockCost,
-                })
-                .ToListAsync();
-
-            return Results.Ok(snapshots);
+            try
+            {
+                return Results.Ok(await ListSnapshotTrendAsync(dateStart, dateEnd, db));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
         });
 
         group.MapGet("/auto-schedule", async (AppDbContext db) =>
@@ -246,4 +192,102 @@ public static class SnapshotEndpoints
             return Results.Ok(config);
         });
     }
+
+    /// <summary>Creates and persists a manual financial snapshot using estimated net sell value for stock holdings.</summary>
+    public static async Task<SnapshotBatch> CreateSnapshotAsync(AppDbContext db)
+    {
+        var bankAccounts = await db.BankAccounts.ToListAsync();
+        var stocks = await db.Stocks.ToListAsync();
+        var now = DateTime.UtcNow;
+        var snapshot = FinancialSnapshotBuilder.Build($"快照 {now:yyyy-MM-dd HH:mm}", null, now, bankAccounts, stocks);
+
+        db.SnapshotBatches.Add(snapshot);
+        await db.SaveChangesAsync();
+
+        return snapshot;
+    }
+
+    /// <summary>Returns paginated snapshot history filtered by an optional inclusive date range.</summary>
+    public static async Task<SnapshotListResponse> ListSnapshotsAsync(int? page, int? pageSize, DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db)
+    {
+        ValidateDateRange(dateStart, dateEnd);
+
+        var p = page is > 0 ? page.Value : 1;
+        var ps = pageSize is > 0 ? pageSize.Value : 20;
+        var query = ApplyDateRange(db.SnapshotBatches.AsQueryable(), dateStart, dateEnd);
+        var total = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(s => s.SnapshotDate)
+            .Skip((p - 1) * ps)
+            .Take(ps)
+            .ToListAsync();
+
+        return new SnapshotListResponse(items, total, p, ps);
+    }
+
+    /// <summary>Returns snapshot trend points filtered by an optional inclusive date range in chronological order.</summary>
+    public static async Task<IReadOnlyList<SnapshotTrendPoint>> ListSnapshotTrendAsync(DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db)
+    {
+        ValidateDateRange(dateStart, dateEnd);
+
+        return await ApplyDateRange(db.SnapshotBatches.AsQueryable(), dateStart, dateEnd)
+            .OrderBy(s => s.SnapshotDate)
+            .Select(s => new SnapshotTrendPoint(
+                s.Id,
+                s.SnapshotDate,
+                s.Name,
+                s.TotalNetWorth,
+                s.TotalBankBalance,
+                s.TotalStockValue,
+                s.TotalStockCost))
+            .ToListAsync();
+    }
+
+    /// <summary>Applies inclusive whole-day date range filters to a snapshot query.</summary>
+    private static IQueryable<SnapshotBatch> ApplyDateRange(IQueryable<SnapshotBatch> query, DateOnly? dateStart, DateOnly? dateEnd)
+    {
+        if (dateStart.HasValue)
+        {
+            var start = dateStart.Value.ToDateTime(TimeOnly.MinValue);
+            query = query.Where(s => s.SnapshotDate >= start);
+        }
+
+        if (dateEnd.HasValue)
+        {
+            var endExclusive = dateEnd.Value.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            query = query.Where(s => s.SnapshotDate < endExclusive);
+        }
+
+        return query;
+    }
+
+    /// <summary>Rejects invalid snapshot date ranges before database queries are executed.</summary>
+    private static void ValidateDateRange(DateOnly? dateStart, DateOnly? dateEnd)
+    {
+        if (dateStart.HasValue && dateEnd.HasValue && dateEnd.Value < dateStart.Value)
+        {
+            throw new ArgumentException("迄日不能小於起日");
+        }
+
+        if (dateStart.HasValue && dateEnd.HasValue && dateStart.Value < dateEnd.Value.AddYears(-MaximumSnapshotRangeYears))
+        {
+            throw new ArgumentException("日期區間最多只能查詢 5 年");
+        }
+    }
+
 }
+
+public sealed record SnapshotListResponse(
+    IReadOnlyList<SnapshotBatch> Items,
+    int Total,
+    int Page,
+    int PageSize);
+
+public sealed record SnapshotTrendPoint(
+    int Id,
+    DateTime Date,
+    string Name,
+    decimal TotalNetWorth,
+    decimal TotalBankBalance,
+    decimal TotalStockValue,
+    decimal TotalStockCost);

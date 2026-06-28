@@ -8,8 +8,10 @@ import DataTable from '../../components/ui/DataTable.vue'
 import Modal from '../../components/ui/Modal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Input from '../../components/ui/Input.vue'
+import Select from '../../components/ui/Select.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
+import { CARD_NETWORK_OPTIONS, formatOptionalCreditCardText, normalizeOptionalCreditCardField } from '../../utils/creditCard'
 import { usePagination } from '../../composables/usePagination'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
@@ -21,7 +23,7 @@ const pagination = usePagination(1, 15)
 
 const modalOpen = ref(false)
 const editingItem = ref<CreditCard | null>(null)
-const form = ref({ bankName: '', lastFourDigits: '', statementDay: 1, dueDay: 1, creditLimit: 0 })
+const form = ref({ bankName: '', lastFourDigits: '', cardNetwork: '', statementDay: 1, dueDay: 1, creditLimit: 0, notes: '' })
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
@@ -31,18 +33,22 @@ const columns = [
   { key: 'createdAt', label: '建立日期' },
   { key: 'updatedAt', label: '修改日期' },
   { key: 'bankName', label: '發卡銀行' },
+  { key: 'cardNetwork', label: '卡種' },
   { key: 'lastFourDigits', label: '卡號後四碼' },
   { key: 'creditLimit', label: '額度', align: 'right' as const },
   { key: 'statementDay', label: '結帳日' },
   { key: 'dueDay', label: '繳款截止日' },
+  { key: 'notes', label: '備註' },
 ]
 
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
   const lastFourDigits = form.value.lastFourDigits?.trim() ?? ''
+  const notes = form.value.notes ?? ''
   if (!form.value.bankName?.trim()) errs.bankName = '請填寫發卡銀行'
   if (!lastFourDigits) errs.lastFourDigits = '請填寫卡號後四碼'
   else if (!/^\d{4}$/.test(lastFourDigits)) errs.lastFourDigits = '卡號後四碼必須為 4 位數字'
+  if (notes.length > 200) errs.notes = '備註最多 200 字元'
   return errs
 })
 
@@ -59,7 +65,7 @@ async function fetchList() {
 
 function openCreate() {
   editingItem.value = null
-  form.value = { bankName: '', lastFourDigits: '', statementDay: 1, dueDay: 1, creditLimit: 0 }
+  form.value = { bankName: '', lastFourDigits: '', cardNetwork: '', statementDay: 1, dueDay: 1, creditLimit: 0, notes: '' }
   modalOpen.value = true
 }
 
@@ -68,9 +74,11 @@ function openEdit(item: CreditCard) {
   form.value = {
     bankName: item.bankName,
     lastFourDigits: item.lastFourDigits,
+    cardNetwork: item.cardNetwork ?? '',
     statementDay: item.statementDay,
     dueDay: item.dueDay,
     creditLimit: item.creditLimit,
+    notes: item.notes ?? '',
   }
   modalOpen.value = true
 }
@@ -81,11 +89,21 @@ async function save() {
 
   saving.value = true
   try {
+    const payload = {
+      bankName: form.value.bankName,
+      lastFourDigits: form.value.lastFourDigits,
+      cardNetwork: normalizeOptionalCreditCardField(form.value.cardNetwork),
+      statementDay: form.value.statementDay,
+      dueDay: form.value.dueDay,
+      creditLimit: form.value.creditLimit,
+      notes: normalizeOptionalCreditCardField(form.value.notes),
+    }
+
     if (editingItem.value) {
-      await api.creditCards.update(editingItem.value.id, form.value)
+      await api.creditCards.update(editingItem.value.id, payload)
       toast.success('信用卡已更新')
     } else {
-      await api.creditCards.create(form.value)
+      await api.creditCards.create(payload)
       toast.success('信用卡已建立')
     }
     modalOpen.value = false
@@ -150,6 +168,7 @@ watch(() => pagination.page.value, () => fetchList())
           <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[110px]">{{ formatDate(item.createdAt) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[110px]">{{ formatDate(item.updatedAt) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm font-medium">{{ item.bankName }}</td>
+          <td class="py-3 px-4 text-text-primary text-sm w-[140px]">{{ formatOptionalCreditCardText(item.cardNetwork) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm w-[120px]">{{ item.lastFourDigits }}</td>
           <td class="py-3 px-4 text-text-primary font-bold text-sm w-[140px] text-right">{{ formatCreditLimit(item.creditLimit) }}</td>
           <td class="py-3 px-4 w-[120px]">
@@ -165,6 +184,9 @@ watch(() => pagination.page.value, () => fetchList())
             >
               每月{{ item.dueDay }}日
             </span>
+          </td>
+          <td class="py-3 px-4 text-text-primary text-sm max-w-[220px]">
+            <span class="block truncate" :title="item.notes ?? undefined">{{ formatOptionalCreditCardText(item.notes) }}</span>
           </td>
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
@@ -202,6 +224,10 @@ watch(() => pagination.page.value, () => fetchList())
           <Input v-model="form.bankName" :error="formErrors.bankName" />
         </div>
         <div>
+          <label class="block text-sm font-medium text-text-primary mb-1">卡種</label>
+          <Select v-model="form.cardNetwork" :options="CARD_NETWORK_OPTIONS" placeholder="選擇卡種（選填）" />
+        </div>
+        <div>
           <label class="block text-sm font-medium text-text-primary mb-1">卡號後四碼</label>
           <Input v-model="form.lastFourDigits" :maxlength="4" :error="formErrors.lastFourDigits" />
         </div>
@@ -235,6 +261,11 @@ watch(() => pagination.page.value, () => fetchList())
             step="0.01"
             @update:model-value="form.creditLimit = Number($event) || 0"
           />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text-primary mb-1">備註</label>
+          <Input v-model="form.notes" :maxlength="200" placeholder="例如：主力卡、網購用" :error="formErrors.notes" />
+          <p class="mt-1 text-xs text-text-tertiary">{{ form.notes.length }} / 200</p>
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>

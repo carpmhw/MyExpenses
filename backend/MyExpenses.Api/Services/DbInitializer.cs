@@ -145,9 +145,9 @@ public static class DbInitializer
 
         var creditCards = new List<CreditCard>
         {
-            new() { BankName = "中國信託", LastFourDigits = "1234", StatementDay = 15, DueDay = 23, CreditLimit = 150000, CreatedAt = now.AddMonths(-12), UpdatedAt = now.AddDays(-27) },
-            new() { BankName = "國泰世華", LastFourDigits = "9012", StatementDay = 5, DueDay = 13, CreditLimit = 200000, CreatedAt = now.AddMonths(-9), UpdatedAt = now.AddDays(-10) },
-            new() { BankName = "玉山銀行", LastFourDigits = "3456", StatementDay = 25, DueDay = 3, CreditLimit = 100000, CreatedAt = now.AddMonths(-6), UpdatedAt = now.AddDays(-22) },
+            new() { BankName = "中國信託", LastFourDigits = "1234", CardNetwork = "VISA", StatementDay = 15, DueDay = 23, CreditLimit = 150000, Notes = "主力消費卡", CreatedAt = now.AddMonths(-12), UpdatedAt = now.AddDays(-27) },
+            new() { BankName = "國泰世華", LastFourDigits = "9012", CardNetwork = "Mastercard", StatementDay = 5, DueDay = 13, CreditLimit = 200000, Notes = "網購與訂閱", CreatedAt = now.AddMonths(-9), UpdatedAt = now.AddDays(-10) },
+            new() { BankName = "玉山銀行", LastFourDigits = "3456", CardNetwork = "JCB", StatementDay = 25, DueDay = 3, CreditLimit = 100000, Notes = "旅遊備用", CreatedAt = now.AddMonths(-6), UpdatedAt = now.AddDays(-22) },
         };
 
         db.CreditCards.AddRange(creditCards);

@@ -1,6 +1,6 @@
 import type {
   Category, Transaction, Installment, CreditCard, CreditCardBill,
-  BankAccount, Stock, Withdrawal, PaymentMethod, PaginatedResponse, InstallmentPayment,
+  BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, PaymentMethod, PaginatedResponse, InstallmentPayment,
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary,
   SnapshotBatch, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
   AuthResponse, TwoFactorSetupResponse, User, ApiToken,
@@ -34,6 +34,28 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return res.json()
+}
+
+// Builds the bank accounts list query string, omitting blank optional filters.
+export function buildBankAccountsQuery(params?: { page?: number; pageSize?: number; bankName?: string }) {
+  const q = new URLSearchParams()
+  if (params?.page) q.set('page', String(params.page))
+  if (params?.pageSize) q.set('pageSize', String(params.pageSize))
+  const bankName = params?.bankName?.trim()
+  if (bankName) q.set('bankName', bankName)
+  return q.toString()
+}
+
+// Builds snapshot list/trend query strings, omitting blank optional date filters.
+export function buildSnapshotQuery(params?: { page?: number; pageSize?: number; dateStart?: string; dateEnd?: string }) {
+  const q = new URLSearchParams()
+  if (params?.page) q.set('page', String(params.page))
+  if (params?.pageSize) q.set('pageSize', String(params.pageSize))
+  const dateStart = params?.dateStart?.trim()
+  const dateEnd = params?.dateEnd?.trim()
+  if (dateStart) q.set('dateStart', dateStart)
+  if (dateEnd) q.set('dateEnd', dateEnd)
+  return q.toString()
 }
 
 export const api = {
@@ -131,11 +153,9 @@ export const api = {
   },
 
   bankAccounts: {
-    list: (params?: { page?: number; pageSize?: number }) => {
-      const q = new URLSearchParams()
-      if (params?.page) q.set('page', String(params.page))
-      if (params?.pageSize) q.set('pageSize', String(params.pageSize))
-      return request<PaginatedResponse<BankAccount>>(`/bank-accounts?${q}`)
+    list: (params?: { page?: number; pageSize?: number; bankName?: string }) => {
+      const q = buildBankAccountsQuery(params)
+      return request<BankAccountListResponse>(`/bank-accounts?${q}`)
     },
     get: (id: number) => request<BankAccount>(`/bank-accounts/${id}`),
     create: (data: Omit<BankAccount, 'id' | 'createdAt' | 'updatedAt'>) =>
@@ -151,7 +171,7 @@ export const api = {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
-      return request<PaginatedResponse<Stock>>(`/stocks?${q}`)
+      return request<StockListResponse>(`/stocks?${q}`)
     },
     get: (id: number) => request<Stock>(`/stocks/${id}`),
     create: (data: Omit<Stock, 'id'>) =>
@@ -258,18 +278,19 @@ export const api = {
   },
 
   snapshots: {
-    list: (params?: { page?: number; pageSize?: number }) => {
-      const q = new URLSearchParams()
-      if (params?.page) q.set('page', String(params.page))
-      if (params?.pageSize) q.set('pageSize', String(params.pageSize))
-      return request<PaginatedResponse<SnapshotBatch>>(`/snapshots?${q}`)
+    list: (params?: { page?: number; pageSize?: number; dateStart?: string; dateEnd?: string }) => {
+      const q = buildSnapshotQuery(params)
+      return request<PaginatedResponse<SnapshotBatch>>(`/snapshots${q ? `?${q}` : ''}`)
     },
     get: (id: number) => request<SnapshotBatch>(`/snapshots/${id}`),
     create: () => request<SnapshotBatch>('/snapshots', { method: 'POST' }),
     delete: (id: number) => request<void>(`/snapshots/${id}`, { method: 'DELETE' }),
     compare: (id1: number, id2: number) =>
       request<SnapshotCompareResult>(`/snapshots/${id1}/compare/${id2}`),
-    trend: () => request<TrendPoint[]>('/snapshots/trend'),
+    trend: (params?: { dateStart?: string; dateEnd?: string }) => {
+      const q = buildSnapshotQuery(params)
+      return request<TrendPoint[]>(`/snapshots/trend${q ? `?${q}` : ''}`)
+    },
     getSchedule: () => request<AutoSnapshotConfig>('/snapshots/auto-schedule'),
     updateSchedule: (data: Partial<AutoSnapshotConfig>) =>
       request<AutoSnapshotConfig>('/snapshots/auto-schedule', { method: 'PUT', body: JSON.stringify(data) }),

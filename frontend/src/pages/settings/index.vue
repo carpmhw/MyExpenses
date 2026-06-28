@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { api } from '../../api'
 import type { ApiToken } from '../../types'
 import { useAuth } from '../../composables/useAuth'
+import { copyTextToClipboard } from '../../utils/clipboard'
 import QRCode from 'qrcode'
 
 const router = useRouter()
@@ -68,13 +69,15 @@ async function createToken() {
   }
 }
 
+/**
+ * Copies the newly created API token while it is still visible to the user.
+ */
 async function copyToken() {
   if (!newlyCreatedToken.value) return
-  try {
-    await navigator.clipboard.writeText(newlyCreatedToken.value.token)
+  if (await copyTextToClipboard(newlyCreatedToken.value.token)) {
     toast.success('已複製到剪貼簿')
-  } catch {
-    toast.error('複製失敗')
+  } else {
+    toast.error('複製失敗，請手動選取金鑰複製')
   }
 }
 

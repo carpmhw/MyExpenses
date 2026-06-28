@@ -5,6 +5,7 @@ import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast } fr
 import Card from '../../components/ui/Card.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
+import { formatStockInstrumentType } from '../../utils/stock'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -415,22 +416,24 @@ function selectCategory(item: CategoryDistribution) {
           <p v-else class="text-sm text-text-tertiary py-4 text-center">無銀行帳戶資料</p>
         </Card>
         <Card>
-          <h3 class="text-sm font-semibold text-text-primary mb-3">股票持倉</h3>
+          <h3 class="text-sm font-semibold text-text-primary mb-3">股票持倉（預估賣出淨值）</h3>
           <table v-if="netWorthData?.stocks.length" class="w-full text-sm">
             <thead>
               <tr class="border-b border-border-default">
                 <th class="text-left py-2 text-text-secondary font-medium">名稱</th>
+                <th class="text-left py-2 text-text-secondary font-medium">類型</th>
                 <th class="text-right py-2 text-text-secondary font-medium">股數</th>
                 <th class="text-right py-2 text-text-secondary font-medium">現價</th>
-                <th class="text-right py-2 text-text-secondary font-medium">市值</th>
+                <th class="text-right py-2 text-text-secondary font-medium">預估賣出淨值</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="s in netWorthData.stocks" :key="s.symbol" class="border-b border-border-default">
                 <td class="py-2 text-text-primary">{{ s.name }} ({{ s.symbol }})</td>
+                <td class="py-2 text-text-secondary whitespace-nowrap">{{ formatStockInstrumentType(s.instrumentType) }}</td>
                 <td class="py-2 text-right text-text-primary">{{ s.shares }}</td>
                 <td class="py-2 text-right text-text-primary">{{ formatMoney(s.currentPrice) }}</td>
-                <td class="py-2 text-right text-text-primary font-medium">{{ formatMoney(s.marketValue) }}</td>
+                <td class="py-2 text-right text-text-primary font-medium">{{ formatMoney(s.estimatedNetSellValue) }}</td>
               </tr>
             </tbody>
           </table>

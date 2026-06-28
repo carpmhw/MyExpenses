@@ -184,6 +184,10 @@ namespace MyExpenses.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CardNetwork")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -196,6 +200,10 @@ namespace MyExpenses.Api.Migrations
                     b.Property<string>("LastFourDigits")
                         .IsRequired()
                         .HasMaxLength(4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("StatementDay")
@@ -411,6 +419,11 @@ namespace MyExpenses.Api.Migrations
 
                     b.Property<decimal>("CurrentPrice")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("InstrumentType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastPriceUpdate")
                         .HasColumnType("TEXT");
@@ -657,6 +670,10 @@ namespace MyExpenses.Api.Migrations
 
                             b1.Property<decimal>("GainLoss")
                                 .HasColumnType("decimal(18,2)");
+
+                            b1.Property<string>("InstrumentType")
+                                .IsRequired()
+                                .HasMaxLength(20);
 
                             b1.Property<decimal>("MarketValue")
                                 .HasColumnType("decimal(18,2)");

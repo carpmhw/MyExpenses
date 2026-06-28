@@ -105,7 +105,7 @@ onMounted(async () => {
                 </td>
               </tr>
               <tr class="border-b border-border-default">
-                <td class="py-3 px-3 text-text-primary">股票總值</td>
+                <td class="py-3 px-3 text-text-primary">股票預估賣出淨值</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.stockValue.old) }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.stockValue.new) }}</td>
                 <td class="py-3 px-3 text-right" :class="result.differences.stockValue.change >= 0 ? 'text-green-600' : 'text-red-600'">
@@ -154,8 +154,8 @@ onMounted(async () => {
               <tr class="border-b border-border-default">
                 <th class="text-left py-2 px-3 text-text-secondary font-medium">名稱</th>
                 <th class="text-left py-2 px-3 text-text-secondary font-medium">代號</th>
-                <th class="text-right py-2 px-3 text-text-secondary font-medium">舊市值</th>
-                <th class="text-right py-2 px-3 text-text-secondary font-medium">新市值</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">舊預估賣出淨值</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">新預估賣出淨值</th>
                 <th class="text-right py-2 px-3 text-text-secondary font-medium">變動</th>
                 <th class="text-right py-2 px-3 text-text-secondary font-medium">變動%</th>
               </tr>
