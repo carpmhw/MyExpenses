@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="bg-gradient" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background with rounded corners -->
+  <rect width="48" height="48" rx="12" fill="url(#bg-gradient)"/>
+  
+  <!-- Wallet body - simplified geometric shape -->
+  <path d="M12 16C12 14.8954 12.8954 14 14 14H34C35.1046 14 36 14.8954 36 16V32C36 33.1046 35.1046 34 34 34H14C12.8954 34 12 33.1046 12 32V16Z" 
+        fill="none" 
+        stroke="white" 
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  
+  <!-- Wallet flap/cover -->
+  <path d="M12 20H36" 
+        stroke="white" 
+        stroke-width="2.5"
+        stroke-linecap="round"/>
+  
+  <!-- Wallet clasp on right side -->
+  <circle cx="32" cy="27" r="2.5" 
+          fill="white"/>
+  
+  <!-- Letter M integrated into wallet -->
+  <path d="M16 24V28M16 24L20 28M20 28L24 24M24 24V28" 
+        stroke="white" 
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>

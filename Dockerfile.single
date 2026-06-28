@@ -1,0 +1,33 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
+WORKDIR /src/backend/MyExpenses.Api
+COPY backend/MyExpenses.Api/MyExpenses.Api.csproj ./
+RUN dotnet restore
+COPY backend/MyExpenses.Api/ ./
+RUN dotnet publish -c Release -o /app/backend
+
+FROM node:24-alpine AS frontend-build
+WORKDIR /src/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nginx \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
+
+WORKDIR /app
+COPY --from=backend-build /app/backend ./
+COPY --from=frontend-build /src/frontend/dist /usr/share/nginx/html
+COPY nginx.single.conf /etc/nginx/conf.d/default.conf
+COPY entrypoint.single.sh /entrypoint.single.sh
+RUN chmod +x /entrypoint.single.sh
+
+EXPOSE 80
+ENV ASPNETCORE_URLS=http://127.0.0.1:5000
+ENV ASPNETCORE_ENVIRONMENT=Production
+VOLUME /app/data
+
+ENTRYPOINT ["/entrypoint.single.sh"]
