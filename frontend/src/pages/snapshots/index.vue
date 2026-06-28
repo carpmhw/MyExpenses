@@ -9,7 +9,7 @@ import DataTable from '../../components/ui/DataTable.vue'
 import Modal from '../../components/ui/Modal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Icon from '../../components/ui/Icon.vue'
-import { formatMoney } from '../../utils/format'
+import { formatMoney, formatShares } from '../../utils/format'
 import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../../utils/snapshot'
 import { usePagination } from '../../composables/usePagination'
 import { Line } from 'vue-chartjs'
@@ -448,7 +448,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
                 <tr v-for="s in detailSnapshot.stockDetails" :key="s.symbol" class="border-b border-border-default">
                   <td class="py-2 px-2 text-text-primary">{{ s.name }}</td>
                   <td class="py-2 px-2 text-text-secondary font-mono">{{ s.symbol }}</td>
-                  <td class="py-2 px-2 text-text-primary text-right">{{ s.shares }}</td>
+                  <td class="py-2 px-2 text-text-primary text-right">{{ formatShares(s.shares) }}</td>
                   <td class="py-2 px-2 text-text-primary text-right">{{ formatMoney(s.marketValue) }}</td>
                   <td class="py-2 px-2 text-right" :class="s.gainLoss >= 0 ? 'text-green-600' : 'text-red-600'">
                     {{ formatMoney(s.gainLoss) }}

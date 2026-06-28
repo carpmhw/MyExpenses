@@ -15,6 +15,7 @@ import {
   Settings,
   Moon,
   Sun,
+  Calculator,
 } from '@lucide/vue'
 import { useAuth } from '../composables/useAuth'
 
@@ -24,7 +25,7 @@ const props = defineProps<{
   isSidebarOpen?: boolean
 }>()
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; 'open-exchange-rate': [] }>()
 
 const route = useRoute()
 const router = useRouter()
@@ -131,6 +132,14 @@ function goToSettings() {
       >
         <component :is="darkMode.isDark.value ? Sun : Moon" class="w-[18px] h-[18px] shrink-0" />
         <span v-if="!isTablet">{{ darkMode.isDark.value ? '淺色模式' : '深色模式' }}</span>
+      </button>
+      <button
+        class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-text-on-dark-muted hover:text-text-on-dark hover:bg-white/5 transition-colors cursor-pointer mb-2"
+        :class="isTablet ? 'justify-center' : ''"
+        @click="emit('open-exchange-rate')"
+      >
+        <Calculator class="w-[18px] h-[18px] shrink-0" />
+        <span v-if="!isTablet">匯率計算機</span>
       </button>
       <button
         :class="['flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm transition-colors cursor-pointer hover:bg-white/5', isTablet ? 'justify-center' : '']"

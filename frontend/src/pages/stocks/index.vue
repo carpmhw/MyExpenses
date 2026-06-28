@@ -9,7 +9,7 @@ import Modal from '../../components/ui/Modal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Input from '../../components/ui/Input.vue'
 import Icon from '../../components/ui/Icon.vue'
-import { formatMoney } from '../../utils/format'
+import { formatMoney, formatShares } from '../../utils/format'
 import { STOCK_INSTRUMENT_TYPE_OPTIONS, formatStockInstrumentType } from '../../utils/stock'
 import { usePagination } from '../../composables/usePagination'
 
@@ -258,7 +258,7 @@ onMounted(fetchStocks)
           <td class="py-3 px-4 text-text-primary font-medium">{{ item.name }}</td>
           <td class="py-3 px-4 text-text-secondary font-mono">{{ item.symbol }}</td>
           <td class="py-3 px-4 text-text-secondary text-sm whitespace-nowrap">{{ formatStockInstrumentType(item.instrumentType) }}</td>
-          <td class="py-3 px-4 text-text-primary text-sm">{{ item.shares }}</td>
+          <td class="py-3 px-4 text-text-primary text-sm">{{ formatShares(item.shares) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm text-right">{{ formatMoney(item.buyPrice) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm text-right" :class="freshnessColors[priceFreshness(item.lastPriceUpdate)]">{{ formatMoney(item.currentPrice) }}</td>
           <td class="py-3 px-4 text-sm text-right font-semibold" :class="item.estimatedGainLoss >= 0 ? 'text-green-600' : 'text-red-600'">

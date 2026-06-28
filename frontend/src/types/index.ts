@@ -321,3 +321,10 @@ export interface PaginatedResponse<T> {
   page: number
   pageSize: number
 }
+
+export interface ExchangeRateResponse {
+  base: string
+  rates: Record<string, number>
+  updatedAt: string
+  warning?: string
+}

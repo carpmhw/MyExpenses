@@ -141,5 +141,6 @@ app.MapPaymentMethodEndpoints();
 app.MapReportEndpoints();
 app.MapAuthEndpoints();
 app.MapSnapshotEndpoints();
+app.MapExchangeRateEndpoints();
 
 app.Run();

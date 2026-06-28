@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import Sidebar from './Sidebar.vue'
 import MobileHeader from '../components/ui/MobileHeader.vue'
+import ExchangeRateDialog from '../components/exchange-rate/ExchangeRateDialog.vue'
 import { useSidebar } from '../composables/useSidebar'
 
 const { isMobile, isTablet, isSidebarOpen, openSidebar, closeSidebar } = useSidebar()
+const exchangeRateOpen = ref(false)
 </script>
 
 <template>
@@ -15,7 +18,7 @@ const { isMobile, isTablet, isSidebarOpen, openSidebar, closeSidebar } = useSide
       </div>
     </div>
     <template v-else>
-      <Sidebar :is-tablet="isTablet" />
+      <Sidebar :is-tablet="isTablet" @open-exchange-rate="exchangeRateOpen = true" />
       <main class="flex-1 overflow-y-auto bg-bg-app">
         <router-view />
       </main>
@@ -25,6 +28,8 @@ const { isMobile, isTablet, isSidebarOpen, openSidebar, closeSidebar } = useSide
       :is-mobile="true"
       :is-sidebar-open="isSidebarOpen"
       @close="closeSidebar"
+      @open-exchange-rate="exchangeRateOpen = true"
     />
+    <ExchangeRateDialog :open="exchangeRateOpen" @update:open="exchangeRateOpen = $event" />
   </div>
 </template>

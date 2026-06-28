@@ -3,7 +3,7 @@ import type {
   BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, PaymentMethod, PaginatedResponse, InstallmentPayment,
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary,
   SnapshotBatch, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
-  AuthResponse, TwoFactorSetupResponse, User, ApiToken,
+  AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
 } from '../types'
 
 const BASE = '/api'
@@ -294,6 +294,9 @@ export const api = {
     getSchedule: () => request<AutoSnapshotConfig>('/snapshots/auto-schedule'),
     updateSchedule: (data: Partial<AutoSnapshotConfig>) =>
       request<AutoSnapshotConfig>('/snapshots/auto-schedule', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  exchangeRates: {
+    get: () => request<ExchangeRateResponse>('/exchange-rates'),
   },
   apiTokens: {
     list: (): Promise<ApiToken[]> => request('/auth/api-tokens'),

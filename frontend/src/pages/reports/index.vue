@@ -4,7 +4,7 @@ import { api } from '../../api'
 import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Icon from '../../components/ui/Icon.vue'
-import { formatMoney } from '../../utils/format'
+import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
@@ -431,7 +431,7 @@ function selectCategory(item: CategoryDistribution) {
               <tr v-for="s in netWorthData.stocks" :key="s.symbol" class="border-b border-border-default">
                 <td class="py-2 text-text-primary">{{ s.name }} ({{ s.symbol }})</td>
                 <td class="py-2 text-text-secondary whitespace-nowrap">{{ formatStockInstrumentType(s.instrumentType) }}</td>
-                <td class="py-2 text-right text-text-primary">{{ s.shares }}</td>
+                <td class="py-2 text-right text-text-primary">{{ formatShares(s.shares) }}</td>
                 <td class="py-2 text-right text-text-primary">{{ formatMoney(s.currentPrice) }}</td>
                 <td class="py-2 text-right text-text-primary font-medium">{{ formatMoney(s.estimatedNetSellValue) }}</td>
               </tr>
