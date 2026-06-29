@@ -58,6 +58,18 @@ export function buildSnapshotQuery(params?: { page?: number; pageSize?: number; 
   return q.toString()
 }
 
+// Builds stock list query strings, omitting blank optional filters.
+export function buildStocksQuery(params?: { page?: number; pageSize?: number; symbol?: string; broker?: string }) {
+  const q = new URLSearchParams()
+  if (params?.page) q.set('page', String(params.page))
+  if (params?.pageSize) q.set('pageSize', String(params.pageSize))
+  const symbol = params?.symbol?.trim()
+  const broker = params?.broker?.trim()
+  if (symbol) q.set('symbol', symbol)
+  if (broker) q.set('broker', broker)
+  return q.toString()
+}
+
 export const api = {
   categories: {
     list: (params?: { page?: number; pageSize?: number }) => {
@@ -167,10 +179,8 @@ export const api = {
   },
 
   stocks: {
-    list: (params?: { page?: number; pageSize?: number }) => {
-      const q = new URLSearchParams()
-      if (params?.page) q.set('page', String(params.page))
-      if (params?.pageSize) q.set('pageSize', String(params.pageSize))
+    list: (params?: { page?: number; pageSize?: number; symbol?: string; broker?: string }) => {
+      const q = buildStocksQuery(params)
       return request<StockListResponse>(`/stocks?${q}`)
     },
     get: (id: number) => request<Stock>(`/stocks/${id}`),
