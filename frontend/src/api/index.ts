@@ -310,8 +310,8 @@ export const api = {
   },
   apiTokens: {
     list: (): Promise<ApiToken[]> => request('/auth/api-tokens'),
-    create: (name: string): Promise<{ id: number; name: string; prefix: string; createdAt: string; token: string }> =>
-      request('/auth/api-tokens', { method: 'POST', body: JSON.stringify({ name }) }),
+    create: (name: string, scopes: string[]): Promise<{ id: number; name: string; prefix: string; createdAt: string; scopes: string[] | null; token: string }> =>
+      request('/auth/api-tokens', { method: 'POST', body: JSON.stringify({ name, scopes }) }),
     revoke: (id: number): Promise<void> =>
       request(`/auth/api-tokens/${id}`, { method: 'DELETE' }),
   },

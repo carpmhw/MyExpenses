@@ -16,7 +16,7 @@ public static class AuthEndpoints
 {
     public static void MapAuthEndpoints(this WebApplication app)
     {
-        var jwtSecret = app.Configuration["Jwt:Secret"] ?? "placeholder-key-replace-in-production";
+        var jwtSecret = JwtSecretProvider.GetJwtSecret(app.Configuration, app.Environment);
         var jwtIssuer = app.Configuration["Jwt:Issuer"];
         var jwtAudience = app.Configuration["Jwt:Audience"];
         var cookieSecure = app.Configuration.GetValue<bool?>("Auth:CookieSecure") ?? !app.Environment.IsDevelopment();

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
 using MyExpenses.Api.Models.Requests;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -38,13 +39,15 @@ public static class TransactionEndpoints
             var items = await query.Skip((p - 1) * ps).Take(ps).ToListAsync();
             var total = await query.CountAsync();
             return Results.Ok(new { items, total, page = p, pageSize = ps });
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
         {
             var transaction = await db.Transactions.Include(t => t.Category).Include(t => t.PaymentMethod).FirstOrDefaultAsync(t => t.Id == id);
             return transaction is not null ? Results.Ok(transaction) : Results.NotFound();
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
 
         group.MapPost("/", async (CreateTransactionRequest request, AppDbContext db) =>
         {
@@ -108,7 +111,8 @@ public static class TransactionEndpoints
             await db.Entry(transaction).Reference(t => t.Category).LoadAsync();
             await db.Entry(transaction).Reference(t => t.PaymentMethod).LoadAsync();
             return Results.Created($"/api/transactions/{transaction.Id}", transaction);
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.TransactionsWrite);
 
         group.MapPut("/{id:int}", async (int id, CreateTransactionRequest request, AppDbContext db) =>
         {
@@ -163,7 +167,8 @@ public static class TransactionEndpoints
 
             await db.SaveChangesAsync();
             return Results.Ok(transaction);
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.TransactionsWrite);
 
         group.MapDelete("/{id:int}", async (int id, AppDbContext db) =>
         {
@@ -173,7 +178,8 @@ public static class TransactionEndpoints
             transaction.DeletedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
             return Results.NoContent();
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.TransactionsDelete);
 
         group.MapPost("/{id:int}/undo", async (int id, AppDbContext db) =>
         {
@@ -186,6 +192,7 @@ public static class TransactionEndpoints
             transaction.DeletedAt = null;
             await db.SaveChangesAsync();
             return Results.Ok(transaction);
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.TransactionsUndo);
     }
 }

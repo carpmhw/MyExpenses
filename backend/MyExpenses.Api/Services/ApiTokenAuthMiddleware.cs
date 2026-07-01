@@ -54,6 +54,7 @@ public class ApiTokenAuthMiddleware
             };
             var identity = new ClaimsIdentity(claims, "ApiToken");
             context.User = new ClaimsPrincipal(identity);
+            ApiTokenAuthenticationFeature.MarkAuthenticated(context, ApiTokenScopes.Parse(token.Scopes));
         }
 
         await _next(context);

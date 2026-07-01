@@ -31,15 +31,45 @@ const showRecoveryCodes = ref(false)
 const tokens = ref<ApiToken[]>([])
 const newTokenName = ref('')
 const creatingToken = ref(false)
-const newlyCreatedToken = ref<{ id: number; name: string; prefix: string; createdAt: string; token: string } | null>(null)
+const newlyCreatedToken = ref<{ id: number; name: string; prefix: string; createdAt: string; scopes: string[] | null; token: string } | null>(null)
 const revokingToken = ref<ApiToken | null>(null)
 const revoking = ref(false)
+const scopeOptionsExpanded = ref(false)
+
+const mcpDefaultScopes = [
+  'transactions:read',
+  'transactions:write',
+  'transactions:undo',
+  'categories:read',
+  'payment-methods:read',
+  'reports:read',
+]
+
+const apiTokenScopeOptions = [
+  { value: 'transactions:read', label: '交易讀取', description: '查詢交易列表與明細' },
+  { value: 'transactions:write', label: '交易寫入', description: '新增或修改交易' },
+  { value: 'transactions:undo', label: '交易復原', description: '復原已刪除交易' },
+  { value: 'transactions:delete', label: '交易刪除', description: '刪除交易，預設不提供給 MCP' },
+  { value: 'categories:read', label: '分類讀取', description: '查詢收支分類' },
+  { value: 'payment-methods:read', label: '支付方式讀取', description: '查詢支付方式' },
+  { value: 'reports:read', label: '報表讀取', description: '查詢月摘要報表' },
+]
+
+const newTokenScopes = ref<string[]>([...mcpDefaultScopes])
 
 const activeTokens = computed(() => tokens.value.filter(t => !t.isRevoked))
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function resetNewTokenScopes() {
+  newTokenScopes.value = [...mcpDefaultScopes]
+}
+
+function getScopeLabel(scope: string): string {
+  return apiTokenScopeOptions.find(option => option.value === scope)?.label || scope
 }
 
 async function fetchTokens() {
@@ -57,9 +87,10 @@ async function createToken() {
   }
   creatingToken.value = true
   try {
-    const res = await api.apiTokens.create(newTokenName.value.trim())
+    const res = await api.apiTokens.create(newTokenName.value.trim(), newTokenScopes.value)
     newlyCreatedToken.value = res
     newTokenName.value = ''
+    resetNewTokenScopes()
     await fetchTokens()
     toast.success('金鑰已建立')
   } catch (e: any) {
@@ -360,6 +391,35 @@ onMounted(() => {
         </button>
       </div>
 
+      <div class="rounded-lg border border-border-color bg-white dark:bg-bg-app">
+        <button type="button" @click="scopeOptionsExpanded = !scopeOptionsExpanded"
+          class="w-full flex items-center justify-between gap-3 p-3 text-left cursor-pointer bg-transparent border-none">
+          <span>
+            <span class="block text-sm font-medium text-text-primary">權限範圍</span>
+            <span class="block text-xs text-text-secondary mt-1">
+              已選 {{ newTokenScopes.length }} 項，預設為 MCP 記帳需要的最小權限
+            </span>
+          </span>
+          <span class="text-sm text-accent-primary whitespace-nowrap">
+            {{ scopeOptionsExpanded ? '收合' : '展開' }}
+          </span>
+        </button>
+        <div v-if="scopeOptionsExpanded" class="px-3 pb-3 space-y-3">
+          <p class="text-xs text-text-secondary">未勾選任何權限的金鑰將無法呼叫業務 API。</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label v-for="scope in apiTokenScopeOptions" :key="scope.value"
+            class="flex items-start gap-2 p-3 rounded-lg border border-border-color bg-white dark:bg-bg-card cursor-pointer hover:border-accent-primary transition-colors">
+            <input v-model="newTokenScopes" :value="scope.value" type="checkbox"
+              class="mt-1 rounded border-border-color text-accent-primary focus:ring-accent-primary" />
+            <span>
+              <span class="block text-sm font-medium text-text-primary">{{ scope.label }}</span>
+              <span class="block text-xs text-text-secondary">{{ scope.description }}</span>
+            </span>
+          </label>
+          </div>
+        </div>
+      </div>
+
       <div v-if="newlyCreatedToken" class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2">
         <p class="text-sm font-medium text-green-800 dark:text-green-200">金鑰已建立（僅顯示一次，請立即複製）</p>
         <div class="flex gap-2">
@@ -382,6 +442,7 @@ onMounted(() => {
             <tr class="text-left text-text-secondary border-b border-border-color">
               <th class="pb-2 pr-4 font-medium">名稱</th>
               <th class="pb-2 pr-4 font-medium">前綴</th>
+              <th class="pb-2 pr-4 font-medium">權限</th>
               <th class="pb-2 pr-4 font-medium">建立時間</th>
               <th class="pb-2 pr-4 font-medium">最後使用</th>
               <th class="pb-2 font-medium"></th>
@@ -391,6 +452,15 @@ onMounted(() => {
             <tr v-for="token in activeTokens" :key="token.id" class="border-b border-border-color">
               <td class="py-2 pr-4 text-text-primary">{{ token.name }}</td>
               <td class="py-2 pr-4 text-text-secondary font-mono">{{ token.prefix }}...</td>
+              <td class="py-2 pr-4 min-w-48">
+                <div v-if="token.scopes && token.scopes.length > 0" class="flex flex-wrap gap-1">
+                  <span v-for="scope in token.scopes" :key="scope"
+                    class="inline-flex items-center rounded-full bg-accent-primary/10 text-accent-primary px-2 py-0.5 text-xs font-medium">
+                    {{ getScopeLabel(scope) }}
+                  </span>
+                </div>
+                <span v-else class="text-xs text-red-500">無權限</span>
+              </td>
               <td class="py-2 pr-4 text-text-secondary whitespace-nowrap">{{ formatDate(token.createdAt) }}</td>
               <td class="py-2 pr-4 text-text-secondary whitespace-nowrap">{{ token.lastUsedAt ? formatDate(token.lastUsedAt) : '從未使用' }}</td>
               <td class="py-2">

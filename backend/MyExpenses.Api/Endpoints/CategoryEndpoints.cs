@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -24,10 +25,12 @@ public static class CategoryEndpoints
             var items = await query.Skip((p - 1) * ps).Take(ps).ToListAsync();
             var total = await query.CountAsync();
             return Results.Ok(new { items, total, page = p, pageSize = ps });
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.CategoriesRead);
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
-            await db.Categories.FindAsync(id) is Category c ? Results.Ok(c) : Results.NotFound());
+            await db.Categories.FindAsync(id) is Category c ? Results.Ok(c) : Results.NotFound())
+            .RequireApiTokenScope(ApiTokenScopes.CategoriesRead);
 
         group.MapPost("/", async (Category category, AppDbContext db) =>
         {
