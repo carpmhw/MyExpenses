@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
@@ -70,6 +71,10 @@ public static class AuthEndpoints
             if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
                 return Results.BadRequest(new { message = "Email and password are required" });
 
+            var passwordError = PasswordPolicy.Validate(request.Password);
+            if (passwordError is not null)
+                return Results.BadRequest(new { message = passwordError });
+
             if (await db.Users.AnyAsync())
                 return Results.Json(new { message = "User already exists" }, statusCode: 403);
 
@@ -102,7 +107,8 @@ public static class AuthEndpoints
                     user.IsTwoFactorEnabled
                 }
             });
-        });
+        })
+        .RequireRateLimiting(AuthRateLimitPolicy.SensitiveAuthPolicy);
 
         publicGroup.MapPost("/login", async (LoginRequest request, AppDbContext db, HttpContext httpContext, IDataProtectionProvider dataProtection) =>
         {
@@ -133,7 +139,8 @@ public static class AuthEndpoints
                     user.IsTwoFactorEnabled
                 }
             });
-        });
+        })
+        .RequireRateLimiting(AuthRateLimitPolicy.SensitiveAuthPolicy);
 
         publicGroup.MapPost("/2fa/login", async (TwoFactorLoginRequest request, AppDbContext db, HttpContext httpContext, IDataProtectionProvider dataProtection) =>
         {
@@ -169,7 +176,8 @@ public static class AuthEndpoints
             }
 
             return Results.Json(new { message = "Invalid verification code" }, statusCode: 401);
-        });
+        })
+        .RequireRateLimiting(AuthRateLimitPolicy.SensitiveAuthPolicy);
 
         publicGroup.MapPost("/2fa/recovery-login", async (RecoveryCodeLoginRequest request, AppDbContext db, HttpContext httpContext, IDataProtectionProvider dataProtection) =>
         {
@@ -210,7 +218,8 @@ public static class AuthEndpoints
                     user.IsTwoFactorEnabled
                 }
             });
-        });
+        })
+        .RequireRateLimiting(AuthRateLimitPolicy.SensitiveAuthPolicy);
 
         protectedGroup.MapPost("/2fa/setup", async (AppDbContext db, HttpContext httpContext) =>
         {
@@ -304,8 +313,9 @@ public static class AuthEndpoints
             if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash))
                 return Results.BadRequest(new { message = "Current password is incorrect" });
 
-            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 6)
-                return Results.BadRequest(new { message = "New password must be at least 6 characters" });
+            var passwordError = PasswordPolicy.Validate(request.NewPassword);
+            if (passwordError is not null)
+                return Results.BadRequest(new { message = passwordError });
 
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
             user.TokenVersion++;
@@ -313,7 +323,8 @@ public static class AuthEndpoints
             await db.SaveChangesAsync();
 
             return Results.Ok(new { message = "Password updated successfully" });
-        });
+        })
+        .RequireRateLimiting(AuthRateLimitPolicy.SensitiveAuthPolicy);
 
         protectedGroup.MapPost("/logout-all", async (AppDbContext db, HttpContext httpContext) =>
         {

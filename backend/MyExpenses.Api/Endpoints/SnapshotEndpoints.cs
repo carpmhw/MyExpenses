@@ -212,8 +212,8 @@ public static class SnapshotEndpoints
     {
         ValidateDateRange(dateStart, dateEnd);
 
-        var p = page is > 0 ? page.Value : 1;
-        var ps = pageSize is > 0 ? pageSize.Value : 20;
+        var p = PaginationPolicy.NormalizePage(page);
+        var ps = PaginationPolicy.NormalizePageSize(pageSize);
         var query = ApplyDateRange(db.SnapshotBatches.AsQueryable(), dateStart, dateEnd);
         var total = await query.CountAsync();
         var items = await query

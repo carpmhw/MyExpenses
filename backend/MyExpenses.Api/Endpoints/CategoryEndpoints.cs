@@ -20,8 +20,8 @@ public static class CategoryEndpoints
                 return Results.Ok(await query.ToListAsync());
             }
 
-            int p = page ?? 1;
-            int ps = pageSize ?? 20;
+            var p = PaginationPolicy.NormalizePage(page);
+            var ps = PaginationPolicy.NormalizePageSize(pageSize);
             var items = await query.Skip((p - 1) * ps).Take(ps).ToListAsync();
             var total = await query.CountAsync();
             return Results.Ok(new { items, total, page = p, pageSize = ps });

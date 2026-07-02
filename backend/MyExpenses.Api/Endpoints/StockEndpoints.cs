@@ -120,8 +120,8 @@ public static class StockEndpoints
     /// <summary>Returns paginated stocks with filters and all-holding valuation totals calculated before pagination.</summary>
     public static async Task<StockListResponse> ListStocksAsync(int page, int pageSize, AppDbContext db, string? symbol = null, string? broker = null)
     {
-        if (page <= 0) page = 1;
-        if (pageSize <= 0) pageSize = 20;
+        page = PaginationPolicy.NormalizePage(page);
+        pageSize = PaginationPolicy.NormalizePageSize(pageSize);
 
         var query = db.Stocks.AsQueryable();
         var trimmedSymbol = symbol?.Trim();

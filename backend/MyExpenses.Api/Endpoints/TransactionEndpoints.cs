@@ -29,13 +29,14 @@ public static class TransactionEndpoints
 
             query = query.Include(t => t.Category).Include(t => t.PaymentMethod);
 
-            if (limit.HasValue)
+            var safeLimit = PaginationPolicy.NormalizeLimit(limit);
+            if (safeLimit.HasValue)
             {
-                return Results.Ok(await query.Take(limit.Value).ToListAsync());
+                return Results.Ok(await query.Take(safeLimit.Value).ToListAsync());
             }
 
-            int p = page ?? 1;
-            int ps = pageSize ?? 20;
+            var p = PaginationPolicy.NormalizePage(page);
+            var ps = PaginationPolicy.NormalizePageSize(pageSize);
             var items = await query.Skip((p - 1) * ps).Take(ps).ToListAsync();
             var total = await query.CountAsync();
             return Results.Ok(new { items, total, page = p, pageSize = ps });

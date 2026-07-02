@@ -86,6 +86,7 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod();
     });
 });
+builder.Services.AddRateLimiter(AuthRateLimitPolicy.Configure);
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -124,6 +125,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<ApiTokenAuthMiddleware>();
 app.UseMiddleware<SessionCookieMiddleware>();

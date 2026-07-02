@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -21,8 +22,8 @@ public static class WithdrawalEndpoints
                 query = query.Where(w => w.Date <= endDate.Value);
 
             var total = await query.CountAsync();
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 20;
+            page = PaginationPolicy.NormalizePage(page);
+            pageSize = PaginationPolicy.NormalizePageSize(pageSize);
 
             var items = await query
                 .OrderByDescending(w => w.Date)
