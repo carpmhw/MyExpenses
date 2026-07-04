@@ -136,7 +136,8 @@ public static class ReportEndpoints
                 TotalExpense = totalExpense,
                 TotalBankBalance = totalBankBalance
             });
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
     }
 
     /// <summary>Builds the net-worth report using estimated net sell value for stock assets.</summary>

@@ -52,8 +52,8 @@ public static class InstallmentEndpoints
                 query = query.Where(i => i.Status == statusFilter);
 
             var total = await query.CountAsync();
-            var p = page ?? 1;
-            var ps = pageSize ?? 20;
+            var p = PaginationPolicy.NormalizePage(page);
+            var ps = PaginationPolicy.NormalizePageSize(pageSize);
 
             var items = await query
                 .OrderByDescending(i => i.PurchaseDate)
@@ -80,6 +80,8 @@ public static class InstallmentEndpoints
         {
             if (installment.PurchaseDate == default)
                 return Results.BadRequest(new { error = "請選擇刷卡日期" });
+            if (installment.Periods <= 0)
+                return Results.BadRequest(new { error = "期數必須大於 0" });
 
             installment.CreatedAt = DateTime.UtcNow;
             installment.RemainingPeriods = installment.Periods;
@@ -135,6 +137,8 @@ public static class InstallmentEndpoints
 
             if (input.PurchaseDate == default)
                 return Results.BadRequest(new { error = "請選擇刷卡日期" });
+            if (input.Periods <= 0)
+                return Results.BadRequest(new { error = "期數必須大於 0" });
 
             var hasPaidPayments = installment.Payments.Any(p => p.IsPaid);
 

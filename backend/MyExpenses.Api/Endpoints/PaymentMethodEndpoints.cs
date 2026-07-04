@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -21,8 +22,8 @@ public static class PaymentMethodEndpoints
             }
 
             var total = await query.CountAsync();
-            var p = page ?? 1;
-            var ps = pageSize ?? 20;
+            var p = PaginationPolicy.NormalizePage(page);
+            var ps = PaginationPolicy.NormalizePageSize(pageSize);
 
             var items = await query
                 .Skip((p - 1) * ps)
@@ -30,10 +31,12 @@ public static class PaymentMethodEndpoints
                 .ToListAsync();
 
             return Results.Ok(new { items, total, page = p, pageSize = ps });
-        });
+        })
+        .RequireApiTokenScope(ApiTokenScopes.PaymentMethodsRead);
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
-            await db.PaymentMethods.FindAsync(id) is PaymentMethod p ? Results.Ok(p) : Results.NotFound());
+            await db.PaymentMethods.FindAsync(id) is PaymentMethod p ? Results.Ok(p) : Results.NotFound())
+            .RequireApiTokenScope(ApiTokenScopes.PaymentMethodsRead);
 
         group.MapPost("/", async (PaymentMethod pm, AppDbContext db) =>
         {

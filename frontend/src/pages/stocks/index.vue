@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted } from 'vue'
 import { api } from '../../api'
-import type { StockInstrumentType, StockListItem } from '../../types'
+import type { Stock, StockInstrumentType, StockListItem } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -27,6 +27,8 @@ const form = ref({ name: '', symbol: '', instrumentType: 'Stock' as StockInstrum
 const syncPrice = ref(true)
 const totalEstimatedNetSellValue = ref(0)
 const totalEstimatedGainLoss = ref(0)
+const symbolFilter = ref('')
+const brokerFilter = ref('')
 
 function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale' {
   if (!lastUpdate) return 'stale'
@@ -77,7 +79,12 @@ const stats = computed(() => {
 async function fetchStocks() {
   loading.value = true
   try {
-    const result = await api.stocks.list({ page: pagination.page.value, pageSize: pagination.pageSize.value })
+    const result = await api.stocks.list({
+      page: pagination.page.value,
+      pageSize: pagination.pageSize.value,
+      symbol: symbolFilter.value,
+      broker: brokerFilter.value,
+    })
     stocks.value = result.items
     pagination.total.value = result.total
     totalEstimatedNetSellValue.value = result.totalEstimatedNetSellValue
@@ -88,6 +95,28 @@ async function fetchStocks() {
 }
 
 watch(() => pagination.page.value, () => fetchStocks())
+
+watch([symbolFilter, brokerFilter], () => {
+  if (pagination.page.value !== 1) {
+    pagination.page.value = 1
+    return
+  }
+  fetchStocks()
+})
+
+// Builds the stock payload with normalized text fields before it is sent to the API.
+function buildStockPayload(): Omit<Stock, 'id'> {
+  return {
+    name: form.value.name.trim(),
+    symbol: form.value.symbol.trim(),
+    instrumentType: form.value.instrumentType,
+    shares: form.value.shares,
+    buyPrice: form.value.buyPrice,
+    currentPrice: form.value.currentPrice,
+    broker: form.value.broker.trim(),
+    lastPriceUpdate: form.value.lastPriceUpdate,
+  }
+}
 
 function openCreate() {
   editingItem.value = null
@@ -129,13 +158,14 @@ async function save() {
     }
 
     if (editingItem.value) {
+      const payload = buildStockPayload()
       await api.stocks.update(editingItem.value.id, {
-        ...form.value,
+        ...payload,
         lastPriceUpdate: syncPrice.value ? new Date().toISOString() : undefined,
       })
       toast.success('股票已更新')
     } else {
-      await api.stocks.create(form.value)
+      await api.stocks.create(buildStockPayload())
       toast.success('股票已建立')
     }
     modalOpen.value = false
@@ -204,7 +234,7 @@ onMounted(fetchStocks)
     <div class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-2xl font-bold text-text-primary">股票管理</h1>
-        <p class="text-xs text-text-secondary mt-1">所有持股記錄 · Stocks</p>
+        <p class="text-xs text-text-secondary mt-1">所有持股記錄 · Stocks · 每個交易日 23:00（台灣時間）自動更新股價</p>
       </div>
       <div class="flex items-center gap-2">
         <Button :loading="snapshotLoading" @click="takeSnapshot" title="紀錄所有銀行帳戶與股票的當前狀態">📷 拍照</Button>
@@ -249,6 +279,26 @@ onMounted(fetchStocks)
     </div>
 
     <Card>
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-sm font-medium text-text-primary">代號</span>
+          <input
+            v-model="symbolFilter"
+            type="text"
+            placeholder="輸入股票代號"
+            class="w-full sm:w-48 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary placeholder:text-text-tertiary"
+          />
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-sm font-medium text-text-primary">券商</span>
+          <input
+            v-model="brokerFilter"
+            type="text"
+            placeholder="輸入券商關鍵字"
+            class="w-full sm:w-56 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary placeholder:text-text-tertiary"
+          />
+        </div>
+      </div>
       <DataTable :columns="columns" :loading="loading" :items="stocks">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無股票資料</div>

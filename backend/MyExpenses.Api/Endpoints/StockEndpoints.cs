@@ -72,14 +72,15 @@ public static class StockEndpoints
             return Results.Ok(new { name = (string?)null });
         });
 
-        group.MapGet("/", async (int page, int pageSize, AppDbContext db) =>
-            Results.Ok(await ListStocksAsync(page, pageSize, db)));
+        group.MapGet("/", async (int page, int pageSize, string? symbol, string? broker, AppDbContext db) =>
+            Results.Ok(await ListStocksAsync(page, pageSize, db, symbol, broker)));
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
             await db.Stocks.FindAsync(id) is Stock s ? Results.Ok(s) : Results.NotFound());
 
         group.MapPost("/", async (Stock stock, AppDbContext db) =>
         {
+            NormalizeStockText(stock);
             db.Stocks.Add(stock);
             await db.SaveChangesAsync();
             return Results.Created($"/api/stocks/{stock.Id}", stock);
@@ -92,10 +93,12 @@ public static class StockEndpoints
 
             stock.Name = input.Name;
             stock.Symbol = input.Symbol;
+            stock.InstrumentType = input.InstrumentType;
             stock.Shares = input.Shares;
             stock.BuyPrice = input.BuyPrice;
             stock.CurrentPrice = input.CurrentPrice;
             stock.Broker = input.Broker;
+            NormalizeStockText(stock);
             if (input.LastPriceUpdate.HasValue)
                 stock.LastPriceUpdate = input.LastPriceUpdate;
 
@@ -114,13 +117,25 @@ public static class StockEndpoints
         });
     }
 
-    /// <summary>Returns paginated stocks with all-holding valuation totals calculated before pagination.</summary>
-    public static async Task<StockListResponse> ListStocksAsync(int page, int pageSize, AppDbContext db)
+    /// <summary>Returns paginated stocks with filters and all-holding valuation totals calculated before pagination.</summary>
+    public static async Task<StockListResponse> ListStocksAsync(int page, int pageSize, AppDbContext db, string? symbol = null, string? broker = null)
     {
-        if (page <= 0) page = 1;
-        if (pageSize <= 0) pageSize = 20;
+        page = PaginationPolicy.NormalizePage(page);
+        pageSize = PaginationPolicy.NormalizePageSize(pageSize);
 
         var query = db.Stocks.AsQueryable();
+        var trimmedSymbol = symbol?.Trim();
+        if (!string.IsNullOrEmpty(trimmedSymbol))
+        {
+            query = query.Where(s => s.Symbol.Contains(trimmedSymbol));
+        }
+
+        var trimmedBroker = broker?.Trim();
+        if (!string.IsNullOrEmpty(trimmedBroker))
+        {
+            query = query.Where(s => s.Broker != null && s.Broker.Contains(trimmedBroker));
+        }
+
         var total = await query.CountAsync();
         var allStocks = await query.OrderBy(s => s.Id).ToListAsync();
         var allItems = allStocks.Select(ToStockListItem).ToList();
@@ -158,6 +173,14 @@ public static class StockEndpoints
             valuation.SecuritiesTransactionTax,
             valuation.EstimatedNetSellValue,
             valuation.EstimatedGainLoss);
+    }
+
+    /// <summary>Trims stock text fields before persistence while preserving null broker values.</summary>
+    private static void NormalizeStockText(Stock stock)
+    {
+        stock.Name = (stock.Name ?? string.Empty).Trim();
+        stock.Symbol = (stock.Symbol ?? string.Empty).Trim();
+        stock.Broker = stock.Broker?.Trim();
     }
 
     /// <summary>Updates stored stock prices when refreshed TWSE cache entries match local symbols.</summary>

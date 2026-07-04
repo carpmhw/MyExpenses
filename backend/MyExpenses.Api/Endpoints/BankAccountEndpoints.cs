@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Endpoints;
 
@@ -77,8 +78,8 @@ public static class BankAccountEndpoints
 
         var total = await query.CountAsync();
         var totalBalance = await query.Select(a => (decimal?)a.Balance).SumAsync() ?? 0m;
-        var p = page ?? 1;
-        var ps = pageSize ?? 20;
+        var p = PaginationPolicy.NormalizePage(page);
+        var ps = PaginationPolicy.NormalizePageSize(pageSize);
 
         var items = await query
             .OrderByDescending(a => a.CreatedAt)

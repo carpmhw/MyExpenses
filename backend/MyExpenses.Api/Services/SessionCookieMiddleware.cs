@@ -17,7 +17,7 @@ public class SessionCookieMiddleware
 
     public async Task InvokeAsync(HttpContext context, IDataProtectionProvider dataProtection)
     {
-        if (context.User.FindFirst("tokenType")?.Value == "api")
+        if (ApiTokenAuthenticationFeature.IsAuthenticated(context))
         {
             await _next(context);
             return;

@@ -17,7 +17,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")
         ?? "Data Source=MyExpenses.db"));
 
-var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "change-this-to-a-secure-random-key-at-least-32-characters";
+var jwtSecret = JwtSecretProvider.GetJwtSecret(builder.Configuration, builder.Environment);
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
 var jwtAudience = builder.Configuration["Jwt:Audience"];
 
@@ -86,6 +86,7 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod();
     });
 });
+builder.Services.AddRateLimiter(AuthRateLimitPolicy.Configure);
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -124,9 +125,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<ApiTokenAuthMiddleware>();
 app.UseMiddleware<SessionCookieMiddleware>();
+app.UseMiddleware<ApiTokenScopeMiddleware>();
 app.UseAuthorization();
 
 app.MapCategoryEndpoints();
