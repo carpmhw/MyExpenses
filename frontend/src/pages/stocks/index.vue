@@ -11,6 +11,7 @@ import Input from '../../components/ui/Input.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { STOCK_INSTRUMENT_TYPE_OPTIONS, formatStockInstrumentType } from '../../utils/stock'
+import { syncStockPriceOnSave } from '../../utils/stockPriceSync'
 import { usePagination } from '../../composables/usePagination'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
@@ -146,24 +147,26 @@ async function save() {
 
   saving.value = true
   try {
-    if (syncPrice.value && editingItem.value && form.value.symbol?.trim()) {
-      try {
-        const result = await api.stocks.lookup(form.value.symbol.trim())
-        if (result.currentPrice != null) {
-          form.value.currentPrice = result.currentPrice
-        }
-      } catch {
-        // lookup failed, proceed with existing price
-      }
-    }
-
     if (editingItem.value) {
-      const payload = buildStockPayload()
-      await api.stocks.update(editingItem.value.id, {
-        ...payload,
-        lastPriceUpdate: syncPrice.value ? new Date().toISOString() : undefined,
-      })
-      toast.success('股票已更新')
+      const priceSyncResult = await syncStockPriceOnSave(
+        syncPrice.value,
+        form.value.symbol,
+        {
+          currentPrice: form.value.currentPrice,
+          lastPriceUpdate: form.value.lastPriceUpdate,
+        },
+        (symbol) => api.stocks.lookup(symbol),
+        () => new Date().toISOString(),
+      )
+      form.value.currentPrice = priceSyncResult.currentPrice
+      form.value.lastPriceUpdate = priceSyncResult.lastPriceUpdate
+
+      await api.stocks.update(editingItem.value.id, buildStockPayload())
+      if (priceSyncResult.status === 'failed') {
+        toast.error('股票已更新，但取得最新股價失敗')
+      } else {
+        toast.success('股票已更新')
+      }
     } else {
       await api.stocks.create(buildStockPayload())
       toast.success('股票已建立')
@@ -403,7 +406,7 @@ onMounted(fetchStocks)
         </div>
         <div v-if="editingItem" class="flex items-center gap-2">
           <input id="syncPrice" type="checkbox" v-model="syncPrice" class="w-4 h-4 rounded border-border-default text-primary-600 focus:ring-primary-500" />
-          <label for="syncPrice" class="text-sm text-text-secondary cursor-pointer">同步更新目前股價</label>
+           <label for="syncPrice" class="text-sm text-text-secondary cursor-pointer">儲存時取得最新股價</label>
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>

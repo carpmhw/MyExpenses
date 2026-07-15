@@ -17,7 +17,7 @@ public static class StockEndpoints
     {
         var group = app.MapGroup("/api/stocks");
 
-        group.MapGet("/lookup", async (string symbol, IHttpClientFactory httpFactory, AppDbContext db) =>
+        group.MapGet("/lookup", async (string symbol, IHttpClientFactory httpFactory) =>
         {
             if (string.IsNullOrWhiteSpace(symbol)) return Results.Ok(new { name = (string?)null });
 
@@ -52,8 +52,6 @@ public static class StockEndpoints
                                 _stockCache[code.Trim().ToUpperInvariant()] = (name, closingPrice);
                         }
                         _lastFetch = DateTime.UtcNow;
-
-                        await UpdateMatchingStocksFromCache(db);
                     }
                 }
                 catch
@@ -183,22 +181,6 @@ public static class StockEndpoints
         stock.Broker = stock.Broker?.Trim();
     }
 
-    /// <summary>Updates stored stock prices when refreshed TWSE cache entries match local symbols.</summary>
-    private static async Task UpdateMatchingStocksFromCache(AppDbContext db)
-    {
-        var stocks = await db.Stocks.ToListAsync();
-        var now = DateTime.UtcNow;
-        foreach (var stock in stocks)
-        {
-            var key = stock.Symbol.Trim().ToUpperInvariant();
-            if (_stockCache.TryGetValue(key, out var cached) && cached.CurrentPrice.HasValue)
-            {
-                stock.CurrentPrice = cached.CurrentPrice.Value;
-                stock.LastPriceUpdate = now;
-            }
-        }
-        await db.SaveChangesAsync();
-    }
 }
 
 public sealed record StockListResponse(

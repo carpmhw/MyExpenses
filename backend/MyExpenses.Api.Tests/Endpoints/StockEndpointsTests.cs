@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text;
+using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -168,13 +170,46 @@ public class StockEndpointsTests
         Assert.Equal(StockInstrumentType.BondEtf, stock.InstrumentType);
     }
 
+    /// <summary>Verifies lookup cache refresh does not update stored holding prices.</summary>
+    [Fact]
+    public async Task Lookup_DoesNotUpdateStoredStocksWhenRefreshingCache()
+    {
+        await using var db = await CreateDbContextAsync();
+        var lookupSymbol = $"9{Guid.NewGuid():N}";
+        db.Stocks.Add(new Stock
+        {
+            Name = "測試股票",
+            Symbol = lookupSymbol,
+            InstrumentType = StockInstrumentType.Stock,
+            Shares = 100m,
+            BuyPrice = 100m,
+            CurrentPrice = 105m,
+        });
+        await db.SaveChangesAsync();
+
+        await using var app = await CreateStockAppAsync(
+            (SqliteConnection)db.Database.GetDbConnection(),
+            new StubTwseHandler(lookupSymbol));
+
+        var response = await app.GetTestClient().GetAsync($"/api/stocks/lookup?symbol={Uri.EscapeDataString(lookupSymbol)}");
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        var stock = await db.Stocks.AsNoTracking().SingleAsync(s => s.Symbol == lookupSymbol);
+        Assert.Equal("測試股票", payload.GetProperty("name").GetString());
+        Assert.Equal(1100m, payload.GetProperty("currentPrice").GetDecimal());
+        Assert.Equal(105m, stock.CurrentPrice);
+        Assert.Null(stock.LastPriceUpdate);
+    }
+
     /// <summary>Creates a stock API test application backed by the supplied SQLite connection.</summary>
-    private static async Task<WebApplication> CreateStockAppAsync(SqliteConnection connection)
+    private static async Task<WebApplication> CreateStockAppAsync(SqliteConnection connection, HttpMessageHandler? handler = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
-        builder.Services.AddHttpClient();
+        var httpClientBuilder = builder.Services.AddHttpClient(string.Empty);
+        httpClientBuilder.ConfigurePrimaryHttpMessageHandler(() => handler ?? new HttpClientHandler());
         builder.Services.ConfigureHttpJsonOptions(options =>
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -182,6 +217,28 @@ public class StockEndpointsTests
         app.MapStockEndpoints();
         await app.StartAsync();
         return app;
+    }
+
+    /// <summary>Returns deterministic TWSE data for lookup endpoint tests.</summary>
+    private sealed class StubTwseHandler : HttpMessageHandler
+    {
+        private readonly string _symbol;
+
+        /// <summary>Initializes a handler that returns the requested test symbol.</summary>
+        public StubTwseHandler(string symbol)
+        {
+            _symbol = symbol;
+        }
+
+        /// <summary>Builds a successful response containing one stock closing price.</summary>
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var content = new StringContent(
+                $"[{{\"Code\":\"{_symbol}\",\"Name\":\"測試股票\",\"ClosingPrice\":\"1100\"}}]",
+                Encoding.UTF8,
+                "application/json");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        }
     }
 
     /// <summary>Creates JSON options that match API enum string serialization.</summary>
