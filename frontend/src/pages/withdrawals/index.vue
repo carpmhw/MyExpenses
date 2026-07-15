@@ -13,8 +13,11 @@ import Select from '../../components/ui/Select.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { usePagination } from '../../composables/usePagination'
 import { formatMoney } from '../../utils/format'
+import { addCalendarDays, getCurrentMonthRange } from '../../utils/timezone'
+import { useTimeZone } from '../../composables/useTimeZone'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
 
 const route = useRoute()
 const router = useRouter()
@@ -46,9 +49,7 @@ function validateDateRange() {
   const diffDays = Math.ceil((end.getTime() - start.getTime()) / 86400000)
   if (diffDays > 365) {
     toast.error('日期區間不可超過 1 年')
-    const maxEnd = new Date(start)
-    maxEnd.setDate(maxEnd.getDate() + 365)
-    endDate.value = maxEnd.toISOString().slice(0, 10)
+    endDate.value = addCalendarDays(startDate.value, 365)
   }
 }
 
@@ -56,7 +57,7 @@ const modalOpen = ref(false)
 const editingItem = ref<Withdrawal | null>(null)
 const form = ref({
   amount: 0,
-  date: new Date().toISOString().slice(0, 10),
+  date: timeZone.getToday(),
   bankAccountId: 0,
   description: '',
 })
@@ -93,13 +94,11 @@ const formErrors = computed(() => {
 })
 
 function getDefaultStartDate() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).start
 }
 
 function getDefaultEndDate() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()}`
+  return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).end
 }
 
 function syncQueryString() {
@@ -116,7 +115,7 @@ function openCreate() {
   editingItem.value = null
   form.value = {
     amount: 0,
-    date: new Date().toISOString().slice(0, 10),
+    date: timeZone.getToday(),
     bankAccountId: bankAccounts.value[0]?.id || 0,
     description: '',
   }

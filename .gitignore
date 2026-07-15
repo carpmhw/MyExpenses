@@ -431,6 +431,8 @@ FodyWeavers.xsd
 
 # OpenCode agent workspace (local tooling, do not commit)
 .opencode/
+openspec
+docs
 
 # OS files
 .DS_Store

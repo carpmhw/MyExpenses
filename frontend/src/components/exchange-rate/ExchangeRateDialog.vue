@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button.vue'
 import Icon from '@/components/ui/Icon.vue'
 import { useExchangeRates } from '@/composables/useExchangeRates'
 import { useToast } from '@/composables/useToast'
+import { useTimeZone } from '@/composables/useTimeZone'
 
 const props = defineProps<{
   open: boolean
@@ -18,6 +19,7 @@ const emit = defineEmits<{
 
 const { rates, updatedAt, loading, error, warning, fetchRates, convert, formatAmount, getCurrencyName, getCurrencySymbol } = useExchangeRates()
 const toast = useToast()
+const timeZone = useTimeZone()
 
 const amount = ref<number>(1)
 const fromCurrency = ref<string>('USD')
@@ -148,7 +150,7 @@ function refresh(): void {
               <Icon name="RefreshCw" :size="12" :class="loading ? 'animate-spin' : ''" />
               重新整理
             </button>
-            <span v-if="updatedAt">{{ new Date(updatedAt).toLocaleString('zh-TW') }}</span>
+            <span v-if="updatedAt">{{ timeZone.formatDateTime(updatedAt) }}</span>
           </div>
         </div>
       </div>

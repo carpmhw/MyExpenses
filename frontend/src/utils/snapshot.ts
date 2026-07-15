@@ -12,9 +12,9 @@ export interface CoercedSnapshotDateRange extends SnapshotDateRange {
 
 const MAX_SNAPSHOT_RANGE_YEARS = 5
 
-// Creates the snapshot page default range from one year before today through today.
-export function createDefaultSnapshotDateRange(today = new Date()): SnapshotDateRange {
-  const dateEnd = formatDateInput(today)
+// Creates the snapshot page default range from one year before the system-local today through today.
+export function createDefaultSnapshotDateRange(today = new Date(), timeZone = 'Asia/Taipei'): SnapshotDateRange {
+  const dateEnd = formatDateInput(today, timeZone)
 
   return {
     dateStart: subtractYearsFromDateInput(dateEnd, 1),
@@ -59,10 +59,19 @@ function subtractYearsFromDateInput(dateInput: string, years: number): string {
   const lastDayOfTargetMonth = new Date(targetYear, month, 0).getDate()
   const clampedDay = Math.min(day, lastDayOfTargetMonth)
 
-  return formatDateInput(new Date(targetYear, month - 1, clampedDay))
+  return `${targetYear}-${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`
 }
 
-// Formats a Date as YYYY-MM-DD for native date inputs and API query parameters.
-function formatDateInput(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+// Formats a Date as YYYY-MM-DD in the requested time zone for date inputs and API query parameters.
+function formatDateInput(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const year = parts.find(part => part.type === 'year')?.value ?? ''
+  const month = parts.find(part => part.type === 'month')?.value ?? ''
+  const day = parts.find(part => part.type === 'day')?.value ?? ''
+  return `${year}-${month}-${day}`
 }

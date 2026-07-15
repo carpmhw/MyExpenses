@@ -12,6 +12,7 @@ using Microsoft.Extensions.Hosting;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Endpoints;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Options;
 using MyExpenses.Api.Services;
 using Xunit;
 
@@ -99,6 +100,8 @@ public class EndpointInputValidationTests
         });
         builder.WebHost.UseTestServer();
         builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
+        builder.Services.Configure<TimeZoneOptions>(_ => { });
+        builder.Services.AddSingleton<TimeZoneService>();
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;

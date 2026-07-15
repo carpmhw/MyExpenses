@@ -9,7 +9,10 @@ public class StockPriceUpdateService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<StockPriceUpdateService> _logger;
-    private readonly TimeZoneService _timeZoneService;
+    private readonly TimeProvider _timeProvider;
+
+    private static readonly TimeZoneInfo MarketTimeZone =
+        TimeZoneInfo.FindSystemTimeZoneById("Asia/Taipei");
 
     /// <summary>
     /// 初始化股票價格更新服務
@@ -18,12 +21,12 @@ public class StockPriceUpdateService : BackgroundService
         IServiceScopeFactory scopeFactory,
         IHttpClientFactory httpFactory,
         ILogger<StockPriceUpdateService> logger,
-        TimeZoneService timeZoneService)
+        TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory;
         _httpFactory = httpFactory;
         _logger = logger;
-        _timeZoneService = timeZoneService;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -37,7 +40,8 @@ public class StockPriceUpdateService : BackgroundService
         {
             try
             {
-                var delay = CalculateDelayToNextUpdate();
+                var nowUtc = DateTime.SpecifyKind(_timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Utc);
+                var delay = CalculateDelayToNextUpdate(nowUtc);
                 _logger.LogInformation("Next stock price update scheduled in {Hours}h {Minutes}m",
                     delay.Hours, delay.Minutes);
 
@@ -61,20 +65,26 @@ public class StockPriceUpdateService : BackgroundService
     /// <summary>
     /// 計算距離下次台股開盤更新的延遲時間（跳過週末）
     /// </summary>
-    private TimeSpan CalculateDelayToNextUpdate()
+    public static TimeSpan CalculateDelayToNextUpdate(DateTime utcNow)
     {
-        var now = DateTime.UtcNow;
-        var next = now.Date.AddHours(15);
-        if (now >= next)
-            next = next.AddDays(1);
+        var normalizedNow = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
+        return CalculateNextUpdateUtc(normalizedNow) - normalizedNow;
+    }
 
-        var localNext = _timeZoneService.ConvertUtcToLocal(next);
+    /// <summary>Calculates the next 23:00 weekday update in the fixed Taiwan market time zone.</summary>
+    public static DateTime CalculateNextUpdateUtc(DateTime utcNow)
+    {
+        var normalizedNow = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(normalizedNow, MarketTimeZone);
+        var nextDate = localNow.Date;
+        if (localNow.TimeOfDay >= TimeSpan.FromHours(15))
+            nextDate = nextDate.AddDays(1);
 
-        while (localNext.DayOfWeek == DayOfWeek.Saturday || localNext.DayOfWeek == DayOfWeek.Sunday)
-            localNext = localNext.AddDays(1);
+        while (nextDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            nextDate = nextDate.AddDays(1);
 
-        var nextUtc = TimeZoneInfo.ConvertTimeToUtc(localNext, _timeZoneService.GetTimeZoneInfo());
-        return nextUtc - now;
+        var localNext = DateTime.SpecifyKind(nextDate.AddHours(23), DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(localNext, MarketTimeZone);
     }
 
     /// <summary>
@@ -95,7 +105,7 @@ public class StockPriceUpdateService : BackgroundService
         }
 
         var stocks = await db.Stocks.ToListAsync(ct);
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(_timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Utc);
         var updatedCount = 0;
 
         foreach (var stock in stocks)

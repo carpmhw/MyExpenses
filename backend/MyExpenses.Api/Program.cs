@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using MyExpenses.Api.Converters;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Endpoints;
 using MyExpenses.Api.Options;
@@ -92,10 +91,6 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
     options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
-#pragma warning disable ASP0000
-    var timeZoneService = builder.Services.BuildServiceProvider().GetRequiredService<TimeZoneService>();
-    options.SerializerOptions.Converters.Add(new UtcToLocalDateTimeConverter(timeZoneService));
-#pragma warning restore ASP0000
 });
 
 builder.Services.AddHttpClient();
@@ -112,10 +107,12 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
+    var timeZoneService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
+    await timeZoneService.InitializeAsync(db);
     await DbInitializer.SeedReferenceDataAsync(db);
     if (app.Environment.IsDevelopment())
     {
-        await DbInitializer.SeedSampleDataAsync(db);
+        await DbInitializer.SeedSampleDataAsync(db, timeZoneService);
     }
 }
 
@@ -145,5 +142,6 @@ app.MapReportEndpoints();
 app.MapAuthEndpoints();
 app.MapSnapshotEndpoints();
 app.MapExchangeRateEndpoints();
+app.MapSettingsEndpoints();
 
 app.Run();

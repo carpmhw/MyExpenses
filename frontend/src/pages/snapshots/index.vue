@@ -12,6 +12,8 @@ import Icon from '../../components/ui/Icon.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../../utils/snapshot'
 import { usePagination } from '../../composables/usePagination'
+import { useTimeZone } from '../../composables/useTimeZone'
+import { getSystemDateParts } from '../../utils/timezone'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -29,11 +31,12 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 const router = useRouter()
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
 
 const snapshots = ref<SnapshotBatch[]>([])
 const loading = ref(false)
 const pagination = usePagination(1, 15)
-const defaultSnapshotRange = createDefaultSnapshotDateRange()
+const defaultSnapshotRange = createDefaultSnapshotDateRange(new Date(), timeZone.timeZoneId.value)
 const dateStart = ref(defaultSnapshotRange.dateStart)
 const dateEnd = ref(defaultSnapshotRange.dateEnd)
 
@@ -70,8 +73,7 @@ const columns = [
 ]
 
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr)
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return timeZone.formatDateTime(dateStr)
 }
 
 const canCompare = computed(() => selectedIds.value.length === 2)
@@ -96,8 +98,8 @@ function goCompare() {
 
 const trendChartData = computed(() => ({
   labels: trendData.value.map(t => {
-    const d = new Date(t.date)
-    return `${d.getMonth() + 1}/${d.getDate()}`
+    const date = getSystemDateParts(t.date, timeZone.timeZoneId.value)
+    return `${date.month}/${date.day}`
   }),
   datasets: [
     {

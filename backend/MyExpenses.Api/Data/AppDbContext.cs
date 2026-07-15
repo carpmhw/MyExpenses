@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MyExpenses.Api.Models;
 
 namespace MyExpenses.Api.Data;
@@ -21,6 +22,7 @@ public class AppDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<AutoSnapshotConfig> AutoSnapshotConfigs => Set<AutoSnapshotConfig>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -212,5 +214,41 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Prefix).HasMaxLength(20);
             entity.Property(e => e.Scopes).HasColumnType("TEXT").HasMaxLength(2000);
         });
+
+        modelBuilder.Entity<SystemSetting>(entity =>
+        {
+            entity.ToTable("SystemSettings");
+            entity.Property(e => e.TimeZoneId).HasMaxLength(100).IsRequired();
+        });
+
+        ApplyUtcDateTimeConversions(modelBuilder);
+    }
+
+    /// <summary>Applies UTC persistence and UTC read semantics to every DateTime entity property.</summary>
+    private static void ApplyUtcDateTimeConversions(ModelBuilder modelBuilder)
+    {
+        var utcConverter = new ValueConverter<DateTime, DateTime>(
+            value => value.Kind == DateTimeKind.Local
+                ? value.ToUniversalTime()
+                : DateTime.SpecifyKind(value, DateTimeKind.Utc),
+            value => DateTime.SpecifyKind(value, DateTimeKind.Utc));
+        var nullableUtcConverter = new ValueConverter<DateTime?, DateTime?>(
+            value => value.HasValue
+                ? value.Value.Kind == DateTimeKind.Local
+                    ? value.Value.ToUniversalTime()
+                    : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+                : null,
+            value => value.HasValue ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc) : null);
+
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTime))
+                    property.SetValueConverter(utcConverter);
+                else if (property.ClrType == typeof(DateTime?))
+                    property.SetValueConverter(nullableUtcConverter);
+            }
+        }
     }
 }

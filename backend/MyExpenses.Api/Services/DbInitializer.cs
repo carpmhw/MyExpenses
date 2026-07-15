@@ -55,18 +55,19 @@ public static class DbInitializer
         }
     }
 
-    public static async Task SeedSampleDataAsync(AppDbContext db)
+    /// <summary>Seeds development sample data using the configured system-local calendar date.</summary>
+    public static async Task SeedSampleDataAsync(AppDbContext db, TimeZoneService timeZoneService)
     {
         var categories = await db.Categories.ToListAsync();
         var paymentMethods = await db.PaymentMethods.ToListAsync();
         var pmByName = paymentMethods.ToDictionary(p => p.Name);
         var rng = Random.Shared;
-        var today = DateTime.Today;
+        var today = timeZoneService.GetLocalDate();
         var transactions = new List<Transaction>();
 
         for (var month = -5; month <= 0; month++)
         {
-            var monthStart = new DateTime(today.Year, today.Month, 1).AddMonths(month);
+            var monthStart = new DateOnly(today.Year, today.Month, 1).AddMonths(month);
             var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
 
             var incomeCats = categories.Where(c => c.Type == CategoryType.Income).ToList();
@@ -76,7 +77,7 @@ public static class DbInitializer
             {
                 Type = TransactionType.Income,
                 Amount = 52000 + rng.Next(-3000, 3000),
-                Date = DateOnly.FromDateTime(monthStart.AddDays(5)),
+                Date = monthStart.AddDays(5),
                 CategoryId = incomeCats[0].Id,
                 Description = "月薪",
                 PaymentMethodId = pmByName["銀行轉帳"].Id,
@@ -88,7 +89,7 @@ public static class DbInitializer
                 {
                     Type = TransactionType.Income,
                     Amount = 5000 + rng.Next(-1000, 2000),
-                    Date = DateOnly.FromDateTime(monthStart.AddDays(15)),
+                    Date = monthStart.AddDays(15),
                     CategoryId = incomeCats[1].Id,
                     Description = "接案收入",
                     PaymentMethodId = pmByName["銀行轉帳"].Id,
@@ -114,7 +115,7 @@ public static class DbInitializer
                         "通訊" => rng.Next(300, 1500),
                         _ => rng.Next(100, 1000),
                     },
-                    Date = DateOnly.FromDateTime(monthStart.AddDays(day - 1)),
+                    Date = monthStart.AddDays(day - 1),
                     CategoryId = cat.Id,
                     Description = cat.Name switch
                     {
