@@ -6,17 +6,18 @@ import type { SnapshotCompareResult } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import { formatMoney } from '../../utils/format'
+import { useTimeZone } from '../../composables/useTimeZone'
 
 const route = useRoute()
 const router = useRouter()
+const timeZone = useTimeZone()
 
 const result = ref<SnapshotCompareResult | null>(null)
 const loading = ref(true)
 const error = ref('')
 
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr)
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return timeZone.formatDateTime(dateStr)
 }
 
 onMounted(async () => {

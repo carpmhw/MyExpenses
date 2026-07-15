@@ -6,6 +6,8 @@ import Card from '../../components/ui/Card.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
+import { addCalendarDays, getCurrentYearRange, getSystemDateParts } from '../../utils/timezone'
+import { useTimeZone } from '../../composables/useTimeZone'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -16,14 +18,13 @@ import {
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler)
 
 const toast = inject<{ error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
 
 function getDefaultStartDate(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-01-01`
+  return getCurrentYearRange(new Date(), timeZone.timeZoneId.value).start
 }
 function getDefaultEndDate(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-12-31`
+  return getCurrentYearRange(new Date(), timeZone.timeZoneId.value).end
 }
 
 const activeTab = ref<'trend' | 'category' | 'networth' | 'forecast'>('trend')
@@ -52,9 +53,7 @@ function validateDateRange() {
   const diffDays = Math.ceil((end.getTime() - start.getTime()) / 86400000)
   if (diffDays > 365) {
     toast.error('日期區間不可超過 1 年')
-    const maxEnd = new Date(start)
-    maxEnd.setDate(maxEnd.getDate() + 365)
-    endDate.value = maxEnd.toISOString().slice(0, 10)
+    endDate.value = addCalendarDays(startDate.value, 365)
   }
 }
 
@@ -220,9 +219,9 @@ const forecastChartOptions = computed(() => ({
 
 const netWorthTrendLabels = computed(() => {
   const labels: string[] = []
+  const current = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
   for (let i = 5; i >= 0; i--) {
-    const d = new Date()
-    d.setMonth(d.getMonth() - i)
+    const d = new Date(current.year, current.month - 1 - i, 1)
     labels.push(`${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
   return labels

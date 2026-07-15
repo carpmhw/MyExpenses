@@ -292,6 +292,10 @@ export interface User {
   isTwoFactorEnabled: boolean
 }
 
+export interface SystemTimeZoneSettings {
+  timeZoneId: string
+}
+
 export interface ApiToken {
   id: number
   name: string

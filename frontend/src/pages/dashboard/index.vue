@@ -5,12 +5,16 @@ import { api } from '../../api'
 import type { Withdrawal, Transaction, Installment } from '../../types'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
+import { formatDateOnly, getSystemDateParts } from '../../utils/timezone'
+import { useTimeZone } from '../../composables/useTimeZone'
 
 const router = useRouter()
 const toast = inject<{ error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
+const initialSystemDate = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
 
-const year = ref(new Date().getFullYear())
-const month = ref(new Date().getMonth() + 1)
+const year = ref(initialSystemDate.year)
+const month = ref(initialSystemDate.month)
 
 function getMonthStart(y: number, m: number): string {
   return `${y}-${String(m).padStart(2, '0')}-01`
@@ -39,11 +43,13 @@ function goNext() {
   else month.value++
 }
 function goCurrent() {
-  year.value = new Date().getFullYear()
-  month.value = new Date().getMonth() + 1
+  const current = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
+  year.value = current.year
+  month.value = current.month
 }
 const isCurrentMonth = computed(() =>
-  year.value === new Date().getFullYear() && month.value === new Date().getMonth() + 1
+  year.value === getSystemDateParts(new Date(), timeZone.timeZoneId.value).year
+  && month.value === getSystemDateParts(new Date(), timeZone.timeZoneId.value).month
 )
 
 const loading = ref(true)
@@ -129,10 +135,13 @@ function progressLabel(i: Installment): string {
 }
 
 function formatDateMMDD(d: string): string {
-  const datePart = d.split('T')[0]
-  const parts = datePart.split('-')
-  if (parts.length === 3) return `${parts[1]}/${parts[2]}`
-  return d
+  const formatted = formatDateOnly(d)
+  return formatted.includes('/') ? formatted.slice(5) : d
+}
+
+// Formats an event timestamp as month/day in the configured system time zone.
+function formatEventDateMMDD(timestamp: string): string {
+  return timeZone.formatDateTime(timestamp).slice(5)
 }
 </script>
 
@@ -388,7 +397,7 @@ function formatDateMMDD(d: string): string {
             class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             @click="router.push('/installments')"
           >
-            <span class="text-xs text-text-secondary w-10">{{ formatDateMMDD(i.transaction?.date ?? i.createdAt) }}</span>
+            <span class="text-xs text-text-secondary w-10">{{ i.transaction?.date ? formatDateMMDD(i.transaction.date) : formatEventDateMMDD(i.createdAt) }}</span>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-text-primary truncate">{{ i.description || '—' }}</p>
             </div>

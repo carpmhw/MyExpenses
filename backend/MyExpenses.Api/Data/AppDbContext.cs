@@ -1,10 +1,72 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MyExpenses.Api.Models;
 
 namespace MyExpenses.Api.Data;
 
 public class AppDbContext : DbContext
 {
+    private static readonly IReadOnlyDictionary<Type, IReadOnlySet<string>> PersistedStringProperties =
+        new Dictionary<Type, IReadOnlySet<string>>
+        {
+            [typeof(Category)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(Category.Name),
+                nameof(Category.Icon),
+                nameof(Category.Color),
+            },
+            [typeof(Transaction)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(Transaction.Description),
+                nameof(Transaction.Notes),
+            },
+            [typeof(Installment)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(Installment.Description),
+            },
+            [typeof(CreditCard)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(CreditCard.BankName),
+                nameof(CreditCard.LastFourDigits),
+                nameof(CreditCard.CardNetwork),
+                nameof(CreditCard.Notes),
+            },
+            [typeof(BankAccount)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(BankAccount.BankName),
+                nameof(BankAccount.AccountNumber),
+                nameof(BankAccount.AccountType),
+            },
+            [typeof(Stock)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(Stock.Name),
+                nameof(Stock.Symbol),
+                nameof(Stock.Broker),
+            },
+            [typeof(Withdrawal)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(Withdrawal.Description),
+            },
+            [typeof(PaymentMethod)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(PaymentMethod.Name),
+                nameof(PaymentMethod.Icon),
+                nameof(PaymentMethod.Color),
+            },
+            [typeof(User)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(User.DisplayName),
+            },
+            [typeof(ApiToken)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(ApiToken.Name),
+            },
+            [typeof(SystemSetting)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(SystemSetting.TimeZoneId),
+            },
+        };
+
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     public DbSet<Category> Categories => Set<Category>();
@@ -21,6 +83,21 @@ public class AppDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<AutoSnapshotConfig> AutoSnapshotConfigs => Set<AutoSnapshotConfig>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+
+    /// <summary>Normalizes allowlisted tracked strings before synchronously saving changes.</summary>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        NormalizeTrackedStrings();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    /// <summary>Normalizes allowlisted tracked strings before asynchronously saving changes.</summary>
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        NormalizeTrackedStrings();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -212,5 +289,75 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Prefix).HasMaxLength(20);
             entity.Property(e => e.Scopes).HasColumnType("TEXT").HasMaxLength(2000);
         });
+
+        modelBuilder.Entity<SystemSetting>(entity =>
+        {
+            entity.ToTable("SystemSettings");
+            entity.Property(e => e.TimeZoneId).HasMaxLength(100).IsRequired();
+        });
+
+        ApplyUtcDateTimeConversions(modelBuilder);
+    }
+
+    /// <summary>Applies UTC persistence and UTC read semantics to every DateTime entity property.</summary>
+    private static void ApplyUtcDateTimeConversions(ModelBuilder modelBuilder)
+    {
+        var utcConverter = new ValueConverter<DateTime, DateTime>(
+            value => value.Kind == DateTimeKind.Local
+                ? value.ToUniversalTime()
+                : DateTime.SpecifyKind(value, DateTimeKind.Utc),
+            value => DateTime.SpecifyKind(value, DateTimeKind.Utc));
+        var nullableUtcConverter = new ValueConverter<DateTime?, DateTime?>(
+            value => value.HasValue
+                ? value.Value.Kind == DateTimeKind.Local
+                    ? value.Value.ToUniversalTime()
+                    : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+                : null,
+            value => value.HasValue ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc) : null);
+
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTime))
+                    property.SetValueConverter(utcConverter);
+                else if (property.ClrType == typeof(DateTime?))
+                    property.SetValueConverter(nullableUtcConverter);
+            }
+        }
+    }
+
+    /// <summary>Trims only allowlisted added or modified string properties before persistence.</summary>
+    private void NormalizeTrackedStrings()
+    {
+        ChangeTracker.DetectChanges();
+
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified) ||
+                !PersistedStringProperties.TryGetValue(entry.Metadata.ClrType, out var propertyNames))
+            {
+                continue;
+            }
+
+            foreach (var propertyName in propertyNames)
+            {
+                var property = entry.Property(propertyName);
+                if (entry.State == EntityState.Modified && !property.IsModified)
+                {
+                    continue;
+                }
+
+                if (property.CurrentValue is not string value)
+                {
+                    continue;
+                }
+
+                var trimmedValue = value.Trim();
+                property.CurrentValue = trimmedValue.Length == 0 && property.Metadata.IsNullable
+                    ? null
+                    : trimmedValue;
+            }
+        }
     }
 }

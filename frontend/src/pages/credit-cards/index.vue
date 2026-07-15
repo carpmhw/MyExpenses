@@ -13,8 +13,10 @@ import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
 import { CARD_NETWORK_OPTIONS, formatOptionalCreditCardText, normalizeOptionalCreditCardField } from '../../utils/creditCard'
 import { usePagination } from '../../composables/usePagination'
+import { useTimeZone } from '../../composables/useTimeZone'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
 
 const cards = ref<CreditCard[]>([])
 const loading = ref(false)
@@ -136,7 +138,7 @@ async function doDelete() {
 
 function formatDate(dateStr: string | undefined | null) {
   if (!dateStr) return '-'
-  return dateStr.slice(0, 10).replace(/-/g, '/')
+  return timeZone.formatDateTime(dateStr).slice(0, 10)
 }
 
 function formatCreditLimit(amount: number) {

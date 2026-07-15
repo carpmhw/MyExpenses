@@ -11,6 +11,6 @@ public static class InstallmentPaymentMarker
             throw new ArgumentException("請選擇實際繳款日");
 
         payment.IsPaid = !payment.IsPaid;
-        payment.PaidDate = payment.IsPaid ? paidDate!.Value.ToDateTime(TimeOnly.MinValue) : null;
+        payment.PaidDate = payment.IsPaid ? paidDate : null;
     }
 }

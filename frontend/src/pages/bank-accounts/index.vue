@@ -12,8 +12,10 @@ import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
 import { createLatestRequestGuard } from '../../utils/latestRequest'
 import { usePagination } from '../../composables/usePagination'
+import { useTimeZone } from '../../composables/useTimeZone'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
 
 const accounts = ref<BankAccount[]>([])
 const totalBalance = ref(0)
@@ -42,8 +44,7 @@ const columns = [
 ]
 
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr)
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+  return timeZone.formatDateTime(dateStr).slice(0, 10)
 }
 
 const formErrors = computed(() => {

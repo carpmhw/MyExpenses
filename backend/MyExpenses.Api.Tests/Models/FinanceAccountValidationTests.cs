@@ -56,24 +56,6 @@ public class FinanceAccountValidationTests
         Assert.Contains(validationResults, r => r.ErrorMessage == "備註最多 200 字元");
     }
 
-    /// <summary>Verifies blank optional credit card metadata is normalized to null.</summary>
-    [Fact]
-    public void CreditCard_NormalizesBlankOptionalMetadataToNull()
-    {
-        var card = new CreditCard
-        {
-            BankName = "測試銀行",
-            LastFourDigits = "1234",
-            CardNetwork = "   ",
-            Notes = "  ",
-        };
-
-        card.NormalizeOptionalMetadata();
-
-        Assert.Null(card.CardNetwork);
-        Assert.Null(card.Notes);
-    }
-
     /// <summary>Verifies bank account suffixes must be exactly five digits.</summary>
     [Theory]
     [InlineData("")]

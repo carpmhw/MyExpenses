@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, inject, onMounted, nextTick } from 'vue'
+import { ref, computed, inject, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api'
 import type { ApiToken } from '../../types'
 import { useAuth } from '../../composables/useAuth'
+import { useTimeZone } from '../../composables/useTimeZone'
 import { copyTextToClipboard } from '../../utils/clipboard'
 import QRCode from 'qrcode'
 
 const router = useRouter()
 const auth = useAuth()
+const timeZone = useTimeZone()
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 
 const displayName = ref(auth.user.value?.displayName || '')
@@ -17,6 +19,20 @@ const newPassword = ref('')
 const confirmNewPassword = ref('')
 const saving = ref(false)
 const changingPassword = ref(false)
+const selectedTimeZone = ref(timeZone.timeZoneId.value)
+const savingTimeZone = ref(false)
+
+const timeZoneOptions = [
+  { value: 'Asia/Taipei', label: 'Asia/Taipei（台北）' },
+  { value: 'Asia/Tokyo', label: 'Asia/Tokyo（東京）' },
+  { value: 'Asia/Shanghai', label: 'Asia/Shanghai（上海）' },
+  { value: 'Asia/Singapore', label: 'Asia/Singapore（新加坡）' },
+  { value: 'Australia/Sydney', label: 'Australia/Sydney（雪梨）' },
+  { value: 'Europe/London', label: 'Europe/London（倫敦）' },
+  { value: 'America/Los_Angeles', label: 'America/Los_Angeles（洛杉磯）' },
+  { value: 'America/New_York', label: 'America/New_York（紐約）' },
+  { value: 'UTC', label: 'UTC' },
+]
 
 const twoFactorEnabled = ref(auth.user.value?.isTwoFactorEnabled || false)
 const setupMode = ref(false)
@@ -60,8 +76,7 @@ const newTokenScopes = ref<string[]>([...mcpDefaultScopes])
 const activeTokens = computed(() => tokens.value.filter(t => !t.isRevoked))
 
 function formatDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return timeZone.formatDateTime(dateStr).replaceAll('/', '-')
 }
 
 function resetNewTokenScopes() {
@@ -142,6 +157,20 @@ async function saveProfile() {
     toast.error(e.message || '更新失敗')
   } finally {
     saving.value = false
+  }
+}
+
+// Persists the selected system time zone and updates all future date calculations.
+async function saveTimeZone() {
+  savingTimeZone.value = true
+  try {
+    const updated = await api.settings.updateTimeZone(selectedTimeZone.value)
+    timeZone.setTimeZone(updated.timeZoneId)
+    toast.success('系統時區已更新')
+  } catch (e: any) {
+    toast.error(e.message || '系統時區更新失敗')
+  } finally {
+    savingTimeZone.value = false
   }
 }
 
@@ -257,6 +286,10 @@ onMounted(() => {
   twoFactorEnabled.value = auth.user.value?.isTwoFactorEnabled || false
   fetchTokens()
 })
+
+watch(() => timeZone.timeZoneId.value, value => {
+  selectedTimeZone.value = value
+})
 </script>
 
 <template>
@@ -282,6 +315,27 @@ onMounted(() => {
           </button>
         </div>
       </div>
+    </section>
+
+    <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+      <div>
+        <h2 class="text-lg font-semibold text-text-primary">系統時區</h2>
+        <p class="text-sm text-text-secondary mt-1">日期預設、報表區間、時間顯示與自動快照排程都會使用此時區。</p>
+      </div>
+
+      <div class="flex gap-2">
+        <select v-model="selectedTimeZone"
+          class="flex-1 px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none">
+          <option v-for="option in timeZoneOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+        <button @click="saveTimeZone" :disabled="savingTimeZone || selectedTimeZone === timeZone.timeZoneId.value"
+          class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-white rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap">
+          {{ savingTimeZone ? '儲存中...' : '儲存' }}
+        </button>
+      </div>
+      <p class="text-xs text-text-secondary">目前設定：{{ timeZone.timeZoneId.value }}</p>
     </section>
 
     <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">

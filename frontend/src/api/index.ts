@@ -4,6 +4,7 @@ import type {
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary,
   SnapshotBatch, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
   AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
+  SystemTimeZoneSettings,
 } from '../types'
 
 const BASE = '/api'
@@ -285,6 +286,14 @@ export const api = {
       request<{ recoveryCodes: string[] }>('/auth/2fa/recovery-codes'),
     logoutAll: () =>
       request<{ message: string }>('/auth/logout-all', { method: 'POST' }),
+  },
+  settings: {
+    getTimeZone: () => request<SystemTimeZoneSettings>('/settings/timezone'),
+    updateTimeZone: (timeZoneId: string) =>
+      request<SystemTimeZoneSettings>('/settings/timezone', {
+        method: 'PUT',
+        body: JSON.stringify({ timeZoneId }),
+      }),
   },
 
   snapshots: {

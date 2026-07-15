@@ -12,8 +12,11 @@ import Select from '../../components/ui/Select.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
 import { usePagination } from '../../composables/usePagination'
+import { useTimeZone } from '../../composables/useTimeZone'
+import { addCalendarDays, formatDateOnly, getCurrentMonthRange, isDateOnlyBefore } from '../../utils/timezone'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
 
 const installments = ref<Installment[]>([])
 const creditCards = ref<CreditCard[]>([])
@@ -26,12 +29,10 @@ const filterCardId = ref<number | ''>('')
 const filterStatus = ref<string>('')
 
 function getDefaultStartDate(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).start
 }
 function getDefaultEndDate(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()}`
+  return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).end
 }
 
 const startDate = ref(getDefaultStartDate())
@@ -54,9 +55,7 @@ function validateDateRange() {
   const diffDays = Math.ceil((end.getTime() - start.getTime()) / 86400000)
   if (diffDays > 365) {
     toast.error('日期區間不可超過 1 年')
-    const maxEnd = new Date(start)
-    maxEnd.setDate(maxEnd.getDate() + 365)
-    endDate.value = maxEnd.toISOString().slice(0, 10)
+    endDate.value = addCalendarDays(startDate.value, 365)
   }
 }
 
@@ -68,7 +67,7 @@ const form = ref({
   totalAmount: 0,
   periods: 3,
   perPeriod: 0,
-  purchaseDate: new Date().toISOString().slice(0, 10),
+  purchaseDate: timeZone.getToday(),
   description: '',
 })
 
@@ -81,7 +80,7 @@ const deletingId = ref<number | null>(null)
 const paymentConfirmOpen = ref(false)
 const payingPaymentId = ref<number | null>(null)
 const markingAsPaid = ref(true)
-const paidDate = ref(new Date().toISOString().slice(0, 10))
+const paidDate = ref(timeZone.getToday())
 
 const columns = [
   { key: 'seq', label: '序號' },
@@ -106,16 +105,13 @@ const cardOptions = computed(() =>
 const stats = computed(() => {
   const total = installments.value.length
   const active = installments.value.filter(i => i.status === 'Active').length
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth()
+  const currentMonth = getCurrentMonthRange(new Date(), timeZone.timeZoneId.value)
   let monthlyDue = 0
   for (const inst of installments.value) {
     if (inst.status !== 'Active') continue
     for (const p of inst.payments || []) {
       if (p.isPaid || !p.dueDate) continue
-      const due = new Date(p.dueDate)
-      if (due.getFullYear() === currentYear && due.getMonth() === currentMonth) {
+      if (p.dueDate >= currentMonth.start && p.dueDate <= currentMonth.end) {
         monthlyDue += p.amount
       }
     }
@@ -189,7 +185,7 @@ function openCreate() {
     totalAmount: 0,
     periods: 3,
     perPeriod: 0,
-    purchaseDate: new Date().toISOString().slice(0, 10),
+    purchaseDate: timeZone.getToday(),
     description: '',
   }
   modalOpen.value = true
@@ -203,7 +199,7 @@ function openEdit(item: Installment) {
     totalAmount: item.totalAmount,
     periods: item.periods,
     perPeriod: item.perPeriod,
-    purchaseDate: item.purchaseDate?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+    purchaseDate: item.purchaseDate?.slice(0, 10) || timeZone.getToday(),
     description: item.description || '',
   }
   modalOpen.value = true
@@ -260,7 +256,7 @@ function openSchedule(item: Installment) {
 function confirmMarkPayment(paymentId: number, isPaid: boolean) {
   payingPaymentId.value = paymentId
   markingAsPaid.value = !isPaid
-  paidDate.value = new Date().toISOString().slice(0, 10)
+  paidDate.value = timeZone.getToday()
   paymentConfirmOpen.value = true
 }
 
@@ -299,7 +295,7 @@ function getCardDisplay(inst: Installment): string {
 
 function formatDate(dateStr: string | undefined | null) {
   if (!dateStr) return '-'
-  return dateStr.slice(0, 10).replace(/-/g, '/')
+  return formatDateOnly(dateStr)
 }
 
 function progressPercent(inst: Installment): number {
@@ -385,7 +381,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
               <td class="py-2 pr-2 text-text-primary">{{ bill.card?.bankName }} ({{ bill.card?.lastFourDigits }})</td>
               <td class="py-2 pr-2 text-text-primary">{{ bill.period }}</td>
               <td class="py-2 pr-2 text-right text-text-primary font-medium">{{ formatMoney(bill.totalAmount) }}</td>
-              <td class="py-2 pr-2" :class="new Date(bill.dueDate) < new Date() ? 'text-red-500 font-medium' : 'text-text-primary'">
+              <td class="py-2 pr-2" :class="isDateOnlyBefore(bill.dueDate, timeZone.getToday()) ? 'text-red-500 font-medium' : 'text-text-primary'">
                 {{ formatDate(bill.dueDate) }}
               </td>
             </tr>

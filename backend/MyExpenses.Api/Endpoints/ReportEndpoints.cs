@@ -11,10 +11,11 @@ public static class ReportEndpoints
     {
         var group = app.MapGroup("/api/reports");
 
-        group.MapGet("/income-expense-trend", async (DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db) =>
+        group.MapGet("/income-expense-trend", async (DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db, TimeZoneService timeZoneService) =>
         {
-            var start = dateStart ?? new DateOnly(DateTime.UtcNow.Year, 1, 1);
-            var end = dateEnd ?? new DateOnly(DateTime.UtcNow.Year, 12, 31);
+            var localNow = timeZoneService.GetLocalNow();
+            var start = dateStart ?? new DateOnly(localNow.Year, 1, 1);
+            var end = dateEnd ?? new DateOnly(localNow.Year, 12, 31);
 
             var data = await db.Transactions
                 .Where(t => t.Date >= start && t.Date <= end)
@@ -39,9 +40,10 @@ public static class ReportEndpoints
             return Results.Ok(result);
         });
 
-        group.MapGet("/category-distribution", async (DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db) =>
+        group.MapGet("/category-distribution", async (DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db, TimeZoneService timeZoneService) =>
         {
-            var start = dateStart ?? new DateOnly(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+            var localNow = timeZoneService.GetLocalNow();
+            var start = dateStart ?? new DateOnly(localNow.Year, localNow.Month, 1);
             var end = dateEnd ?? start.AddMonths(1).AddDays(-1);
 
             var totalExpense = await db.Transactions
@@ -72,10 +74,10 @@ public static class ReportEndpoints
         group.MapGet("/net-worth", async (AppDbContext db) =>
             Results.Ok(await GetNetWorthAsync(db)));
 
-        group.MapGet("/installment-forecast", async (int? months, AppDbContext db) =>
+        group.MapGet("/installment-forecast", async (int? months, AppDbContext db, TimeZoneService timeZoneService) =>
         {
             var forecastMonths = months ?? 6;
-            var today = DateTime.UtcNow.Date;
+            var today = timeZoneService.GetLocalDate();
 
             var unpaidPayments = await db.InstallmentPayments
                 .Include(p => p.Installment).ThenInclude(i => i!.Card)
@@ -85,10 +87,8 @@ public static class ReportEndpoints
             var forecast = new List<object>();
             for (var i = 0; i < forecastMonths; i++)
             {
-                var monthStart = new DateTime(today.Year, today.Month, 1).AddMonths(i);
-                var monthEnd = monthStart.AddMonths(1).AddDays(-1);
-                var monthStartDate = DateOnly.FromDateTime(monthStart);
-                var monthEndDate = DateOnly.FromDateTime(monthEnd);
+                var monthStartDate = new DateOnly(today.Year, today.Month, 1).AddMonths(i);
+                var monthEndDate = monthStartDate.AddMonths(1).AddDays(-1);
 
                 var monthPayments = unpaidPayments
                     .Where(p => p.DueDate!.Value >= monthStartDate && p.DueDate.Value <= monthEndDate)
@@ -96,7 +96,7 @@ public static class ReportEndpoints
 
                 forecast.Add(new
                 {
-                    Month = $"{monthStart.Year:D4}/{monthStart.Month:D2}",
+                    Month = $"{monthStartDate.Year:D4}/{monthStartDate.Month:D2}",
                     TotalAmount = monthPayments.Sum(p => p.Amount),
                     Payments = monthPayments.Select(p => new
                     {
@@ -112,9 +112,9 @@ public static class ReportEndpoints
             return Results.Ok(forecast);
         });
 
-        group.MapGet("/monthly-summary", async (int? year, int? month, AppDbContext db) =>
+        group.MapGet("/monthly-summary", async (int? year, int? month, AppDbContext db, TimeZoneService timeZoneService) =>
         {
-            var now = DateTime.UtcNow;
+            var now = timeZoneService.GetLocalNow();
             var y = year ?? now.Year;
             var m = month ?? now.Month;
             var start = new DateOnly(y, m, 1);

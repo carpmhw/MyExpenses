@@ -20,11 +20,11 @@ public static class SnapshotEndpoints
             return Results.Created($"/api/snapshots/{snapshot.Id}", snapshot);
         });
 
-        group.MapGet("/", async (int? page, int? pageSize, DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db) =>
+        group.MapGet("/", async (int? page, int? pageSize, DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db, TimeZoneService timeZoneService) =>
         {
             try
             {
-                return Results.Ok(await ListSnapshotsAsync(page, pageSize, dateStart, dateEnd, db));
+                return Results.Ok(await ListSnapshotsAsync(page, pageSize, dateStart, dateEnd, db, timeZoneService));
             }
             catch (ArgumentException ex)
             {
@@ -159,11 +159,11 @@ public static class SnapshotEndpoints
             });
         });
 
-        group.MapGet("/trend", async (DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db) =>
+        group.MapGet("/trend", async (DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db, TimeZoneService timeZoneService) =>
         {
             try
             {
-                return Results.Ok(await ListSnapshotTrendAsync(dateStart, dateEnd, db));
+                return Results.Ok(await ListSnapshotTrendAsync(dateStart, dateEnd, db, timeZoneService));
             }
             catch (ArgumentException ex)
             {
@@ -208,13 +208,19 @@ public static class SnapshotEndpoints
     }
 
     /// <summary>Returns paginated snapshot history filtered by an optional inclusive date range.</summary>
-    public static async Task<SnapshotListResponse> ListSnapshotsAsync(int? page, int? pageSize, DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db)
+    public static async Task<SnapshotListResponse> ListSnapshotsAsync(
+        int? page,
+        int? pageSize,
+        DateOnly? dateStart,
+        DateOnly? dateEnd,
+        AppDbContext db,
+        TimeZoneService? timeZoneService = null)
     {
         ValidateDateRange(dateStart, dateEnd);
 
         var p = PaginationPolicy.NormalizePage(page);
         var ps = PaginationPolicy.NormalizePageSize(pageSize);
-        var query = ApplyDateRange(db.SnapshotBatches.AsQueryable(), dateStart, dateEnd);
+        var query = ApplyDateRange(db.SnapshotBatches.AsQueryable(), dateStart, dateEnd, timeZoneService);
         var total = await query.CountAsync();
         var items = await query
             .OrderByDescending(s => s.SnapshotDate)
@@ -226,11 +232,15 @@ public static class SnapshotEndpoints
     }
 
     /// <summary>Returns snapshot trend points filtered by an optional inclusive date range in chronological order.</summary>
-    public static async Task<IReadOnlyList<SnapshotTrendPoint>> ListSnapshotTrendAsync(DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db)
+    public static async Task<IReadOnlyList<SnapshotTrendPoint>> ListSnapshotTrendAsync(
+        DateOnly? dateStart,
+        DateOnly? dateEnd,
+        AppDbContext db,
+        TimeZoneService? timeZoneService = null)
     {
         ValidateDateRange(dateStart, dateEnd);
 
-        return await ApplyDateRange(db.SnapshotBatches.AsQueryable(), dateStart, dateEnd)
+        return await ApplyDateRange(db.SnapshotBatches.AsQueryable(), dateStart, dateEnd, timeZoneService)
             .OrderBy(s => s.SnapshotDate)
             .Select(s => new SnapshotTrendPoint(
                 s.Id,
@@ -244,17 +254,40 @@ public static class SnapshotEndpoints
     }
 
     /// <summary>Applies inclusive whole-day date range filters to a snapshot query.</summary>
-    private static IQueryable<SnapshotBatch> ApplyDateRange(IQueryable<SnapshotBatch> query, DateOnly? dateStart, DateOnly? dateEnd)
+    private static IQueryable<SnapshotBatch> ApplyDateRange(
+        IQueryable<SnapshotBatch> query,
+        DateOnly? dateStart,
+        DateOnly? dateEnd,
+        TimeZoneService? timeZoneService)
     {
+        if (timeZoneService is null)
+        {
+            if (dateStart.HasValue)
+            {
+                var start = dateStart.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                query = query.Where(s => s.SnapshotDate >= start);
+            }
+
+            if (dateEnd.HasValue)
+            {
+                var endExclusive = dateEnd.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                query = query.Where(s => s.SnapshotDate < endExclusive);
+            }
+
+            return query;
+        }
+
         if (dateStart.HasValue)
         {
-            var start = dateStart.Value.ToDateTime(TimeOnly.MinValue);
+            var start = timeZoneService.ConvertLocalToUtc(
+                dateStart.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified));
             query = query.Where(s => s.SnapshotDate >= start);
         }
 
         if (dateEnd.HasValue)
         {
-            var endExclusive = dateEnd.Value.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            var endExclusive = timeZoneService.ConvertLocalToUtc(
+                dateEnd.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified));
             query = query.Where(s => s.SnapshotDate < endExclusive);
         }
 

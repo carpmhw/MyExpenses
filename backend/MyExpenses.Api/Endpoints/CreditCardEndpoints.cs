@@ -34,7 +34,6 @@ public static class CreditCardEndpoints
 
         group.MapPost("/", async (CreditCard card, AppDbContext db) =>
         {
-            card.NormalizeOptionalMetadata();
             var validationResults = new List<ValidationResult>();
             if (!Validator.TryValidateObject(card, new ValidationContext(card), validationResults, true))
             {
@@ -53,7 +52,6 @@ public static class CreditCardEndpoints
             var card = await db.CreditCards.FindAsync(id);
             if (card is null) return Results.NotFound();
 
-            input.NormalizeOptionalMetadata();
             var validationResults = new List<ValidationResult>();
             if (!Validator.TryValidateObject(input, new ValidationContext(input), validationResults, true))
             {

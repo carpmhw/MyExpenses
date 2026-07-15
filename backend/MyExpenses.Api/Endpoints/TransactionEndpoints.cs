@@ -50,7 +50,7 @@ public static class TransactionEndpoints
         })
         .RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
 
-        group.MapPost("/", async (CreateTransactionRequest request, AppDbContext db) =>
+        group.MapPost("/", async (CreateTransactionRequest request, AppDbContext db, TimeZoneService timeZoneService) =>
         {
             int? resolvedCategoryId = request.CategoryId;
 
@@ -99,7 +99,7 @@ public static class TransactionEndpoints
             {
                 Type = request.Type.Value,
                 Amount = request.Amount,
-                Date = request.Date ?? DateOnly.FromDateTime(DateTime.UtcNow),
+                Date = request.Date ?? timeZoneService.GetLocalDate(),
                 Description = request.Description,
                 Notes = request.Notes,
                 CategoryId = resolvedCategoryId.Value,

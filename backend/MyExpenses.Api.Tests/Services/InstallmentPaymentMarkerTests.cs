@@ -15,7 +15,7 @@ public class InstallmentPaymentMarkerTests
         InstallmentPaymentMarker.TogglePaid(payment, new DateOnly(2026, 6, 20));
 
         Assert.True(payment.IsPaid);
-        Assert.Equal(new DateTime(2026, 6, 20), payment.PaidDate);
+        Assert.Equal(new DateOnly(2026, 6, 20), payment.PaidDate);
     }
 
     /// <summary>Verifies marking paid without a date is rejected before persistence.</summary>
@@ -36,7 +36,7 @@ public class InstallmentPaymentMarkerTests
         var payment = new InstallmentPayment
         {
             IsPaid = true,
-            PaidDate = new DateTime(2026, 6, 20),
+            PaidDate = new DateOnly(2026, 6, 20),
         };
 
         InstallmentPaymentMarker.TogglePaid(payment, null);
