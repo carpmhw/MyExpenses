@@ -142,9 +142,9 @@ public class StockEndpointsTests
         Assert.Equal("凱基證券", stock.Broker);
     }
 
-    /// <summary>Verifies stock updates trim text fields and preserve blank broker as an empty string.</summary>
+    /// <summary>Verifies stock updates trim text fields and normalize blank broker to null.</summary>
     [Fact]
-    public async Task UpdateStock_TrimsTextFieldsAndPreservesBlankBroker()
+    public async Task UpdateStock_TrimsTextFieldsAndNormalizesBlankBroker()
     {
         await using var db = await CreateDbContextAsync();
         await using var app = await CreateStockAppAsync((SqliteConnection)db.Database.GetDbConnection());
@@ -166,7 +166,7 @@ public class StockEndpointsTests
         await db.Entry(stock).ReloadAsync();
         Assert.Equal("台積電更新", stock.Name);
         Assert.Equal("2330", stock.Symbol);
-        Assert.Equal(string.Empty, stock.Broker);
+        Assert.Null(stock.Broker);
         Assert.Equal(StockInstrumentType.BondEtf, stock.InstrumentType);
     }
 

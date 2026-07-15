@@ -32,17 +32,11 @@ public class CreditCard : IValidatableObject
 
     public ICollection<CreditCardBill> Bills { get; set; } = new List<CreditCardBill>();
 
-    /// <summary>Normalizes optional metadata so cleared form values persist as null.</summary>
-    public void NormalizeOptionalMetadata()
-    {
-        CardNetwork = string.IsNullOrWhiteSpace(CardNetwork) ? null : CardNetwork.Trim();
-        Notes = string.IsNullOrWhiteSpace(Notes) ? null : Notes.Trim();
-    }
-
     /// <summary>Validates optional credit card metadata against supported card network values.</summary>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (!string.IsNullOrWhiteSpace(CardNetwork) && !ValidCardNetworks.Contains(CardNetwork))
+        var normalizedCardNetwork = CardNetwork?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedCardNetwork) && !ValidCardNetworks.Contains(normalizedCardNetwork))
         {
             yield return new ValidationResult("卡種必須為有效的國際卡別網路", [nameof(CardNetwork)]);
         }

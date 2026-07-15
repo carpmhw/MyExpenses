@@ -78,7 +78,6 @@ public static class StockEndpoints
 
         group.MapPost("/", async (Stock stock, AppDbContext db) =>
         {
-            NormalizeStockText(stock);
             db.Stocks.Add(stock);
             await db.SaveChangesAsync();
             return Results.Created($"/api/stocks/{stock.Id}", stock);
@@ -96,7 +95,6 @@ public static class StockEndpoints
             stock.BuyPrice = input.BuyPrice;
             stock.CurrentPrice = input.CurrentPrice;
             stock.Broker = input.Broker;
-            NormalizeStockText(stock);
             if (input.LastPriceUpdate.HasValue)
                 stock.LastPriceUpdate = input.LastPriceUpdate;
 
@@ -171,14 +169,6 @@ public static class StockEndpoints
             valuation.SecuritiesTransactionTax,
             valuation.EstimatedNetSellValue,
             valuation.EstimatedGainLoss);
-    }
-
-    /// <summary>Trims stock text fields before persistence while preserving null broker values.</summary>
-    private static void NormalizeStockText(Stock stock)
-    {
-        stock.Name = (stock.Name ?? string.Empty).Trim();
-        stock.Symbol = (stock.Symbol ?? string.Empty).Trim();
-        stock.Broker = stock.Broker?.Trim();
     }
 
 }
