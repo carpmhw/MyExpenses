@@ -7,9 +7,10 @@ import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
 import Modal from '../../components/ui/Modal.vue'
+import SnapshotDetailModal from '../../components/snapshots/SnapshotDetailModal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Icon from '../../components/ui/Icon.vue'
-import { formatMoney, formatShares } from '../../utils/format'
+import { formatMoney } from '../../utils/format'
 import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../../utils/snapshot'
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
@@ -379,89 +380,10 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
       </div>
     </Card>
 
-    <Modal :open="detailOpen" title="快照明細" @update:open="detailOpen = $event">
-      <div v-if="detailSnapshot" class="space-y-6">
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <p class="text-xs text-text-secondary">快照名稱</p>
-            <p class="text-sm font-medium text-text-primary">{{ detailSnapshot.name }}</p>
-          </div>
-          <div>
-            <p class="text-xs text-text-secondary">快照日期</p>
-            <p class="text-sm font-medium text-text-primary">{{ formatDate(detailSnapshot.snapshotDate) }}</p>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-            <p class="text-xs text-text-secondary">總淨值</p>
-            <p class="text-lg font-bold text-emerald-600">{{ formatMoney(detailSnapshot.totalNetWorth) }}</p>
-          </div>
-          <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-            <p class="text-xs text-text-secondary">銀行總額</p>
-            <p class="text-lg font-bold text-blue-600">{{ formatMoney(detailSnapshot.totalBankBalance) }}</p>
-          </div>
-          <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-            <p class="text-xs text-text-secondary">股票預估賣出淨值</p>
-            <p class="text-lg font-bold text-amber-600">{{ formatMoney(detailSnapshot.totalStockValue) }}</p>
-          </div>
-          <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-            <p class="text-xs text-text-secondary">股票估算成本</p>
-            <p class="text-lg font-bold text-text-primary">{{ formatMoney(detailSnapshot.totalStockCost) }}</p>
-          </div>
-        </div>
-
-        <div v-if="detailSnapshot.bankDetails.length > 0">
-          <h3 class="text-sm font-semibold text-text-primary mb-2">銀行明細</h3>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-border-default">
-                  <th class="text-left py-2 px-2 text-text-secondary font-medium">銀行</th>
-                  <th class="text-left py-2 px-2 text-text-secondary font-medium">帳號</th>
-                  <th class="text-right py-2 px-2 text-text-secondary font-medium">餘額</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="b in detailSnapshot.bankDetails" :key="b.accountNumber" class="border-b border-border-default">
-                  <td class="py-2 px-2 text-text-primary">{{ b.bankName }}</td>
-                  <td class="py-2 px-2 text-text-secondary font-mono">{{ b.accountNumber }}</td>
-                  <td class="py-2 px-2 text-text-primary text-right">{{ formatMoney(b.balance) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div v-if="detailSnapshot.stockDetails.length > 0">
-          <h3 class="text-sm font-semibold text-text-primary mb-2">股票明細</h3>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-border-default">
-                  <th class="text-left py-2 px-2 text-text-secondary font-medium">名稱</th>
-                  <th class="text-left py-2 px-2 text-text-secondary font-medium">代號</th>
-                  <th class="text-right py-2 px-2 text-text-secondary font-medium">股數</th>
-                  <th class="text-right py-2 px-2 text-text-secondary font-medium">預估賣出淨值</th>
-                  <th class="text-right py-2 px-2 text-text-secondary font-medium">預估損益</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="s in detailSnapshot.stockDetails" :key="s.symbol" class="border-b border-border-default">
-                  <td class="py-2 px-2 text-text-primary">{{ s.name }}</td>
-                  <td class="py-2 px-2 text-text-secondary font-mono">{{ s.symbol }}</td>
-                  <td class="py-2 px-2 text-text-primary text-right">{{ formatShares(s.shares) }}</td>
-                  <td class="py-2 px-2 text-text-primary text-right">{{ formatMoney(s.marketValue) }}</td>
-                  <td class="py-2 px-2 text-right" :class="s.gainLoss >= 0 ? 'text-green-600' : 'text-red-600'">
-                    {{ formatMoney(s.gainLoss) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </Modal>
+    <SnapshotDetailModal
+      v-model:open="detailOpen"
+      :snapshot="detailSnapshot"
+    />
 
     <Modal :open="scheduleOpen" title="自動排程設定" @update:open="scheduleOpen = $event">
       <div v-if="scheduleLoading" class="text-center py-4 text-text-tertiary">載入中...</div>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildSnapshotQuery } from '../src/api/index.ts'
-import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../src/utils/snapshot.ts'
+import { coerceSnapshotDateRange, createDefaultSnapshotDateRange, formatSnapshotAccountSuffix } from '../src/utils/snapshot.ts'
 
 // Verifies snapshot list/trend query strings include date range filters when provided.
 test('buildSnapshotQuery includes date range filters', () => {
@@ -111,4 +111,16 @@ test('coerceSnapshotDateRange accepts exactly five years ending on leap day', ()
     changed: false,
     reason: null,
   })
+})
+
+// Verifies the stored five-digit account suffix remains fully visible.
+test('formatSnapshotAccountSuffix preserves the stored five-digit suffix', () => {
+  assert.equal(formatSnapshotAccountSuffix('12345'), '12345')
+  assert.equal(formatSnapshotAccountSuffix(' 12345 '), '12345')
+})
+
+// Verifies blank historical suffixes use a neutral unavailable label.
+test('formatSnapshotAccountSuffix handles blank suffixes', () => {
+  assert.equal(formatSnapshotAccountSuffix(null), '未提供')
+  assert.equal(formatSnapshotAccountSuffix('   '), '未提供')
 })

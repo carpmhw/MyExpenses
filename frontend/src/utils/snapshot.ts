@@ -12,6 +12,12 @@ export interface CoercedSnapshotDateRange extends SnapshotDateRange {
 
 const MAX_SNAPSHOT_RANGE_YEARS = 5
 
+// Formats the five-digit account suffix stored in a snapshot without applying another mask.
+export function formatSnapshotAccountSuffix(value: string | null | undefined): string {
+  const suffix = (value ?? '').trim()
+  return suffix || '未提供'
+}
+
 // Creates the snapshot page default range from one year before the system-local today through today.
 export function createDefaultSnapshotDateRange(today = new Date(), timeZone = 'Asia/Taipei'): SnapshotDateRange {
   const dateEnd = formatDateInput(today, timeZone)
