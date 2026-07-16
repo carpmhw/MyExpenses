@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildSnapshotQuery } from '../src/api/index.ts'
-import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../src/utils/snapshot.ts'
+import { coerceSnapshotDateRange, createDefaultSnapshotDateRange, maskSnapshotAccountNumber } from '../src/utils/snapshot.ts'
 
 // Verifies snapshot list/trend query strings include date range filters when provided.
 test('buildSnapshotQuery includes date range filters', () => {
@@ -111,4 +111,21 @@ test('coerceSnapshotDateRange accepts exactly five years ending on leap day', ()
     changed: false,
     reason: null,
   })
+})
+
+// Verifies long account numbers preserve only the final four meaningful characters.
+test('maskSnapshotAccountNumber masks a standard account number', () => {
+  assert.equal(maskSnapshotAccountNumber('1234-5678 90'), '•••• 7890')
+})
+
+// Verifies short account numbers never reveal their complete value.
+test('maskSnapshotAccountNumber fully masks short account numbers', () => {
+  assert.equal(maskSnapshotAccountNumber('1234'), '••••')
+  assert.equal(maskSnapshotAccountNumber('12-3'), '••••')
+})
+
+// Verifies blank and separator-only values use a neutral unavailable label.
+test('maskSnapshotAccountNumber handles blank account numbers', () => {
+  assert.equal(maskSnapshotAccountNumber(null), '未提供')
+  assert.equal(maskSnapshotAccountNumber('   -  '), '未提供')
 })

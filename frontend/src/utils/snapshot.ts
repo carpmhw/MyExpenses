@@ -12,6 +12,16 @@ export interface CoercedSnapshotDateRange extends SnapshotDateRange {
 
 const MAX_SNAPSHOT_RANGE_YEARS = 5
 
+// Masks a snapshot account number while preserving only its final four meaningful characters.
+export function maskSnapshotAccountNumber(value: string | null | undefined): string {
+  const meaningfulCharacters = (value ?? '').replace(/[^A-Za-z0-9]/g, '')
+
+  if (meaningfulCharacters.length === 0) return '未提供'
+  if (meaningfulCharacters.length <= 4) return '••••'
+
+  return `•••• ${meaningfulCharacters.slice(-4)}`
+}
+
 // Creates the snapshot page default range from one year before the system-local today through today.
 export function createDefaultSnapshotDateRange(today = new Date(), timeZone = 'Asia/Taipei'): SnapshotDateRange {
   const dateEnd = formatDateInput(today, timeZone)
