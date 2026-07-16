@@ -4,7 +4,7 @@ import type { SnapshotBatch } from '../../types'
 import Modal from '../ui/Modal.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
-import { maskSnapshotAccountNumber } from '../../utils/snapshot'
+import { formatSnapshotAccountSuffix } from '../../utils/snapshot'
 import { useTimeZone } from '../../composables/useTimeZone'
 
 const props = defineProps<{
@@ -103,7 +103,7 @@ function gainLossClass(value: number): string {
               <thead>
                 <tr class="border-b border-border-default text-sm text-text-secondary">
                   <th class="w-[28%] px-3 py-3 font-medium">銀行名稱</th>
-                  <th class="w-[28%] px-3 py-3 font-medium">帳號</th>
+                  <th class="w-[28%] px-3 py-3 font-medium">帳號後五碼</th>
                   <th class="w-[24%] px-3 py-3 font-medium">帳戶類型</th>
                   <th class="w-[20%] px-3 py-3 text-right font-medium">餘額</th>
                 </tr>
@@ -111,7 +111,7 @@ function gainLossClass(value: number): string {
               <tbody>
                 <tr v-for="(bank, bankIndex) in snapshot.bankDetails" :key="`${bank.bankName}-${bankIndex}`" class="border-b border-border-default last:border-b-0">
                   <td class="min-w-0 break-words px-3 py-3 text-sm text-text-primary">{{ bank.bankName }}</td>
-                  <td class="min-w-0 break-all px-3 py-3 font-mono text-sm text-text-secondary">{{ maskSnapshotAccountNumber(bank.accountNumber) }}</td>
+                  <td class="min-w-0 break-all px-3 py-3 font-mono text-sm text-text-secondary">{{ formatSnapshotAccountSuffix(bank.accountNumber) }}</td>
                   <td class="min-w-0 break-words px-3 py-3 text-sm text-text-secondary">{{ bank.accountType || '未提供' }}</td>
                   <td class="min-w-0 break-all px-3 py-3 text-right text-sm font-medium text-text-primary">{{ formatMoney(bank.balance) }}</td>
                 </tr>
@@ -127,8 +127,8 @@ function gainLossClass(value: number): string {
               </div>
               <dl class="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
                 <div class="min-w-0">
-                  <dt class="text-xs text-text-secondary">帳號</dt>
-                  <dd class="mt-1 break-all font-mono text-sm text-text-primary">{{ maskSnapshotAccountNumber(bank.accountNumber) }}</dd>
+                  <dt class="text-xs text-text-secondary">帳號後五碼</dt>
+                  <dd class="mt-1 break-all font-mono text-sm text-text-primary">{{ formatSnapshotAccountSuffix(bank.accountNumber) }}</dd>
                 </div>
                 <div class="min-w-0">
                   <dt class="text-xs text-text-secondary">帳戶類型</dt>

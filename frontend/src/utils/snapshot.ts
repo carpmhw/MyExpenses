@@ -12,14 +12,10 @@ export interface CoercedSnapshotDateRange extends SnapshotDateRange {
 
 const MAX_SNAPSHOT_RANGE_YEARS = 5
 
-// Masks a snapshot account number while preserving only its final four meaningful characters.
-export function maskSnapshotAccountNumber(value: string | null | undefined): string {
-  const meaningfulCharacters = (value ?? '').replace(/[^A-Za-z0-9]/g, '')
-
-  if (meaningfulCharacters.length === 0) return '未提供'
-  if (meaningfulCharacters.length <= 4) return '••••'
-
-  return `•••• ${meaningfulCharacters.slice(-4)}`
+// Formats the five-digit account suffix stored in a snapshot without applying another mask.
+export function formatSnapshotAccountSuffix(value: string | null | undefined): string {
+  const suffix = (value ?? '').trim()
+  return suffix || '未提供'
 }
 
 // Creates the snapshot page default range from one year before the system-local today through today.
