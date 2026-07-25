@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import {
   DialogRoot, DialogPortal, DialogOverlay,
-  DialogContent, DialogTitle, DialogClose,
+  DialogContent, DialogTitle, DialogDescription, DialogClose,
 } from 'radix-vue'
 
 withDefaults(defineProps<{
   open: boolean
   title?: string
+  description?: string
   size?: 'sm' | 'md' | 'lg' | 'xl'
   mobileFullScreen?: boolean
   scrollBody?: boolean
 }>(), {
   size: 'md',
+  description: '對話框內容',
   mobileFullScreen: false,
   scrollBody: false,
 })
@@ -33,9 +35,10 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>()
           mobileFullScreen ? 'max-md:inset-0 max-md:translate-x-0 max-md:translate-y-0 max-md:w-screen max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:max-w-none max-md:rounded-none max-md:p-4' : '',
         ]"
       >
-        <div class="flex items-center justify-between mb-4 shrink-0">
-          <DialogTitle class="text-lg font-semibold text-text-primary">{{ title }}</DialogTitle>
-          <DialogClose aria-label="關閉" class="text-text-tertiary hover:text-text-primary transition-colors cursor-pointer">
+        <DialogDescription class="sr-only">{{ description }}</DialogDescription>
+        <div class="flex items-center justify-between gap-3 mb-4 shrink-0">
+          <DialogTitle class="min-w-0 flex-1 break-words text-lg font-semibold text-text-primary">{{ title }}</DialogTitle>
+          <DialogClose aria-label="關閉" class="shrink-0 min-h-11 min-w-11 inline-flex items-center justify-center text-text-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/30 transition-colors cursor-pointer">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 5l10 10M15 5l-10 10" />
             </svg>

@@ -70,6 +70,8 @@ npm run dev
 | `MYEXPENSES_API_URL` | 後端 API 位址 | 否（預設 `http://localhost:5000`） |
 | `MYEXPENSES_API_TOKEN` | API Token（格式 `oc_xxx`） | 是 |
 
+MCP server 需要 Node.js `>=20`。
+
 使用單一 image 部署時，MCP 應透過 nginx 入口呼叫 API：
 
 ```bash
