@@ -354,6 +354,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
               <button
                 class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
                 title="檢視明細"
+                aria-label="檢視明細"
                 @click="showDetail(item)"
               >
                 <Icon name="eye" :size="16" />
@@ -361,6 +362,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
               <button
                 class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
                 title="刪除快照"
+                aria-label="刪除快照"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />

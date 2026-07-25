@@ -46,6 +46,7 @@ function gainLossClass(value: number): string {
     v-if="snapshot"
     :open="props.open"
     :title="snapshot?.name || '快照明細'"
+    description="顯示所選財務快照的歷史資產明細"
     size="xl"
     mobile-full-screen
     scroll-body
@@ -102,10 +103,10 @@ function gainLossClass(value: number): string {
             <table class="w-full table-fixed border-collapse text-left">
               <thead>
                 <tr class="border-b border-border-default text-sm text-text-secondary">
-                  <th class="w-[28%] px-3 py-3 font-medium">銀行名稱</th>
-                  <th class="w-[28%] px-3 py-3 font-medium">帳號後五碼</th>
-                  <th class="w-[24%] px-3 py-3 font-medium">帳戶類型</th>
-                  <th class="w-[20%] px-3 py-3 text-right font-medium">餘額</th>
+                  <th scope="col" class="w-[28%] px-3 py-3 font-medium">銀行名稱</th>
+                  <th scope="col" class="w-[28%] px-3 py-3 font-medium">帳號後五碼</th>
+                  <th scope="col" class="w-[24%] px-3 py-3 font-medium">帳戶類型</th>
+                  <th scope="col" class="w-[20%] px-3 py-3 text-right font-medium">餘額</th>
                 </tr>
               </thead>
               <tbody>
@@ -157,14 +158,14 @@ function gainLossClass(value: number): string {
             <table class="w-full min-w-[900px] table-fixed border-collapse text-left">
               <thead>
                 <tr class="border-b border-border-default text-sm text-text-secondary">
-                  <th class="w-[18%] px-3 py-3 font-medium">名稱</th>
-                  <th class="w-[10%] px-3 py-3 font-medium">代號</th>
-                  <th class="w-[12%] px-3 py-3 font-medium">商品類型</th>
-                  <th class="w-[10%] px-3 py-3 text-right font-medium">持有股數</th>
-                  <th class="w-[12%] px-3 py-3 text-right font-medium">買入價</th>
-                  <th class="w-[12%] px-3 py-3 text-right font-medium">現價</th>
-                  <th class="w-[14%] px-3 py-3 text-right font-medium">預估賣出淨值</th>
-                  <th class="w-[12%] px-3 py-3 text-right font-medium">預估損益</th>
+                  <th scope="col" class="w-[18%] px-3 py-3 font-medium">名稱</th>
+                  <th scope="col" class="w-[10%] px-3 py-3 font-medium">代號</th>
+                  <th scope="col" class="w-[12%] px-3 py-3 font-medium">商品類型</th>
+                  <th scope="col" class="w-[10%] px-3 py-3 text-right font-medium">持有股數</th>
+                  <th scope="col" class="w-[12%] px-3 py-3 text-right font-medium">買入價</th>
+                  <th scope="col" class="w-[12%] px-3 py-3 text-right font-medium">現價</th>
+                  <th scope="col" class="w-[14%] px-3 py-3 text-right font-medium">預估賣出淨值</th>
+                  <th scope="col" class="w-[12%] px-3 py-3 text-right font-medium">預估損益</th>
                 </tr>
               </thead>
               <tbody>
