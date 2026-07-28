@@ -42,9 +42,9 @@ function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale
 }
 
 const freshnessColors: Record<string, string> = {
-  fresh: 'text-green-600',
-  warning: 'text-amber-500',
-  stale: 'text-red-500',
+  fresh: 'text-color-income-text',
+  warning: 'text-color-warning-text',
+  stale: 'text-color-expense-text',
 }
 
 const confirmOpen = ref(false)
@@ -248,8 +248,8 @@ onMounted(fetchStocks)
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-blue-500 dark:bg-blue-700 flex items-center justify-center">
-            <Icon name="wallet" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-info flex items-center justify-center">
+            <Icon name="wallet" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">預估賣出淨值</p>
@@ -259,19 +259,19 @@ onMounted(fetchStocks)
       </Card>
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl flex items-center justify-center" :class="stats.totalPnl >= 0 ? 'bg-green-500 dark:bg-green-700' : 'bg-red-500 dark:bg-red-700'">
-            <Icon name="trending-up" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl flex items-center justify-center" :class="stats.totalPnl >= 0 ? 'bg-color-income' : 'bg-color-expense-action'">
+            <Icon name="trending-up" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">預估損益</p>
-            <p class="text-xl font-bold" :class="stats.totalPnl >= 0 ? 'text-green-600' : 'text-red-600'">{{ formatMoney(stats.totalPnl) }}</p>
+            <p class="text-xl font-bold" :class="stats.totalPnl >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatMoney(stats.totalPnl) }}</p>
           </div>
         </div>
       </Card>
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-amber-500 dark:bg-amber-700 flex items-center justify-center">
-            <Icon name="shopping-bag" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-warning flex items-center justify-center">
+            <Icon name="shopping-bag" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">持股檔數</p>
@@ -289,7 +289,7 @@ onMounted(fetchStocks)
             v-model="symbolFilter"
             type="text"
             placeholder="輸入股票代號"
-            class="w-full sm:w-48 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary placeholder:text-text-tertiary"
+            class="w-full sm:w-48 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary placeholder:text-text-tertiary"
           />
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -298,7 +298,7 @@ onMounted(fetchStocks)
             v-model="brokerFilter"
             type="text"
             placeholder="輸入券商關鍵字"
-            class="w-full sm:w-56 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary placeholder:text-text-tertiary"
+            class="w-full sm:w-56 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary placeholder:text-text-tertiary"
           />
         </div>
       </div>
@@ -306,7 +306,7 @@ onMounted(fetchStocks)
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無股票資料</div>
         </template>
-        <tr v-for="(item, idx) in stocks" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="(item, idx) in stocks" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
           <td class="py-3 px-4 text-text-primary font-medium">{{ item.name }}</td>
           <td class="py-3 px-4 text-text-secondary font-mono">{{ item.symbol }}</td>
@@ -314,20 +314,20 @@ onMounted(fetchStocks)
           <td class="py-3 px-4 text-text-primary text-sm">{{ formatShares(item.shares) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm text-right">{{ formatMoney(item.buyPrice) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm text-right" :class="freshnessColors[priceFreshness(item.lastPriceUpdate)]">{{ formatMoney(item.currentPrice) }}</td>
-          <td class="py-3 px-4 text-sm text-right font-semibold" :class="item.estimatedGainLoss >= 0 ? 'text-green-600' : 'text-red-600'">
+          <td class="py-3 px-4 text-sm text-right font-semibold" :class="item.estimatedGainLoss >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
             {{ formatMoney(item.estimatedGainLoss) }}
           </td>
           <td class="py-3 px-4 text-text-secondary text-sm">{{ item.broker }}</td>
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />
@@ -364,7 +364,7 @@ onMounted(fetchStocks)
           <label class="block text-sm font-medium text-text-primary mb-1">商品類型</label>
           <select
             v-model="form.instrumentType"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
           >
             <option v-for="option in STOCK_INSTRUMENT_TYPE_OPTIONS" :key="option.value" :value="option.value">
               {{ option.label }}
@@ -405,7 +405,7 @@ onMounted(fetchStocks)
           <Input v-model="form.broker" placeholder="e.g. 元大證券" />
         </div>
         <div v-if="editingItem" class="flex items-center gap-2">
-          <input id="syncPrice" type="checkbox" v-model="syncPrice" class="w-4 h-4 rounded border-border-default text-primary-600 focus:ring-primary-500" />
+          <input id="syncPrice" type="checkbox" v-model="syncPrice" class="w-4 h-4 rounded border-border-strong text-primary-600 focus:ring-focus-ring" />
            <label for="syncPrice" class="text-sm text-text-secondary cursor-pointer">儲存時取得最新股價</label>
         </div>
         <div class="flex justify-end gap-3 pt-2">

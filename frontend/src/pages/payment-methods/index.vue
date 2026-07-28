@@ -143,7 +143,7 @@ watch(() => pagination.page.value, () => fetchList())
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無支付方式資料</div>
         </template>
-        <tr v-for="item in items" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="item in items" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 w-[200px]">
             <div class="flex items-center gap-2">
               <Icon :name="item.icon" :size="18" :color="item.color" />
@@ -158,13 +158,13 @@ watch(() => pagination.page.value, () => fetchList())
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />

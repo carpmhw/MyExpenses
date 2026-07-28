@@ -170,8 +170,8 @@ watch(bankNameFilter, () => {
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-emerald-500 dark:bg-emerald-700 flex items-center justify-center">
-            <Icon name="wallet" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-income flex items-center justify-center">
+            <Icon name="wallet" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">總計金額</p>
@@ -189,14 +189,14 @@ watch(bankNameFilter, () => {
           v-model="bankNameFilter"
           type="text"
           placeholder="輸入銀行名稱關鍵字"
-          class="w-full sm:w-64 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary placeholder:text-text-tertiary"
+          class="w-full sm:w-64 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary placeholder:text-text-tertiary"
         />
       </div>
       <DataTable :columns="columns" :loading="loading" :items="accounts">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無銀行帳戶資料</div>
         </template>
-        <tr v-for="(item, index) in accounts" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="(item, index) in accounts" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + index + 1 }}</td>
           <td class="py-3 px-4 text-text-secondary w-[110px]">{{ formatDate(item.createdAt) }}</td>
           <td class="py-3 px-4 text-text-secondary w-[110px]">{{ formatDate(item.updatedAt) }}</td>
@@ -207,13 +207,13 @@ watch(bankNameFilter, () => {
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />

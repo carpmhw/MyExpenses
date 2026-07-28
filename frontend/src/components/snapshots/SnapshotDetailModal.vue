@@ -35,8 +35,8 @@ function formatGainLoss(value: number): string {
 
 // Selects semantic text colors for positive, negative, and neutral changes.
 function gainLossClass(value: number): string {
-  if (value > 0) return 'text-emerald-600 dark:text-emerald-400'
-  if (value < 0) return 'text-red-600 dark:text-red-400'
+  if (value > 0) return 'text-color-income-text'
+  if (value < 0) return 'text-color-expense-text'
   return 'text-text-secondary'
 }
 </script>

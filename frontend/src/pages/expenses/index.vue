@@ -323,12 +323,12 @@ onMounted(async () => {
       <Button @click="openCreate">+ {{ activeTab === 'all' ? '新增' : activeTab === 'Income' ? '新增收入' : '新增支出' }}</Button>
     </div>
 
-    <div class="flex gap-1 mb-6 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
+    <div class="flex gap-1 mb-6 bg-bg-raised rounded-lg p-1 w-fit">
       <button
         v-for="tab in ([{ key: 'all', label: '全部' }, { key: 'Income', label: '收入' }, { key: 'Expense', label: '支出' }] as const)"
         :key="tab.key"
         class="px-4 py-1.5 text-sm rounded-md transition-colors cursor-pointer"
-        :class="activeTab === tab.key ? 'bg-white dark:bg-gray-700 text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+        :class="activeTab === tab.key ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
         @click="activeTab = tab.key"
       >
         {{ tab.label }}
@@ -339,8 +339,8 @@ onMounted(async () => {
       <template v-if="activeTab === 'all'">
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-blue-500 dark:bg-blue-700 flex items-center justify-center">
-              <Icon name="receipt" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-info flex items-center justify-center">
+              <Icon name="receipt" :size="22" class="text-text-on-accent" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">總金額</p>
@@ -350,30 +350,30 @@ onMounted(async () => {
         </Card>
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-green-500 dark:bg-green-700 flex items-center justify-center">
-              <Icon name="arrow-up" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-income flex items-center justify-center">
+              <Icon name="arrow-up" :size="22" class="text-text-on-accent" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">總收入</p>
-              <p class="text-xl font-bold text-green-600">{{ formatMoney(stats.income) }}</p>
+              <p class="text-xl font-bold text-color-income-text">{{ formatMoney(stats.income) }}</p>
             </div>
           </div>
         </Card>
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-red-500 dark:bg-red-700 flex items-center justify-center">
-              <Icon name="arrow-down" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-expense-action flex items-center justify-center">
+              <Icon name="arrow-down" :size="22" class="text-color-expense-action-text" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">總支出</p>
-              <p class="text-xl font-bold text-red-600">{{ formatMoney(stats.expense) }}</p>
+              <p class="text-xl font-bold text-color-expense-text">{{ formatMoney(stats.expense) }}</p>
             </div>
           </div>
         </Card>
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-amber-500 dark:bg-amber-700 flex items-center justify-center">
-              <Icon name="shopping-bag" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-warning flex items-center justify-center">
+              <Icon name="shopping-bag" :size="22" class="text-text-on-accent" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">筆數</p>
@@ -385,8 +385,8 @@ onMounted(async () => {
       <template v-else>
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-blue-500 dark:bg-blue-700 flex items-center justify-center">
-              <Icon name="receipt" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-info flex items-center justify-center">
+              <Icon name="receipt" :size="22" class="text-text-on-accent" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">{{ activeTab === 'Income' ? '總收入' : '總支出' }}</p>
@@ -396,8 +396,8 @@ onMounted(async () => {
         </Card>
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-amber-500 dark:bg-amber-700 flex items-center justify-center">
-              <Icon name="calendar" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-warning flex items-center justify-center">
+              <Icon name="calendar" :size="22" class="text-text-on-accent" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">{{ activeTab === 'Income' ? '日均收入' : '日均支出' }}</p>
@@ -407,8 +407,8 @@ onMounted(async () => {
         </Card>
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-green-500 dark:bg-green-700 flex items-center justify-center">
-              <Icon name="shopping-bag" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-income flex items-center justify-center">
+              <Icon name="shopping-bag" :size="22" class="text-text-on-accent" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">{{ activeTab === 'Income' ? '收入筆數' : '支出筆數' }}</p>
@@ -418,8 +418,8 @@ onMounted(async () => {
         </Card>
         <Card>
           <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-xl bg-red-500 dark:bg-red-700 flex items-center justify-center">
-              <Icon name="arrow-up" :size="22" class="text-white" />
+            <div class="w-11 h-11 rounded-xl bg-color-expense-action flex items-center justify-center">
+              <Icon name="arrow-up" :size="22" class="text-color-expense-action-text" />
             </div>
             <div>
               <p class="text-xs text-text-secondary">單筆最高</p>
@@ -437,20 +437,20 @@ onMounted(async () => {
           v-model="startDate"
           type="date"
           @change="validateDateRange"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+           class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         />
         <span class="text-text-secondary">~</span>
         <input
           v-model="endDate"
           type="date"
           @change="validateDateRange"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+           class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         />
         <span class="text-xs text-text-tertiary">（最多 1 年）</span>
         <span class="text-sm font-medium text-text-primary ml-2">類別</span>
         <select
           v-model="selectedCategory"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         >
           <option value="">全部</option>
           <option v-for="c in categories.filter(c => activeTab === 'all' || c.type === activeTab)" :key="c.id" :value="c.id">{{ c.name }}</option>
@@ -458,7 +458,7 @@ onMounted(async () => {
         <input
           v-model="search"
           placeholder="搜尋項目或備註..."
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary min-w-[200px]"
+           class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary min-w-[200px]"
         />
       </div>
 
@@ -466,15 +466,15 @@ onMounted(async () => {
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無交易資料</div>
         </template>
-        <tr v-for="(item, idx) in transactions" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="(item, idx) in transactions" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
           <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[100px]">{{ item.date.slice(0, 10) }}</td>
           <td class="py-3 px-4 w-[120px]">
             <span
               class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
               :style="{
-                backgroundColor: item.category?.color ? `${item.category.color}20` : '#f3f4f6',
-                color: item.category?.color || '#6b7280',
+                backgroundColor: item.category?.color ? `${item.category.color}20` : 'var(--color-color-info-bg)',
+                color: item.category?.color || 'var(--color-color-info-text)',
               }"
             >
               {{ item.category?.name }}
@@ -483,14 +483,14 @@ onMounted(async () => {
           <td class="py-3 px-4 w-[80px]">
             <span
               class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium"
-              :class="item.type === 'Income' ? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300'"
+              :class="item.type === 'Income' ? 'bg-color-income-bg text-color-income-text' : 'bg-color-expense-bg text-color-expense-text'"
             >
               {{ item.type === 'Income' ? '收入' : '支出' }}
             </span>
           </td>
           <td class="py-3 px-4 text-text-primary text-sm">{{ item.description }}</td>
           <td class="py-3 px-4 text-right w-[130px]">
-            <span :class="item.type === 'Income' ? 'text-green-600' : 'text-red-600'" class="font-semibold text-sm">
+            <span :class="item.type === 'Income' ? 'text-color-income-text' : 'text-color-expense-text'" class="font-semibold text-sm">
               {{ formatAmount(item.amount) }}
             </span>
           </td>
@@ -499,9 +499,9 @@ onMounted(async () => {
               v-if="item.paymentMethod"
               class="inline-flex items-center px-2 py-0.5 rounded-md text-xs border"
               :style="{
-                backgroundColor: `${item.paymentMethod.color || '#6B7280'}20`,
-                color: item.paymentMethod.color || '#6B7280',
-                borderColor: item.paymentMethod.color || '#6B7280',
+                backgroundColor: item.paymentMethod.color ? `${item.paymentMethod.color}20` : 'var(--color-bg-raised)',
+                color: item.paymentMethod.color || 'var(--color-text-tertiary)',
+                borderColor: item.paymentMethod.color || 'var(--color-border-strong)',
               }"
             >
               {{ item.paymentMethod.name }}
@@ -511,13 +511,13 @@ onMounted(async () => {
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />
@@ -558,7 +558,7 @@ onMounted(async () => {
           <input
             v-model="form.date"
             type="date"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
             required
           />
         </div>
@@ -570,7 +570,7 @@ onMounted(async () => {
             :error="formErrors.categoryId"
             @update:model-value="form.categoryId = Number($event)"
           />
-          <p v-if="formErrors.categoryId" class="mt-1 text-xs text-red-500">{{ formErrors.categoryId }}</p>
+          <p v-if="formErrors.categoryId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.categoryId }}</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">項目</label>

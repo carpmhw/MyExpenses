@@ -151,81 +151,81 @@ function goBackToLogin() {
         載入中...
       </div>
 
-      <div v-if="error" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg px-4 py-3 text-sm mb-4">
+      <div v-if="error" class="bg-color-expense-bg border border-color-expense-text text-color-expense-text rounded-lg px-4 py-3 text-sm mb-4">
         {{ error }}
       </div>
 
-      <form v-if="mode === 'register'" @submit.prevent="handleRegister" class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+      <form v-if="mode === 'register'" @submit.prevent="handleRegister" class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
         <h2 class="text-lg font-semibold text-text-primary">建立管理員帳號</h2>
 
         <div>
           <label class="block text-sm font-medium text-text-secondary mb-1">Email</label>
           <input v-model="email" type="email" required
-            class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none"
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
             placeholder="user@example.com" />
         </div>
 
         <div>
           <label class="block text-sm font-medium text-text-secondary mb-1">顯示名稱</label>
           <input v-model="displayName" type="text" required
-            class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none"
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
             placeholder="你的名稱" />
         </div>
 
         <div>
           <label class="block text-sm font-medium text-text-secondary mb-1">密碼</label>
           <input v-model="password" type="password" required minlength="6"
-            class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none"
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
             placeholder="至少 6 位" />
         </div>
 
         <div>
           <label class="block text-sm font-medium text-text-secondary mb-1">確認密碼</label>
           <input v-model="confirmPassword" type="password" required
-            class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none" />
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none" />
         </div>
 
         <button type="submit"
-          class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-white font-medium rounded-lg text-sm transition-colors cursor-pointer">
+          class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent font-medium rounded-lg text-sm transition-colors cursor-pointer">
           建立帳號
         </button>
       </form>
 
-      <form v-if="mode === 'login'" @submit.prevent="handleLogin" class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+      <form v-if="mode === 'login'" @submit.prevent="handleLogin" class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
         <h2 class="text-lg font-semibold text-text-primary">登入</h2>
 
         <div>
           <label class="block text-sm font-medium text-text-secondary mb-1">Email</label>
           <input v-model="email" type="email" required
-            class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none"
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
             placeholder="user@example.com" />
         </div>
 
         <div>
           <label class="block text-sm font-medium text-text-secondary mb-1">密碼</label>
           <input v-model="password" type="password" required
-            class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none" />
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none" />
         </div>
 
         <button type="submit"
-          class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-white font-medium rounded-lg text-sm transition-colors cursor-pointer">
+          class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent font-medium rounded-lg text-sm transition-colors cursor-pointer">
           登入
         </button>
       </form>
 
-      <div v-if="mode === 'verify-2fa'" class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+      <div v-if="mode === 'verify-2fa'" class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
         <template v-if="!showRecovery">
           <h2 class="text-lg font-semibold text-text-primary">兩步驟驗證</h2>
           <p class="text-sm text-text-secondary">請輸入 Authenticator 應用程式中的 6 位數驗證碼</p>
 
           <div>
             <input v-model="verifyCode" type="text" maxlength="6" inputmode="numeric"
-              class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none text-center text-lg tracking-widest"
+              class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none text-center text-lg tracking-widest"
               placeholder="000000" @keyup.enter="handleVerify2fa" />
           </div>
 
           <button @click="handleVerify2fa"
-            class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-white font-medium rounded-lg text-sm transition-colors cursor-pointer">
+            class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent font-medium rounded-lg text-sm transition-colors cursor-pointer">
             驗證
           </button>
 
@@ -240,12 +240,12 @@ function goBackToLogin() {
 
           <div>
             <input v-model="recoveryCode" type="text"
-              class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none"
+              class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
               placeholder="XXXX-XXXX-XXXX" @keyup.enter="handleRecoveryLogin" />
           </div>
 
           <button @click="handleRecoveryLogin"
-            class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-white font-medium rounded-lg text-sm transition-colors cursor-pointer">
+            class="w-full py-2.5 bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent font-medium rounded-lg text-sm transition-colors cursor-pointer">
             使用備用碼登入
           </button>
 

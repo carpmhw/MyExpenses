@@ -16,12 +16,12 @@ withDefaults(defineProps<{
     :class="[
       'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
       variant === 'ghost'
-        ? 'bg-transparent text-text-secondary hover:bg-gray-100 dark:hover:bg-gray-700'
+        ? 'bg-transparent text-text-secondary hover:bg-bg-control-hover'
         : variant === 'danger'
-          ? 'bg-red-500 text-white hover:bg-red-600'
+          ? 'bg-color-expense-action text-color-expense-action-text hover:bg-color-expense-action/90'
           : variant === 'warning'
-            ? 'bg-amber-500 text-white hover:bg-amber-600'
-            : 'bg-accent-primary text-white hover:bg-accent-primary-hover',
+            ? 'bg-color-warning-action text-color-warning-action-text hover:bg-color-warning-action/90'
+            : 'bg-accent-primary text-text-on-accent hover:bg-accent-primary-hover',
       (disabled || loading) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
     ]"
   >

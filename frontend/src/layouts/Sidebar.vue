@@ -112,8 +112,8 @@ function goToSettings() {
             'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors mb-1',
             isTablet ? 'justify-center' : '',
             isActive(item.route)
-              ? 'bg-[#1E293B] text-text-on-dark'
-              : 'text-text-on-dark-muted hover:text-text-on-dark hover:bg-white/5',
+              ? 'bg-bg-sidebar-active text-text-on-dark'
+              : 'text-text-on-dark-muted hover:text-text-on-dark hover:bg-bg-sidebar-raised',
           ]"
           @click="handleNavClick"
         >
@@ -124,9 +124,9 @@ function goToSettings() {
     </nav>
 
     <!-- Footer: dark mode toggle + user card -->
-    <div class="p-4 border-t border-white/10">
+    <div class="p-4 border-t border-border-sidebar-divider">
       <button
-        class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-text-on-dark-muted hover:text-text-on-dark hover:bg-white/5 transition-colors cursor-pointer mb-2"
+        class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-text-on-dark-muted hover:text-text-on-dark hover:bg-bg-sidebar-raised transition-colors cursor-pointer mb-2"
         :class="isTablet ? 'justify-center' : ''"
         @click="darkMode.toggle()"
       >
@@ -134,7 +134,7 @@ function goToSettings() {
         <span v-if="!isTablet">{{ darkMode.isDark.value ? '淺色模式' : '深色模式' }}</span>
       </button>
       <button
-        class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-text-on-dark-muted hover:text-text-on-dark hover:bg-white/5 transition-colors cursor-pointer mb-2"
+        class="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-text-on-dark-muted hover:text-text-on-dark hover:bg-bg-sidebar-raised transition-colors cursor-pointer mb-2"
         :class="isTablet ? 'justify-center' : ''"
         @click="emit('open-exchange-rate')"
       >
@@ -142,10 +142,10 @@ function goToSettings() {
         <span v-if="!isTablet">匯率計算機</span>
       </button>
       <button
-        :class="['flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm transition-colors cursor-pointer hover:bg-white/5', isTablet ? 'justify-center' : '']"
+        :class="['flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm transition-colors cursor-pointer hover:bg-bg-sidebar-raised', isTablet ? 'justify-center' : '']"
         @click="goToSettings"
       >
-        <div class="w-9 h-9 rounded-full bg-accent-primary flex items-center justify-center text-white font-semibold text-sm shrink-0">
+        <div class="w-9 h-9 rounded-full bg-accent-primary flex items-center justify-center text-text-on-accent font-semibold text-sm shrink-0">
           {{ (auth.user.value?.displayName || 'U')[0].toUpperCase() }}
         </div>
         <div v-if="!isTablet" class="flex flex-col text-left">
