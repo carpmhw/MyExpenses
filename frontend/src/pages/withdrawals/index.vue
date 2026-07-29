@@ -225,8 +225,8 @@ onMounted(async () => {
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-red-500 dark:bg-red-700 flex items-center justify-center">
-            <Icon name="banknote" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-expense-action flex items-center justify-center">
+            <Icon name="banknote" :size="22" class="text-color-expense-action-text" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">總提款金額</p>
@@ -236,8 +236,8 @@ onMounted(async () => {
       </Card>
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-amber-500 dark:bg-amber-700 flex items-center justify-center">
-            <Icon name="hash" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-warning flex items-center justify-center">
+            <Icon name="hash" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">提款筆數</p>
@@ -247,8 +247,8 @@ onMounted(async () => {
       </Card>
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-blue-500 dark:bg-blue-700 flex items-center justify-center">
-            <Icon name="calculator" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-info flex items-center justify-center">
+            <Icon name="calculator" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">平均每筆</p>
@@ -258,8 +258,8 @@ onMounted(async () => {
       </Card>
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-green-500 dark:bg-green-700 flex items-center justify-center">
-            <Icon name="arrow-up" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-income flex items-center justify-center">
+            <Icon name="arrow-up" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">最高單筆</p>
@@ -276,14 +276,14 @@ onMounted(async () => {
           v-model="startDate"
           type="date"
           @change="validateDateRange"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+           class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         />
         <span class="text-text-secondary">~</span>
         <input
           v-model="endDate"
           type="date"
           @change="validateDateRange"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+           class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         />
         <span class="text-xs text-text-tertiary">（最多 1 年）</span>
       </div>
@@ -292,18 +292,18 @@ onMounted(async () => {
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無提款紀錄</div>
         </template>
-        <tr v-for="(item, idx) in withdrawals" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="(item, idx) in withdrawals" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
           <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[100px]">{{ item.date.slice(0, 10) }}</td>
           <td class="py-3 px-4 w-[180px]">
             <span
-              class="inline-flex items-center px-2 py-0.5 rounded-md text-xs border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
+              class="inline-flex items-center px-2 py-0.5 rounded-md text-xs border border-color-info bg-color-info-bg text-color-info-text"
             >
               {{ item.bankAccount?.bankName }}
             </span>
           </td>
           <td class="py-3 px-4 text-right w-[130px]">
-            <span class="font-semibold text-sm text-red-600 dark:text-red-400">
+            <span class="font-semibold text-sm text-color-expense-text">
               {{ formatMoney(item.amount) }}
             </span>
           </td>
@@ -311,13 +311,13 @@ onMounted(async () => {
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />
@@ -354,7 +354,7 @@ onMounted(async () => {
           <input
             v-model="form.date"
             type="date"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+             class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
             required
           />
         </div>
@@ -366,7 +366,7 @@ onMounted(async () => {
             :error="formErrors.bankAccountId"
             @update:model-value="form.bankAccountId = Number($event)"
           />
-          <p v-if="formErrors.bankAccountId" class="mt-1 text-xs text-red-500">{{ formErrors.bankAccountId }}</p>
+          <p v-if="formErrors.bankAccountId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.bankAccountId }}</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">說明</label>

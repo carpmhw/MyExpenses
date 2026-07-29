@@ -56,7 +56,7 @@ onMounted(async () => {
     </div>
 
     <div v-if="loading" class="text-center py-12 text-text-tertiary">載入中...</div>
-    <div v-else-if="error" class="text-center py-12 text-red-500">{{ error }}</div>
+    <div v-else-if="error" class="text-center py-12 text-color-expense-text">{{ error }}</div>
     <div v-else-if="result" class="space-y-6">
       <div class="grid grid-cols-2 gap-4">
         <Card>
@@ -87,10 +87,10 @@ onMounted(async () => {
                 <td class="py-3 px-3 text-text-primary font-medium">總淨值</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.netWorth.old) }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.netWorth.new) }}</td>
-                <td class="py-3 px-3 text-right" :class="result.differences.netWorth.change >= 0 ? 'text-green-600' : 'text-red-600'">
+                <td class="py-3 px-3 text-right" :class="result.differences.netWorth.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
                   {{ formatMoney(result.differences.netWorth.change) }}
                 </td>
-                <td class="py-3 px-3 text-right" :class="result.differences.netWorth.changePercent >= 0 ? 'text-green-600' : 'text-red-600'">
+                <td class="py-3 px-3 text-right" :class="result.differences.netWorth.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
                   {{ result.differences.netWorth.changePercent }}%
                 </td>
               </tr>
@@ -98,10 +98,10 @@ onMounted(async () => {
                 <td class="py-3 px-3 text-text-primary">銀行總額</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.bankBalance.old) }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.bankBalance.new) }}</td>
-                <td class="py-3 px-3 text-right" :class="result.differences.bankBalance.change >= 0 ? 'text-green-600' : 'text-red-600'">
+                <td class="py-3 px-3 text-right" :class="result.differences.bankBalance.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
                   {{ formatMoney(result.differences.bankBalance.change) }}
                 </td>
-                <td class="py-3 px-3 text-right" :class="result.differences.bankBalance.changePercent >= 0 ? 'text-green-600' : 'text-red-600'">
+                <td class="py-3 px-3 text-right" :class="result.differences.bankBalance.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
                   {{ result.differences.bankBalance.changePercent }}%
                 </td>
               </tr>
@@ -109,10 +109,10 @@ onMounted(async () => {
                 <td class="py-3 px-3 text-text-primary">股票預估賣出淨值</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.stockValue.old) }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.stockValue.new) }}</td>
-                <td class="py-3 px-3 text-right" :class="result.differences.stockValue.change >= 0 ? 'text-green-600' : 'text-red-600'">
+                <td class="py-3 px-3 text-right" :class="result.differences.stockValue.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
                   {{ formatMoney(result.differences.stockValue.change) }}
                 </td>
-                <td class="py-3 px-3 text-right" :class="result.differences.stockValue.changePercent >= 0 ? 'text-green-600' : 'text-red-600'">
+                <td class="py-3 px-3 text-right" :class="result.differences.stockValue.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
                   {{ result.differences.stockValue.changePercent }}%
                 </td>
               </tr>
@@ -139,8 +139,8 @@ onMounted(async () => {
                 <td class="py-3 px-3 text-text-primary">{{ b.bankName }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(b.oldBalance) }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(b.newBalance) }}</td>
-                <td class="py-3 px-3 text-right" :class="b.change >= 0 ? 'text-green-600' : 'text-red-600'">{{ formatMoney(b.change) }}</td>
-                <td class="py-3 px-3 text-right" :class="b.changePercent >= 0 ? 'text-green-600' : 'text-red-600'">{{ b.changePercent }}%</td>
+                <td class="py-3 px-3 text-right" :class="b.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatMoney(b.change) }}</td>
+                <td class="py-3 px-3 text-right" :class="b.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ b.changePercent }}%</td>
               </tr>
             </tbody>
           </table>
@@ -167,8 +167,8 @@ onMounted(async () => {
                 <td class="py-3 px-3 text-text-secondary font-mono">{{ s.symbol }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(s.oldValue) }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(s.newValue) }}</td>
-                <td class="py-3 px-3 text-right" :class="s.change >= 0 ? 'text-green-600' : 'text-red-600'">{{ formatMoney(s.change) }}</td>
-                <td class="py-3 px-3 text-right" :class="s.changePercent >= 0 ? 'text-green-600' : 'text-red-600'">{{ s.changePercent }}%</td>
+                <td class="py-3 px-3 text-right" :class="s.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatMoney(s.change) }}</td>
+                <td class="py-3 px-3 text-right" :class="s.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ s.changePercent }}%</td>
               </tr>
             </tbody>
           </table>

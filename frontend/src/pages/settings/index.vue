@@ -296,7 +296,7 @@ watch(() => timeZone.timeZoneId.value, value => {
   <div class="p-6 max-w-2xl mx-auto space-y-6">
     <h1 class="text-2xl font-bold text-text-primary">使用者設定</h1>
 
-    <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+    <section class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
       <h2 class="text-lg font-semibold text-text-primary">個人資料</h2>
 
       <div>
@@ -308,16 +308,16 @@ watch(() => timeZone.timeZoneId.value, value => {
         <label class="block text-sm font-medium text-text-secondary mb-1">顯示名稱</label>
         <div class="flex gap-2">
           <input v-model="displayName" type="text"
-            class="flex-1 px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none" />
+             class="flex-1 px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none" />
           <button @click="saveProfile" :disabled="saving"
-            class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-white rounded-lg text-sm transition-colors cursor-pointer">
+            class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-text-on-accent rounded-lg text-sm transition-colors cursor-pointer">
             {{ saving ? '儲存中...' : '儲存' }}
           </button>
         </div>
       </div>
     </section>
 
-    <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+    <section class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
       <div>
         <h2 class="text-lg font-semibold text-text-primary">系統時區</h2>
         <p class="text-sm text-text-secondary mt-1">日期預設、報表區間、時間顯示與自動快照排程都會使用此時區。</p>
@@ -325,53 +325,53 @@ watch(() => timeZone.timeZoneId.value, value => {
 
       <div class="flex gap-2">
         <select v-model="selectedTimeZone"
-          class="flex-1 px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none">
+          class="flex-1 px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none">
           <option v-for="option in timeZoneOptions" :key="option.value" :value="option.value">
             {{ option.label }}
           </option>
         </select>
         <button @click="saveTimeZone" :disabled="savingTimeZone || selectedTimeZone === timeZone.timeZoneId.value"
-          class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-white rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap">
+          class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-text-on-accent rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap">
           {{ savingTimeZone ? '儲存中...' : '儲存' }}
         </button>
       </div>
       <p class="text-xs text-text-secondary">目前設定：{{ timeZone.timeZoneId.value }}</p>
     </section>
 
-    <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+    <section class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
       <h2 class="text-lg font-semibold text-text-primary">修改密碼</h2>
 
       <div>
         <label class="block text-sm font-medium text-text-secondary mb-1">目前密碼</label>
         <input v-model="currentPassword" type="password"
-          class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none" />
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none" />
       </div>
 
       <div>
         <label class="block text-sm font-medium text-text-secondary mb-1">新密碼</label>
         <input v-model="newPassword" type="password" minlength="6"
-          class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none" />
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none" />
       </div>
 
       <div>
         <label class="block text-sm font-medium text-text-secondary mb-1">確認新密碼</label>
         <input v-model="confirmNewPassword" type="password"
-          class="w-full px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none" />
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none" />
       </div>
 
       <button @click="changePassword" :disabled="changingPassword"
-        class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-white rounded-lg text-sm transition-colors cursor-pointer">
+        class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-text-on-accent rounded-lg text-sm transition-colors cursor-pointer">
         {{ changingPassword ? '更新中...' : '更新密碼' }}
       </button>
     </section>
 
-    <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+    <section class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
       <h2 class="text-lg font-semibold text-text-primary">兩步驟驗證</h2>
 
       <template v-if="!twoFactorEnabled && !setupMode">
         <p class="text-sm text-text-secondary">啟用兩步驟驗證來提升帳戶安全性。</p>
         <button @click="setup2fa"
-          class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover text-white rounded-lg text-sm transition-colors cursor-pointer">
+          class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent rounded-lg text-sm transition-colors cursor-pointer">
           啟用兩步驟驗證
         </button>
       </template>
@@ -392,10 +392,10 @@ watch(() => timeZone.timeZoneId.value, value => {
           <label class="block text-sm font-medium text-text-secondary mb-1">輸入驗證碼確認</label>
           <div class="flex gap-2">
             <input v-model="verifyCode" type="text" maxlength="6" inputmode="numeric"
-              class="flex-1 px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none tracking-widest"
+            class="flex-1 px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none tracking-widest"
               placeholder="000000" />
             <button @click="verify2faSetup" :disabled="verifying"
-              class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-white rounded-lg text-sm transition-colors cursor-pointer">
+              class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-text-on-accent rounded-lg text-sm transition-colors cursor-pointer">
               {{ verifying ? '驗證中...' : '確認' }}
             </button>
           </div>
@@ -408,21 +408,21 @@ watch(() => timeZone.timeZoneId.value, value => {
       </template>
 
       <template v-if="twoFactorEnabled">
-        <div class="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-          <span class="w-2 h-2 rounded-full bg-green-500" />
+        <div class="flex items-center gap-2 text-sm text-color-income-text">
+          <span class="w-2 h-2 rounded-full bg-color-income" />
           兩步驟驗證已啟用
         </div>
 
         <button @click="disable2fa"
-          class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm transition-colors cursor-pointer">
+          class="px-4 py-2 bg-color-expense-action hover:bg-color-expense-action/90 text-color-expense-action-text rounded-lg text-sm transition-colors cursor-pointer">
           停用兩步驟驗證
         </button>
 
-        <div v-if="showRecoveryCodes && recoveryCodes.length > 0" class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-          <p class="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-2">備用碼（請妥善保存）</p>
-          <p class="text-xs text-yellow-600 dark:text-yellow-400 mb-3">每個備用碼只能使用一次。此為最後一次顯示。</p>
+        <div v-if="showRecoveryCodes && recoveryCodes.length > 0" class="bg-color-warning-bg border border-color-warning rounded-lg p-4">
+          <p class="text-sm font-medium text-color-warning-text mb-2">備用碼（請妥善保存）</p>
+          <p class="text-xs text-color-warning-text mb-3">每個備用碼只能使用一次。此為最後一次顯示。</p>
           <div class="grid grid-cols-1 gap-1">
-            <code v-for="(code, i) in recoveryCodes" :key="i" class="block font-mono text-sm bg-white dark:bg-bg-app rounded px-3 py-1.5">{{ code }}</code>
+            <code v-for="(code, i) in recoveryCodes" :key="i" class="block font-mono text-sm bg-bg-app rounded px-3 py-1.5">{{ code }}</code>
           </div>
         </div>
 
@@ -433,19 +433,19 @@ watch(() => timeZone.timeZoneId.value, value => {
       </template>
     </section>
 
-    <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+    <section class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
       <h2 class="text-lg font-semibold text-text-primary">API 金鑰管理</h2>
 
       <div class="flex gap-2">
         <input v-model="newTokenName" type="text" placeholder="金鑰名稱"
-          class="flex-1 px-3 py-2 rounded-lg border border-border-color bg-white dark:bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-accent-primary focus:border-transparent outline-none" />
+            class="flex-1 px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none" />
         <button @click="createToken" :disabled="creatingToken"
-          class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-white rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap">
+          class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover disabled:opacity-50 text-text-on-accent rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap">
           {{ creatingToken ? '建立中...' : '建立新金鑰' }}
         </button>
       </div>
 
-      <div class="rounded-lg border border-border-color bg-white dark:bg-bg-app">
+      <div class="rounded-lg border border-border-default bg-bg-app">
         <button type="button" @click="scopeOptionsExpanded = !scopeOptionsExpanded"
           class="w-full flex items-center justify-between gap-3 p-3 text-left cursor-pointer bg-transparent border-none">
           <span>
@@ -462,9 +462,9 @@ watch(() => timeZone.timeZoneId.value, value => {
           <p class="text-xs text-text-secondary">未勾選任何權限的金鑰將無法呼叫業務 API。</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <label v-for="scope in apiTokenScopeOptions" :key="scope.value"
-            class="flex items-start gap-2 p-3 rounded-lg border border-border-color bg-white dark:bg-bg-card cursor-pointer hover:border-accent-primary transition-colors">
+            class="flex items-start gap-2 p-3 rounded-lg border border-border-default bg-bg-card cursor-pointer hover:border-accent-primary transition-colors">
             <input v-model="newTokenScopes" :value="scope.value" type="checkbox"
-              class="mt-1 rounded border-border-color text-accent-primary focus:ring-accent-primary" />
+              class="mt-1 rounded border-border-strong text-accent-primary focus:ring-focus-ring" />
             <span>
               <span class="block text-sm font-medium text-text-primary">{{ scope.label }}</span>
               <span class="block text-xs text-text-secondary">{{ scope.description }}</span>
@@ -474,13 +474,13 @@ watch(() => timeZone.timeZoneId.value, value => {
         </div>
       </div>
 
-      <div v-if="newlyCreatedToken" class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2">
-        <p class="text-sm font-medium text-green-800 dark:text-green-200">金鑰已建立（僅顯示一次，請立即複製）</p>
+      <div v-if="newlyCreatedToken" class="bg-color-income-bg border border-color-income rounded-lg p-4 space-y-2">
+        <p class="text-sm font-medium text-color-income-text">金鑰已建立（僅顯示一次，請立即複製）</p>
         <div class="flex gap-2">
           <input :value="newlyCreatedToken.token" type="text" readonly
-            class="flex-1 px-3 py-2 rounded-lg border border-green-300 dark:border-green-700 bg-white dark:bg-bg-app text-text-primary text-sm font-mono" />
+            class="flex-1 px-3 py-2 rounded-lg border border-color-income bg-bg-app text-text-primary text-sm font-mono" />
           <button @click="copyToken"
-            class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap">
+            class="px-3 py-2 bg-color-income-action hover:bg-color-income-action/90 text-color-income-action-text rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap">
             複製
           </button>
         </div>
@@ -493,7 +493,7 @@ watch(() => timeZone.timeZoneId.value, value => {
       <div v-if="activeTokens.length > 0" class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-left text-text-secondary border-b border-border-color">
+            <tr class="text-left text-text-secondary border-b border-border-default">
               <th class="pb-2 pr-4 font-medium">名稱</th>
               <th class="pb-2 pr-4 font-medium">前綴</th>
               <th class="pb-2 pr-4 font-medium">權限</th>
@@ -503,7 +503,7 @@ watch(() => timeZone.timeZoneId.value, value => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="token in activeTokens" :key="token.id" class="border-b border-border-color">
+            <tr v-for="token in activeTokens" :key="token.id" class="border-b border-border-default">
               <td class="py-2 pr-4 text-text-primary">{{ token.name }}</td>
               <td class="py-2 pr-4 text-text-secondary font-mono">{{ token.prefix }}...</td>
               <td class="py-2 pr-4 min-w-48">
@@ -513,13 +513,13 @@ watch(() => timeZone.timeZoneId.value, value => {
                     {{ getScopeLabel(scope) }}
                   </span>
                 </div>
-                <span v-else class="text-xs text-red-500">無權限</span>
+                <span v-else class="text-xs text-color-expense-text">無權限</span>
               </td>
               <td class="py-2 pr-4 text-text-secondary whitespace-nowrap">{{ formatDate(token.createdAt) }}</td>
               <td class="py-2 pr-4 text-text-secondary whitespace-nowrap">{{ token.lastUsedAt ? formatDate(token.lastUsedAt) : '從未使用' }}</td>
               <td class="py-2">
                 <button @click="revokingToken = token"
-                  class="text-red-500 hover:text-red-700 text-sm cursor-pointer bg-transparent border-none">
+                   class="text-color-expense-text hover:text-color-expense-text text-sm cursor-pointer bg-transparent border-none">
                   撤銷
                 </button>
               </td>
@@ -530,15 +530,15 @@ watch(() => timeZone.timeZoneId.value, value => {
       <p v-else class="text-sm text-text-secondary">尚無 API 金鑰。</p>
 
       <div v-if="revokingToken" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="revokingToken = null">
-        <div class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-xl max-w-sm mx-4 space-y-4">
+        <div class="bg-bg-card border border-border-default rounded-xl p-6 shadow-xl max-w-sm mx-4 space-y-4">
           <p class="text-text-primary">確定要撤銷「{{ revokingToken.name }}」嗎？此操作無法復原。</p>
           <div class="flex justify-end gap-2">
             <button @click="revokingToken = null"
-              class="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text-primary rounded-lg text-sm transition-colors cursor-pointer">
+              class="px-4 py-2 bg-bg-raised hover:bg-bg-active text-text-primary rounded-lg text-sm transition-colors cursor-pointer">
               取消
             </button>
             <button @click="revoke" :disabled="revoking"
-              class="px-4 py-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg text-sm transition-colors cursor-pointer">
+              class="px-4 py-2 bg-color-expense-action hover:bg-color-expense-action/90 disabled:opacity-50 text-color-expense-action-text rounded-lg text-sm transition-colors cursor-pointer">
               {{ revoking ? '撤銷中...' : '確認撤銷' }}
             </button>
           </div>
@@ -546,15 +546,15 @@ watch(() => timeZone.timeZoneId.value, value => {
       </div>
     </section>
 
-    <section class="bg-white dark:bg-bg-card rounded-xl p-6 shadow-sm border border-border-color space-y-4">
+    <section class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">
       <button @click="logout"
-        class="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-text-primary rounded-lg text-sm transition-colors cursor-pointer">
+        class="px-4 py-2 bg-bg-raised hover:bg-bg-active text-text-primary rounded-lg text-sm transition-colors cursor-pointer">
         登出
       </button>
-      <div class="pt-3 border-t border-border-color">
+      <div class="pt-3 border-t border-border-default">
         <p class="text-xs text-text-secondary mb-2">使所有已登入裝置的 token 失效（需要重新登入）</p>
         <button @click="logoutAll"
-          class="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm transition-colors cursor-pointer">
+          class="px-4 py-2 bg-color-warning-action hover:bg-color-warning-action/90 text-color-warning-action-text rounded-lg text-sm transition-colors cursor-pointer">
           登出所有裝置
         </button>
       </div>

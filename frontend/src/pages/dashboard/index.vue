@@ -184,7 +184,7 @@ function formatEventDateMMDD(timestamp: string): string {
           </button>
         </div>
         <button
-          class="flex items-center gap-1.5 bg-bg-card border border-border-subtle rounded-lg px-3.5 py-2 text-xs font-medium text-text-primary hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+          class="flex items-center gap-1.5 bg-bg-card border border-border-subtle rounded-lg px-3.5 py-2 text-xs font-medium text-text-primary hover:bg-bg-raised cursor-pointer"
           @click="router.push('/reports')"
         >
           <Icon name="ChartColumn" :size="15" class="text-text-secondary" />
@@ -201,15 +201,15 @@ function formatEventDateMMDD(timestamp: string): string {
       <!-- Hero Card -->
       <div
         class="flex rounded-2xl overflow-hidden"
-        style="background: linear-gradient(135deg, #0F172A, #1E293B 50%, #065F46)"
+        style="background: linear-gradient(135deg, var(--color-bg-hero-start), var(--color-bg-hero-mid) 50%, var(--color-bg-hero-end))"
       >
         <div class="flex-1 flex flex-col justify-between p-7 gap-3">
           <div class="space-y-3">
-            <div class="inline-flex items-center gap-1.5 bg-emerald-500/20 dark:bg-emerald-500/10 rounded-full px-3 py-1">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 dark:bg-emerald-300" />
-              <span class="text-xs font-medium text-emerald-300">本月可支配餘額</span>
+            <div class="inline-flex items-center gap-1.5 bg-color-income-hero-bg rounded-full px-3 py-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-color-income-hero-dot" />
+              <span class="text-xs font-medium text-color-income-hero-text">本月可支配餘額</span>
             </div>
-            <p class="text-4xl font-bold text-white tracking-tight">
+            <p class="text-4xl font-bold text-text-on-dark tracking-tight">
               {{ formatMoney(disposableBalance) }}
             </p>
             <div class="flex items-center gap-4">
@@ -217,22 +217,22 @@ function formatEventDateMMDD(timestamp: string): string {
                 <Icon
                   :name="comparisonPct >= 0 ? 'TrendingUp' : 'TrendingDown'"
                   :size="15"
-                  :class="comparisonPct >= 0 ? 'text-emerald-400' : 'text-red-400'"
+                  :class="comparisonPct >= 0 ? 'text-color-income-hero-fg' : 'text-color-expense-hero-fg'"
                 />
-                <span :class="comparisonPct >= 0 ? 'text-emerald-400' : 'text-red-400'" class="text-xs">
+                <span :class="comparisonPct >= 0 ? 'text-color-income-hero-fg' : 'text-color-expense-hero-fg'" class="text-xs">
                   較上月 {{ comparisonPct >= 0 ? '+' : '' }}{{ comparisonPct.toFixed(1) }}%
                 </span>
               </div>
-              <span class="w-px h-3 bg-slate-600" />
+              <span class="w-px h-3 bg-bg-hero-divider" />
               <div class="flex items-center gap-1.5">
-                <Icon name="CircleDot" :size="14" class="text-slate-400" />
-                <span class="text-xs text-slate-400">已更新於剛剛</span>
+                <Icon name="CircleDot" :size="14" class="text-text-on-hero-muted" />
+                <span class="text-xs text-text-on-hero-muted">已更新於剛剛</span>
               </div>
             </div>
           </div>
           <div class="flex gap-2.5">
             <button
-              class="inline-flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg px-3.5 py-2 cursor-pointer"
+              class="inline-flex items-center gap-1.5 bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent text-xs font-semibold rounded-lg px-3.5 py-2 cursor-pointer"
               @click="router.push('/reports')"
             >
               <Icon name="FileText" :size="14" />
@@ -242,30 +242,30 @@ function formatEventDateMMDD(timestamp: string): string {
         </div>
         <div class="w-[280px] flex flex-col justify-center gap-2.5 pr-6">
           <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-lg bg-emerald-500/30 flex items-center justify-center">
-              <Icon name="TrendingDown" :size="18" class="text-emerald-400" />
+            <div class="w-9 h-9 rounded-lg bg-color-income-hero-icon-bg flex items-center justify-center">
+              <Icon name="TrendingDown" :size="18" class="text-color-income-hero-fg" />
             </div>
             <div>
-              <p class="text-xs text-slate-400">本期收入</p>
-              <p class="text-base font-bold text-white">{{ formatMoney(totalWithdrawals) }}</p>
+              <p class="text-xs text-text-on-hero-muted">本期收入</p>
+              <p class="text-base font-bold text-text-on-dark">{{ formatMoney(totalWithdrawals) }}</p>
             </div>
           </div>
           <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-lg bg-red-500/30 flex items-center justify-center">
-              <Icon name="Receipt" :size="18" class="text-red-300" />
+            <div class="w-9 h-9 rounded-lg bg-color-expense-hero-icon-bg flex items-center justify-center">
+              <Icon name="Receipt" :size="18" class="text-color-expense-hero-fg" />
             </div>
             <div>
-              <p class="text-xs text-slate-400">本期支出</p>
-              <p class="text-base font-bold text-white">{{ formatMoney(totalExpenses) }}</p>
+              <p class="text-xs text-text-on-hero-muted">本期支出</p>
+              <p class="text-base font-bold text-text-on-dark">{{ formatMoney(totalExpenses) }}</p>
             </div>
           </div>
           <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-lg bg-purple-500/30 flex items-center justify-center">
-              <Icon name="CreditCard" :size="18" class="text-purple-300" />
+            <div class="w-9 h-9 rounded-lg bg-color-credit-hero-icon-bg flex items-center justify-center">
+              <Icon name="CreditCard" :size="18" class="text-color-credit-hero-fg" />
             </div>
             <div>
-              <p class="text-xs text-slate-400">本期分期</p>
-              <p class="text-base font-bold text-white">{{ formatMoney(installmentMonthlyDue) }}</p>
+              <p class="text-xs text-text-on-hero-muted">本期分期</p>
+              <p class="text-base font-bold text-text-on-dark">{{ formatMoney(installmentMonthlyDue) }}</p>
             </div>
           </div>
         </div>
@@ -275,31 +275,31 @@ function formatEventDateMMDD(timestamp: string): string {
       <div class="flex gap-5">
         <!-- Withdraw Card -->
         <div class="w-[340px] bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
-          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-[#ECFDF5] to-[#D1FAE5] dark:from-emerald-900/40 dark:to-emerald-800/30">
+          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-income-panel-start to-color-income-panel-end">
             <div class="flex items-center gap-3.5 flex-1 min-w-0">
-              <div class="w-11 h-11 rounded-xl bg-emerald-500 dark:bg-emerald-700 flex items-center justify-center shrink-0">
-                <Icon name="TrendingDown" :size="22" class="text-white" />
+              <div class="w-11 h-11 rounded-xl bg-color-income flex items-center justify-center shrink-0">
+                <Icon name="TrendingDown" :size="22" class="text-text-on-accent" />
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <p class="text-base font-bold text-emerald-900 dark:text-emerald-100">提款</p>
-                  <span class="bg-white dark:bg-gray-800 text-emerald-700 dark:text-emerald-300 text-[10px] font-semibold rounded-full px-2 py-0.5">{{ withdrawals.length }} 筆</span>
+                  <p class="text-base font-bold text-color-income-text">提款</p>
+                  <span class="bg-bg-card text-color-income-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ withdrawals.length }} 筆</span>
                 </div>
-                <p class="text-xs text-emerald-700 dark:text-emerald-300">Withdrawals</p>
+                <p class="text-xs text-color-income-text">Withdrawals</p>
               </div>
             </div>
             <div class="text-right">
-              <p class="text-[10px] text-emerald-700 dark:text-emerald-300">本月提款合計</p>
-              <p class="text-2xl font-bold text-emerald-900 dark:text-emerald-100">{{ formatMoney(totalWithdrawals) }}</p>
+              <p class="text-[10px] text-color-income-text">本月提款合計</p>
+              <p class="text-2xl font-bold text-color-income-text">{{ formatMoney(totalWithdrawals) }}</p>
             </div>
           </div>
           <div
             v-for="w in recentWithdrawals"
             :key="w.id"
-            class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-bg-raised transition-colors"
             @click="router.push('/withdrawals')"
           >
-            <span class="text-[11px] font-medium text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 rounded px-2 py-0.5 truncate max-w-24">
+            <span class="text-[11px] font-medium text-color-income-text bg-color-income-bg rounded px-2 py-0.5 truncate max-w-24">
               {{ w.bankAccount.bankName }}
             </span>
             <span class="text-xs text-text-secondary flex-1 text-right">
@@ -317,25 +317,25 @@ function formatEventDateMMDD(timestamp: string): string {
 
         <!-- Expense Card -->
         <div class="flex-1 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
-          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-[#FEF2F2] to-[#FECACA] dark:from-red-900/40 dark:to-red-800/30">
+          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-expense-panel-start to-color-expense-panel-end">
             <div class="flex items-center gap-3.5 flex-1 min-w-0">
-              <div class="w-11 h-11 rounded-xl bg-red-500 dark:bg-red-700 flex items-center justify-center shrink-0">
-                <Icon name="Receipt" :size="22" class="text-white" />
+              <div class="w-11 h-11 rounded-xl bg-color-expense-action flex items-center justify-center shrink-0">
+                <Icon name="Receipt" :size="22" class="text-color-expense-action-text" />
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <p class="text-base font-bold text-red-900 dark:text-red-100">支出</p>
-                  <span class="bg-white dark:bg-gray-800 text-red-700 dark:text-red-300 text-[10px] font-semibold rounded-full px-2 py-0.5">{{ expenses.length }} 筆</span>
+                  <p class="text-base font-bold text-color-expense-text">支出</p>
+                  <span class="bg-bg-card text-color-expense-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ expenses.length }} 筆</span>
                 </div>
-                <p class="text-xs text-red-700 dark:text-red-300">Expenses</p>
+                <p class="text-xs text-color-expense-text">Expenses</p>
               </div>
             </div>
             <div class="text-right">
-              <p class="text-[10px] text-red-700 dark:text-red-300">本月支出合計</p>
-              <p class="text-2xl font-bold text-red-900 dark:text-red-100">{{ formatMoney(totalExpenses) }}</p>
+              <p class="text-[10px] text-color-expense-text">本月支出合計</p>
+              <p class="text-2xl font-bold text-color-expense-text">{{ formatMoney(totalExpenses) }}</p>
             </div>
           </div>
-          <div class="flex items-center gap-3 px-5 py-2.5 bg-gray-50 dark:bg-gray-800/50 border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+          <div class="flex items-center gap-3 px-5 py-2.5 bg-bg-raised border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
             <span class="w-10">日期</span>
             <span class="flex-1">類別</span>
             <span class="text-right w-20">金額</span>
@@ -343,7 +343,7 @@ function formatEventDateMMDD(timestamp: string): string {
           <div
             v-for="e in recentExpenses"
             :key="e.id"
-            class="flex items-center gap-3 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            class="flex items-center gap-3 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-bg-raised transition-colors"
             @click="router.push('/transactions')"
           >
             <span class="text-xs text-text-secondary w-10">{{ formatDateMMDD(e.date) }}</span>
@@ -351,7 +351,7 @@ function formatEventDateMMDD(timestamp: string): string {
               <p class="text-xs text-text-secondary">{{ e.category.name }}</p>
               <p class="text-sm font-semibold text-text-primary truncate">{{ e.description || '—' }}</p>
             </div>
-            <span class="text-sm font-bold text-color-expense text-right w-20">{{ formatMoney(e.amount) }}</span>
+            <span class="text-sm font-bold text-color-expense-text text-right w-20">{{ formatMoney(e.amount) }}</span>
           </div>
           <div
             v-if="recentExpenses.length === 0"
@@ -363,27 +363,27 @@ function formatEventDateMMDD(timestamp: string): string {
 
         <!-- Installment Card -->
         <div class="flex-1 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
-          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-[#F5F3FF] to-[#DDD6FE] dark:from-purple-900/40 dark:to-purple-800/30">
+          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-credit-panel-start to-color-credit-panel-end">
             <div class="flex items-center gap-3.5 flex-1 min-w-0">
-              <div class="w-11 h-11 rounded-xl bg-purple-600 dark:bg-purple-700 flex items-center justify-center shrink-0">
-                <Icon name="CreditCard" :size="22" class="text-white" />
+              <div class="w-11 h-11 rounded-xl bg-color-credit flex items-center justify-center shrink-0">
+                <Icon name="CreditCard" :size="22" class="text-text-on-accent" />
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <p class="text-base font-bold text-purple-900 dark:text-purple-100">信用卡分期</p>
-                  <span class="bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 text-[10px] font-semibold rounded-full px-2 py-0.5">
+                  <p class="text-base font-bold text-color-credit-text">信用卡分期</p>
+                  <span class="bg-bg-card text-color-credit-text text-[10px] font-semibold rounded-full px-2 py-0.5">
                     {{ activeInstallments.length }} 筆
                   </span>
                 </div>
-                <p class="text-xs text-purple-700 dark:text-purple-300">Credit Card Installments</p>
+                <p class="text-xs text-color-credit-text">Credit Card Installments</p>
               </div>
             </div>
             <div class="text-right">
-              <p class="text-[10px] text-purple-700 dark:text-purple-300">本期應繳金額</p>
-              <p class="text-2xl font-bold text-purple-900 dark:text-purple-100">{{ formatMoney(installmentMonthlyDue) }}</p>
+              <p class="text-[10px] text-color-credit-text">本期應繳金額</p>
+              <p class="text-2xl font-bold text-color-credit-text">{{ formatMoney(installmentMonthlyDue) }}</p>
             </div>
           </div>
-          <div class="flex items-center gap-2 px-5 py-2.5 bg-gray-50 dark:bg-gray-800/50 border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+          <div class="flex items-center gap-2 px-5 py-2.5 bg-bg-raised border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
             <span class="w-10">日期</span>
             <span class="flex-1">項目 / 摘要</span>
             <span class="text-right w-14">總額</span>
@@ -394,7 +394,7 @@ function formatEventDateMMDD(timestamp: string): string {
           <div
             v-for="i in recentInstallments"
             :key="i.id"
-            class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-bg-raised transition-colors"
             @click="router.push('/installments')"
           >
             <span class="text-xs text-text-secondary w-10">{{ i.transaction?.date ? formatDateMMDD(i.transaction.date) : formatEventDateMMDD(i.createdAt) }}</span>
@@ -403,10 +403,10 @@ function formatEventDateMMDD(timestamp: string): string {
             </div>
             <span class="text-xs text-text-secondary text-right w-14">{{ formatMoney(i.totalAmount) }}</span>
             <span class="w-12 flex justify-center">
-              <span class="text-[11px] font-semibold text-purple-700 bg-purple-50 dark:bg-purple-900/30 rounded px-2 py-0.5">{{ i.periods }} 期</span>
+              <span class="text-[11px] font-semibold text-color-credit-text bg-color-credit-bg rounded px-2 py-0.5">{{ i.periods }} 期</span>
             </span>
             <span class="text-xs font-semibold text-text-primary text-center w-12">{{ progressLabel(i) }}</span>
-            <span class="text-sm font-bold text-purple-700 text-right w-16">{{ formatMoney(i.perPeriod) }}</span>
+            <span class="text-sm font-bold text-color-credit-text text-right w-16">{{ formatMoney(i.perPeriod) }}</span>
           </div>
           <div
             v-if="recentInstallments.length === 0"

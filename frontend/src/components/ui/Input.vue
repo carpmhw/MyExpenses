@@ -37,11 +37,11 @@ function onInput(e: Event) {
       :disabled="disabled"
       @input="onInput"
       :class="[
-        'w-full px-3 py-2 border rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 placeholder:text-text-tertiary transition-colors',
-        error ? 'border-red-400 focus:border-red-500' : 'border-border-default focus:border-accent-primary',
+        'w-full px-3 py-2 border rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring placeholder:text-text-tertiary transition-colors',
+        error ? 'border-color-expense-text focus:border-color-expense-text' : 'border-border-strong focus:border-accent-primary',
         disabled ? 'opacity-50 cursor-not-allowed' : '',
       ]"
     >
-    <p v-if="error" class="mt-1 text-xs text-red-500">{{ error }}</p>
+    <p v-if="error" class="mt-1 text-xs text-color-expense-text">{{ error }}</p>
   </div>
 </template>

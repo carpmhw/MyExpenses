@@ -15,18 +15,16 @@ const toasts = computed(() => toast.toasts.value)
     <div
       v-for="t in toasts"
       :key="t.id"
-      :style="{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '12px 16px',
-        borderRadius: '8px',
-        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-        fontSize: '14px',
-        color: '#fff',
-        cursor: 'pointer',
-        backgroundColor: t.type === 'success' ? '#10B981' : t.type === 'error' ? '#E11D48' : t.type === 'warning' ? '#F59E0B' : '#6366F1',
-      }"
+      :class="[
+        'flex items-center gap-3 px-4 py-3 rounded-lg border border-transparent shadow-lg text-sm cursor-pointer',
+        t.type === 'success'
+          ? 'bg-color-income-action text-color-income-action-text'
+          : t.type === 'error'
+            ? 'bg-color-expense-toast text-color-expense-toast-text'
+            : t.type === 'warning'
+              ? 'bg-color-warning-action text-color-warning-action-text'
+              : 'bg-color-info-action text-color-info-action-text',
+      ]"
       @click="toast?.dismiss(t.id)"
     >
       <span>{{ t.message }}</span>

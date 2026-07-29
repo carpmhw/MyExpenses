@@ -151,7 +151,7 @@ watch(() => pagination.page.value, () => fetchList())
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無分類資料</div>
         </template>
-        <tr v-for="item in categories" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="item in categories" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 w-[180px]">
             <div class="flex items-center gap-2">
               <Icon :name="item.icon" :color="item.color" :size="18" />
@@ -161,7 +161,7 @@ watch(() => pagination.page.value, () => fetchList())
           <td class="py-3 px-4 w-[80px]">
             <span
               class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
-              :class="item.type === 'Income' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'"
+              :class="item.type === 'Income' ? 'bg-color-income-bg text-color-income-text' : 'bg-color-expense-bg text-color-expense-text'"
             >
               {{ item.type === 'Income' ? '收入' : '支出' }}
             </span>
@@ -174,13 +174,13 @@ watch(() => pagination.page.value, () => fetchList())
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />
@@ -220,11 +220,11 @@ watch(() => pagination.page.value, () => fetchList())
             <input
               v-model="form.color"
               type="color"
-              class="w-10 h-10 rounded-lg border border-border-default cursor-pointer"
+              class="w-10 h-10 rounded-lg border border-border-strong focus:outline-none focus:ring-2 focus:ring-focus-ring cursor-pointer"
             />
             <span class="text-sm text-text-secondary">{{ form.color }}</span>
           </div>
-          <p v-if="formErrors.color" class="mt-1 text-xs text-red-500">{{ formErrors.color }}</p>
+          <p v-if="formErrors.color" class="mt-1 text-xs text-color-expense-text">{{ formErrors.color }}</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">排序</label>

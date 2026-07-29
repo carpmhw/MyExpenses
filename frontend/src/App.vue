@@ -41,7 +41,7 @@ watch(() => auth.isAuthenticated.value, async (authenticated) => {
         {{ timeZone.loadError.value ? '無法載入系統時區設定。' : '載入系統時區設定中...' }}
       </p>
       <button v-if="timeZone.loadError.value" @click="timeZone.fetchTimeZone"
-        class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover text-white rounded-lg text-sm cursor-pointer">
+        class="px-4 py-2 bg-accent-primary hover:bg-accent-primary-hover text-text-on-accent rounded-lg text-sm cursor-pointer">
         重試
       </button>
     </div>

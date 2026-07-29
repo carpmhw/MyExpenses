@@ -62,7 +62,7 @@ function openPicker() {
   <div>
     <div
       class="flex items-center gap-3 px-3 py-2 border rounded-lg cursor-pointer transition-colors bg-bg-card"
-      :class="error ? 'border-red-400' : 'border-border-default hover:border-accent-primary'"
+      :class="error ? 'border-color-expense-text' : 'border-border-strong hover:border-accent-primary'"
       @click="openPicker"
     >
       <Icon v-if="modelValue" :name="modelValue" :size="20" />
@@ -70,14 +70,14 @@ function openPicker() {
       <span v-else class="text-sm text-text-tertiary">點擊選擇圖示</span>
       <span class="ml-auto text-xs text-text-tertiary">瀏覽</span>
     </div>
-    <p v-if="error" class="mt-1 text-xs text-red-500">{{ error }}</p>
+    <p v-if="error" class="mt-1 text-xs text-color-expense-text">{{ error }}</p>
 
     <Modal :open="open" title="選擇圖示" size="lg" @update:open="open = $event">
       <div class="space-y-4">
         <input
           v-model="search"
           placeholder="搜尋圖示..."
-          class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30"
+          class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring"
         >
 
         <div class="max-h-80 overflow-y-auto">
@@ -91,8 +91,8 @@ function openPicker() {
               :class="[
                 'flex flex-col items-center gap-1 p-2 rounded-lg text-xs transition-colors cursor-pointer',
                 modelValue === name
-                  ? 'bg-accent-primary/10 ring-2 ring-accent-primary'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-700',
+                   ? 'bg-accent-primary/10 ring-2 ring-focus-ring'
+                   : 'hover:bg-bg-raised',
               ]"
               @click="selectIcon(name)"
             >

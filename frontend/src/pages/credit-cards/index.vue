@@ -165,7 +165,7 @@ watch(() => pagination.page.value, () => fetchList())
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無信用卡資料</div>
         </template>
-        <tr v-for="(item, idx) in cards" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="(item, idx) in cards" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
           <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[110px]">{{ formatDate(item.createdAt) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[110px]">{{ formatDate(item.updatedAt) }}</td>
@@ -175,14 +175,14 @@ watch(() => pagination.page.value, () => fetchList())
           <td class="py-3 px-4 text-text-primary font-bold text-sm w-[140px] text-right">{{ formatCreditLimit(item.creditLimit) }}</td>
           <td class="py-3 px-4 w-[120px]">
             <span
-              class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
+              class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-color-info-bg text-color-info-text"
             >
               每月{{ item.statementDay }}日
             </span>
           </td>
           <td class="py-3 px-4 w-[120px]">
             <span
-              class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300"
+              class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-color-credit-bg text-color-credit-text"
             >
               每月{{ item.dueDay }}日
             </span>
@@ -193,13 +193,13 @@ watch(() => pagination.page.value, () => fetchList())
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />

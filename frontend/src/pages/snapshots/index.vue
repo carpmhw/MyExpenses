@@ -15,6 +15,7 @@ import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../../u
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { getSystemDateParts } from '../../utils/timezone'
+import { getThemeColor } from '../../utils/themeColor'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -33,6 +34,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 const router = useRouter()
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
+const darkMode = inject<{ isDark: { value: boolean } }>('darkMode')!
 
 const snapshots = ref<SnapshotBatch[]>([])
 const loading = ref(false)
@@ -49,6 +51,23 @@ const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
 
 const trendData = ref<TrendPoint[]>([])
+
+const chartColors = computed(() => {
+  const theme = darkMode.isDark.value ? 'dark' : 'light'
+  return {
+    text: getThemeColor('--color-text-secondary', theme === 'dark' ? '#B8C0CC' : '#4C566A'),
+    primary: getThemeColor('--color-text-primary', theme === 'dark' ? '#ECEFF4' : '#2E3440'),
+    grid: getThemeColor('--color-chart-grid', theme === 'dark' ? '#4B5563' : '#D2DAE4'),
+    axis: getThemeColor('--color-chart-axis', theme === 'dark' ? '#8794A8' : '#758399'),
+    surface: getThemeColor('--color-bg-card', theme === 'dark' ? '#3B4252' : '#F8FAFC'),
+    income: getThemeColor('--color-color-income-chart', theme === 'dark' ? '#A3BE8C' : '#6F8F5E'),
+    incomeSoft: getThemeColor('--color-color-income-chart-bg', theme === 'dark' ? 'rgb(163 190 140 / 14%)' : 'rgb(111 143 94 / 12%)'),
+    info: getThemeColor('--color-color-info-chart', theme === 'dark' ? '#81A1C1' : '#4F759D'),
+    infoSoft: getThemeColor('--color-color-info-chart-bg', theme === 'dark' ? 'rgb(129 161 193 / 14%)' : 'rgb(79 117 157 / 12%)'),
+    warning: getThemeColor('--color-color-warning-chart', theme === 'dark' ? '#EBCB8B' : '#A56C26'),
+    warningSoft: getThemeColor('--color-color-warning-chart-bg', theme === 'dark' ? 'rgb(235 203 139 / 14%)' : 'rgb(165 108 38 / 12%)'),
+  }
+})
 
 const scheduleOpen = ref(false)
 const scheduleLoading = ref(false)
@@ -106,47 +125,63 @@ const trendChartData = computed(() => ({
     {
       label: '總淨值',
       data: trendData.value.map(t => t.totalNetWorth),
-      borderColor: '#10B981',
-      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+       borderColor: chartColors.value.income,
+       backgroundColor: chartColors.value.incomeSoft,
       fill: true,
       tension: 0.3,
     },
     {
       label: '銀行總額',
       data: trendData.value.map(t => t.totalBankBalance),
-      borderColor: '#3B82F6',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+       borderColor: chartColors.value.info,
+       backgroundColor: chartColors.value.infoSoft,
       fill: true,
       tension: 0.3,
     },
     {
       label: '股票預估賣出淨值',
       data: trendData.value.map(t => t.totalStockValue),
-      borderColor: '#F59E0B',
-      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+       borderColor: chartColors.value.warning,
+       backgroundColor: chartColors.value.warningSoft,
       fill: true,
       tension: 0.3,
     },
   ],
 }))
 
-const trendChartOptions = {
+const trendChartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
     legend: {
       position: 'bottom' as const,
+      labels: { color: chartColors.value.text },
+    },
+    tooltip: {
+      backgroundColor: chartColors.value.surface,
+      titleColor: chartColors.value.primary,
+      bodyColor: chartColors.value.primary,
+      borderColor: chartColors.value.grid,
+      borderWidth: 1,
     },
   },
   scales: {
+    x: {
+      ticks: { color: chartColors.value.text },
+      grid: { color: 'transparent' },
+      border: { color: chartColors.value.axis },
+    },
     y: {
       beginAtZero: true,
       ticks: {
+        color: chartColors.value.text,
         callback: (value: string | number) => formatMoney(Number(value)),
       },
+      grid: { color: chartColors.value.grid },
+      border: { color: chartColors.value.axis },
     },
   },
-}
+}))
 
 async function fetchList() {
   loading.value = true
@@ -286,7 +321,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           比對選取快照
         </Button>
         <button
-          class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+          class="p-2 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
           title="自動排程設定"
           @click="openSchedule"
         >
@@ -302,7 +337,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <input
             v-model="dateStart"
             type="date"
-            class="w-full sm:w-44 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full sm:w-44 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
           />
         </div>
         <div>
@@ -310,7 +345,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <input
             v-model="dateEnd"
             type="date"
-            class="w-full sm:w-44 px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full sm:w-44 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
           />
         </div>
         <p class="text-xs text-text-secondary sm:pb-2">預設顯示最近一年快照，列表與趨勢圖會套用相同區間。</p>
@@ -334,12 +369,12 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無快照資料</div>
         </template>
-        <tr v-for="(item, index) in snapshots" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="(item, index) in snapshots" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 w-[60px]">
             <input
               type="checkbox"
               :checked="selectedIds.includes(item.id)"
-              class="w-4 h-4 rounded border-gray-300 cursor-pointer"
+              class="w-4 h-4 rounded border-border-strong cursor-pointer"
               @change="toggleSelect(item.id)"
             />
           </td>
@@ -352,7 +387,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <td class="py-3 px-4 w-[120px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 title="檢視明細"
                 aria-label="檢視明細"
                 @click="showDetail(item)"
@@ -360,7 +395,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
                 <Icon name="eye" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 title="刪除快照"
                 aria-label="刪除快照"
                 @click="confirmDelete(item.id)"
@@ -395,7 +430,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <input
             type="checkbox"
             :checked="scheduleForm.isEnabled"
-            class="w-4 h-4 rounded border-gray-300 cursor-pointer"
+            class="w-4 h-4 rounded border-border-strong cursor-pointer"
             @change="scheduleForm.isEnabled = !scheduleForm.isEnabled"
           />
         </div>
@@ -404,7 +439,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <label class="block text-sm font-medium text-text-primary mb-1">頻率</label>
           <select
             v-model="scheduleForm.frequency"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
           >
             <option value="Daily">每日</option>
             <option value="Weekly">每週</option>
@@ -417,7 +452,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <select
             :value="scheduleForm.dayOfWeek ?? 1"
             @change="scheduleForm.dayOfWeek = Number(($event.target as HTMLSelectElement).value)"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
           >
             <option :value="0">日</option>
             <option :value="1">一</option>
@@ -436,7 +471,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
             type="number"
             min="1"
             max="31"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
             @input="scheduleForm.dayOfMonth = Number(($event.target as HTMLInputElement).value) || 1"
           />
         </div>
@@ -446,7 +481,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <input
             v-model="scheduleForm.timeOfDay"
             type="time"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
           />
         </div>
 

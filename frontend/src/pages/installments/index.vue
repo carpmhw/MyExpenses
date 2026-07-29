@@ -328,8 +328,8 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-blue-500 dark:bg-blue-700 flex items-center justify-center">
-            <Icon name="receipt" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-info flex items-center justify-center">
+            <Icon name="receipt" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">總分期筆數</p>
@@ -339,8 +339,8 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
       </Card>
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-amber-500 dark:bg-amber-700 flex items-center justify-center">
-            <Icon name="clock" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-warning flex items-center justify-center">
+            <Icon name="clock" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">進行中</p>
@@ -350,12 +350,12 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
       </Card>
       <Card>
         <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-xl bg-green-500 dark:bg-green-700 flex items-center justify-center">
-            <Icon name="credit-card" :size="22" class="text-white" />
+          <div class="w-11 h-11 rounded-xl bg-color-credit flex items-center justify-center">
+            <Icon name="credit-card" :size="22" class="text-text-on-accent" />
           </div>
           <div>
             <p class="text-xs text-text-secondary">本月應繳總額</p>
-            <p class="text-xl font-bold text-green-600">{{ formatMoney(stats.monthlyDue) }}</p>
+            <p class="text-xl font-bold text-color-credit-text">{{ formatMoney(stats.monthlyDue) }}</p>
           </div>
         </div>
       </Card>
@@ -381,7 +381,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
               <td class="py-2 pr-2 text-text-primary">{{ bill.card?.bankName }} ({{ bill.card?.lastFourDigits }})</td>
               <td class="py-2 pr-2 text-text-primary">{{ bill.period }}</td>
               <td class="py-2 pr-2 text-right text-text-primary font-medium">{{ formatMoney(bill.totalAmount) }}</td>
-              <td class="py-2 pr-2" :class="isDateOnlyBefore(bill.dueDate, timeZone.getToday()) ? 'text-red-500 font-medium' : 'text-text-primary'">
+              <td class="py-2 pr-2" :class="isDateOnlyBefore(bill.dueDate, timeZone.getToday()) ? 'text-color-expense-text font-medium' : 'text-text-primary'">
                 {{ formatDate(bill.dueDate) }}
               </td>
             </tr>
@@ -397,7 +397,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
 
     <div v-else class="mb-6">
       <Card>
-        <div class="flex items-center gap-2 text-sm text-green-600">
+        <div class="flex items-center gap-2 text-sm text-color-income-text">
           <Icon name="check-circle" :size="18" />
           <span>目前無未繳帳單</span>
         </div>
@@ -411,20 +411,20 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           v-model="startDate"
           type="date"
           @change="validateDateRange"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         />
         <span class="text-text-secondary">~</span>
         <input
           v-model="endDate"
           type="date"
           @change="validateDateRange"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         />
         <span class="text-xs text-text-tertiary">（最多 1 年）</span>
         <span class="text-sm font-medium text-text-primary ml-2">信用卡</span>
         <select
           v-model="filterCardId"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         >
           <option value="">全部</option>
           <option v-for="c in creditCards" :key="c.id" :value="c.id">{{ c.bankName }} ({{ c.lastFourDigits }})</option>
@@ -432,7 +432,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
         <span class="text-sm font-medium text-text-primary ml-2">狀態</span>
         <select
           v-model="filterStatus"
-          class="px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         >
           <option value="">全部</option>
           <option value="Active">進行中</option>
@@ -443,7 +443,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無分期資料</div>
         </template>
-        <tr v-for="(item, idx) in installments" :key="item.id" class="border-b border-border-default hover:bg-gray-100 dark:hover:bg-gray-700">
+        <tr v-for="(item, idx) in installments" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
           <td class="py-3 px-4 text-text-primary text-sm whitespace-nowrap w-[100px]">{{ formatDate(item.purchaseDate) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm">{{ item.description }}</td>
@@ -456,18 +456,18 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
             <span
               class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
               :class="item.status === 'PaidOff'
-                ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
-                : 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'"
+                 ? 'bg-color-income-bg text-color-income-text'
+                 : 'bg-color-info-bg text-color-info-text'"
             >
               {{ item.status === 'PaidOff' ? '已結清' : '進行中' }}
             </span>
           </td>
           <td class="py-3 px-4 w-[130px]">
             <div class="flex items-center gap-2">
-              <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+              <div class="flex-1 h-2 bg-bg-raised rounded-full overflow-hidden">
                 <div
                   class="h-full rounded-full transition-all"
-                  :class="progressPercent(item) >= 100 ? 'bg-green-500' : 'bg-blue-500'"
+                  :class="progressPercent(item) >= 100 ? 'bg-color-income' : 'bg-color-info'"
                   :style="{ width: `${progressPercent(item)}%` }"
                 />
               </div>
@@ -477,21 +477,21 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           <td class="py-3 px-4 w-[120px]">
             <div class="flex items-center gap-1">
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 title="檢視時程"
                 @click="openSchedule(item)"
               >
                 <Icon name="calendar" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-text-secondary cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
                 title="編輯"
                 @click="openEdit(item)"
               >
                 <Icon name="pencil" :size="16" />
               </button>
               <button
-                class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 cursor-pointer transition-colors"
+                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
                 title="刪除"
                 @click="confirmDelete(item.id)"
               >
@@ -529,7 +529,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
               :error="formErrors.totalAmount"
               @update:model-value="form.totalAmount = Number($event) || 0"
             />
-            <p v-if="hasPaidPayments" class="mt-1 text-xs text-amber-500">已有繳款記錄，不可修改</p>
+            <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-text-primary mb-1">期數</label>
@@ -541,7 +541,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
               :error="formErrors.periods"
               @update:model-value="form.periods = Number($event) || 1"
             />
-            <p v-if="hasPaidPayments" class="mt-1 text-xs text-amber-500">已有繳款記錄，不可修改</p>
+            <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           </div>
         </div>
         <div>
@@ -553,8 +553,8 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
             :disabled="hasPaidPayments"
             @update:model-value="form.cardId = Number($event) || null"
           />
-          <p v-if="hasPaidPayments" class="mt-1 text-xs text-amber-500">已有繳款記錄，不可修改</p>
-          <p v-else-if="formErrors.cardId" class="mt-1 text-xs text-red-500">{{ formErrors.cardId }}</p>
+          <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
+          <p v-else-if="formErrors.cardId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.cardId }}</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">刷卡日期</label>
@@ -562,10 +562,10 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
             v-model="form.purchaseDate"
             type="date"
             :disabled="hasPaidPayments"
-            class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary disabled:opacity-60 disabled:cursor-not-allowed"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary disabled:opacity-60 disabled:cursor-not-allowed"
           />
-          <p v-if="hasPaidPayments" class="mt-1 text-xs text-amber-500">已有繳款記錄，不可修改</p>
-          <p v-else-if="formErrors.purchaseDate" class="mt-1 text-xs text-red-500">{{ formErrors.purchaseDate }}</p>
+          <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
+          <p v-else-if="formErrors.purchaseDate" class="mt-1 text-xs text-color-expense-text">{{ formErrors.purchaseDate }}</p>
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>
@@ -603,8 +603,8 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
                 <span
                   class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
                   :class="p.isPaid
-                    ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'"
+                     ? 'bg-color-income-bg text-color-income-text'
+                     : 'bg-bg-raised text-text-secondary'"
                 >
                   {{ p.isPaid ? '已繳' : '未繳' }}
                 </span>
@@ -612,14 +612,14 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
               <td class="py-2 px-2 text-center">
                 <button
                   v-if="!p.isPaid"
-                  class="px-2 py-1 rounded text-xs font-medium bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900 cursor-pointer transition-colors"
+                  class="px-2 py-1 rounded text-xs font-medium bg-color-income-bg text-color-income-text hover:bg-bg-raised cursor-pointer transition-colors"
                   @click="confirmMarkPayment(p.id, false)"
                 >
                   標記已繳
                 </button>
                 <button
                   v-else
-                  class="px-2 py-1 rounded text-xs font-medium bg-gray-50 dark:bg-gray-800 text-text-secondary hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+                  class="px-2 py-1 rounded text-xs font-medium bg-bg-raised text-text-secondary hover:bg-bg-active cursor-pointer transition-colors"
                   @click="confirmMarkPayment(p.id, true)"
                 >
                   取消已繳
@@ -647,7 +647,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
         <input
           v-model="paidDate"
           type="date"
-          class="w-full px-3 py-2 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary"
+          class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         />
       </div>
       <div class="flex justify-end gap-3">

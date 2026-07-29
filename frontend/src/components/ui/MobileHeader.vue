@@ -10,15 +10,15 @@ const darkMode = inject<{ isDark: { value: boolean }; toggle: () => void }>('dar
 </script>
 
 <template>
-  <div class="flex flex-col items-center py-3 w-12 bg-bg-sidebar text-white shrink-0 lg:hidden">
+  <div class="flex flex-col items-center py-3 w-12 bg-bg-sidebar text-text-on-dark shrink-0 lg:hidden">
     <button
-      class="p-2 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+      class="p-2 rounded-lg hover:bg-bg-mobile-sidebar-raised transition-colors cursor-pointer"
       @click="onMenuClick"
     >
       <Menu :size="20" />
     </button>
     <button
-      class="p-2 rounded-lg hover:bg-white/10 transition-colors cursor-pointer mt-auto"
+      class="p-2 rounded-lg hover:bg-bg-mobile-sidebar-raised transition-colors cursor-pointer mt-auto"
       @click="darkMode.toggle()"
     >
       <Sun v-if="darkMode.isDark.value" :size="18" />

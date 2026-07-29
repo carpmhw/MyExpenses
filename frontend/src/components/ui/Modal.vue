@@ -27,7 +27,7 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>()
       <DialogOverlay class="fixed inset-0 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50" />
       <DialogContent
         :class="[
-          'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100vw-2rem)] bg-bg-card rounded-2xl shadow-lg p-6 z-50',
+          'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100vw-2rem)] bg-bg-card border border-border-overlay rounded-2xl shadow-lg p-6 z-50',
           'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
           'max-h-[85vh]',
           scrollBody ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
@@ -38,7 +38,7 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>()
         <DialogDescription class="sr-only">{{ description }}</DialogDescription>
         <div class="flex items-center justify-between gap-3 mb-4 shrink-0">
           <DialogTitle class="min-w-0 flex-1 break-words text-lg font-semibold text-text-primary">{{ title }}</DialogTitle>
-          <DialogClose aria-label="關閉" class="shrink-0 min-h-11 min-w-11 inline-flex items-center justify-center text-text-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/30 transition-colors cursor-pointer">
+          <DialogClose aria-label="關閉" class="shrink-0 min-h-11 min-w-11 inline-flex items-center justify-center text-text-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring transition-colors cursor-pointer">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 5l10 10M15 5l-10 10" />
             </svg>

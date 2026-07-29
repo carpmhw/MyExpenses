@@ -94,15 +94,15 @@ function refresh(): void {
 
     <!-- 錯誤狀態 -->
     <div v-else-if="error" class="flex flex-col items-center gap-3 py-10">
-      <Icon name="AlertCircle" :size="32" class="text-red-400" />
-      <p class="text-sm text-red-400 text-center">{{ error }}</p>
+      <Icon name="AlertCircle" :size="32" class="text-color-expense-text" />
+      <p class="text-sm text-color-expense-text text-center">{{ error }}</p>
       <Button variant="primary" @click="refresh">重試</Button>
     </div>
 
     <!-- 主內容 -->
     <template v-else>
       <!-- 警告訊息 -->
-      <div v-if="warning" class="mb-4 flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-500">
+      <div v-if="warning" class="mb-4 flex items-center gap-2 rounded-lg bg-color-warning-bg px-3 py-2 text-sm text-color-warning-text">
         <Icon name="AlertTriangle" :size="16" />
         {{ warning }}
       </div>

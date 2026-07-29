@@ -7,6 +7,7 @@ import Icon from '../../components/ui/Icon.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
 import { addCalendarDays, getCurrentYearRange, getSystemDateParts } from '../../utils/timezone'
+import { getThemeColor } from '../../utils/themeColor'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
@@ -59,7 +60,23 @@ function validateDateRange() {
 
 const darkMode = inject<{ isDark: { value: boolean } }>('darkMode')!
 
-const chartTextColor = computed(() => darkMode.isDark.value ? '#E2E8F0' : '#334155')
+const chartColors = computed(() => {
+  const theme = darkMode.isDark.value ? 'dark' : 'light'
+  return {
+    text: getThemeColor('--color-text-secondary', theme === 'dark' ? '#B8C0CC' : '#4C566A'),
+    primary: getThemeColor('--color-text-primary', theme === 'dark' ? '#ECEFF4' : '#2E3440'),
+    grid: getThemeColor('--color-chart-grid', theme === 'dark' ? '#4B5563' : '#D2DAE4'),
+    axis: getThemeColor('--color-chart-axis', theme === 'dark' ? '#8794A8' : '#758399'),
+    surface: getThemeColor('--color-bg-card', theme === 'dark' ? '#3B4252' : '#F8FAFC'),
+    income: getThemeColor('--color-color-income-chart', theme === 'dark' ? '#A3BE8C' : '#6F8F5E'),
+    incomeChartBg: getThemeColor('--color-color-income-chart-bg', theme === 'dark' ? 'rgb(163 190 140 / 14%)' : 'rgb(111 143 94 / 12%)'),
+    expense: getThemeColor('--color-color-expense', theme === 'dark' ? '#BF616A' : '#AA4F5A'),
+    expenseChart: getThemeColor('--color-color-expense-chart', theme === 'dark' ? '#E6A5AB' : '#AA4F5A'),
+    credit: getThemeColor('--color-color-credit', theme === 'dark' ? '#B48EAD' : '#8D6A88'),
+    creditChart: getThemeColor('--color-color-credit-chart', theme === 'dark' ? '#B48EAD' : '#8D6A88'),
+    info: getThemeColor('--color-color-info', theme === 'dark' ? '#81A1C1' : '#4F759D'),
+  }
+})
 
 async function loadTrend() {
   try {
@@ -118,16 +135,16 @@ const trendChartData = computed(() => ({
   datasets: [
     {
       label: '收入',
-      backgroundColor: '#10B981',
-      borderColor: '#10B981',
+      backgroundColor: chartColors.value.income,
+      borderColor: chartColors.value.income,
       borderWidth: 2,
       data: trendData.value.map(d => d.income),
       borderRadius: 4,
     },
     {
       label: '支出',
-      backgroundColor: '#EF4444',
-      borderColor: '#EF4444',
+      backgroundColor: chartColors.value.expenseChart,
+      borderColor: chartColors.value.expenseChart,
       borderWidth: 2,
       data: trendData.value.map(d => d.expense),
       borderRadius: 4,
@@ -139,8 +156,13 @@ const trendChartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: { labels: { color: chartTextColor.value } },
+    legend: { labels: { color: chartColors.value.text } },
     tooltip: {
+      backgroundColor: chartColors.value.surface,
+      titleColor: chartColors.value.primary,
+      bodyColor: chartColors.value.primary,
+      borderColor: chartColors.value.grid,
+      borderWidth: 1,
       callbacks: {
         label: (ctx: { dataset: { label?: string }; parsed: { y?: number | null } }) =>
           `${ctx.dataset.label ?? ''}: ${formatMoney(ctx.parsed.y ?? 0)}`,
@@ -148,10 +170,15 @@ const trendChartOptions = computed(() => ({
     },
   },
   scales: {
-    x: { ticks: { color: chartTextColor.value }, grid: { color: 'transparent' } },
+    x: {
+      ticks: { color: chartColors.value.text },
+      grid: { color: 'transparent' },
+      border: { color: chartColors.value.axis },
+    },
     y: {
-      ticks: { color: chartTextColor.value, callback: (v: string | number) => formatMoney(Number(v)) },
-      grid: { color: darkMode.isDark.value ? '#1E293B' : '#E2E8F0' },
+      ticks: { color: chartColors.value.text, callback: (v: string | number) => formatMoney(Number(v)) },
+      grid: { color: chartColors.value.grid },
+      border: { color: chartColors.value.axis },
     },
   },
 }))
@@ -160,9 +187,9 @@ const categoryChartData = computed(() => ({
   labels: categoryData.value.map(d => d.categoryName),
   datasets: [{
     data: categoryData.value.map(d => d.total),
-    backgroundColor: categoryData.value.map(d => d.color || '#94A3B8'),
+    backgroundColor: categoryData.value.map(d => d.color || chartColors.value.info),
     borderWidth: 1,
-    borderColor: darkMode.isDark.value ? '#1E293B' : '#FFFFFF',
+    borderColor: chartColors.value.surface,
   }],
 }))
 
@@ -172,9 +199,14 @@ const categoryChartOptions = computed(() => ({
   plugins: {
     legend: {
       position: 'right' as const,
-      labels: { color: chartTextColor.value, padding: 12 },
+      labels: { color: chartColors.value.text, padding: 12 },
     },
     tooltip: {
+      backgroundColor: chartColors.value.surface,
+      titleColor: chartColors.value.primary,
+      bodyColor: chartColors.value.primary,
+      borderColor: chartColors.value.grid,
+      borderWidth: 1,
       callbacks: {
         label: (ctx: { label: string; parsed: number }) => {
           const item = categoryData.value.find(d => d.categoryName === ctx.label)
@@ -189,8 +221,8 @@ const forecastChartData = computed(() => ({
   labels: forecastData.value.map(d => d.month),
   datasets: [{
     label: '預計應繳',
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: chartColors.value.creditChart,
+    borderColor: chartColors.value.creditChart,
     borderWidth: 2,
     data: forecastData.value.map(d => d.totalAmount),
     borderRadius: 4,
@@ -201,18 +233,28 @@ const forecastChartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: { labels: { color: chartTextColor.value } },
+    legend: { labels: { color: chartColors.value.text } },
     tooltip: {
+      backgroundColor: chartColors.value.surface,
+      titleColor: chartColors.value.primary,
+      bodyColor: chartColors.value.primary,
+      borderColor: chartColors.value.grid,
+      borderWidth: 1,
       callbacks: {
         label: (ctx: { parsed: { y?: number | null } }) => `預計應繳: ${formatMoney(ctx.parsed.y ?? 0)}`,
       },
     },
   },
   scales: {
-    x: { ticks: { color: chartTextColor.value }, grid: { color: 'transparent' } },
+    x: {
+      ticks: { color: chartColors.value.text },
+      grid: { color: 'transparent' },
+      border: { color: chartColors.value.axis },
+    },
     y: {
-      ticks: { color: chartTextColor.value, callback: (v: string | number) => formatMoney(Number(v)) },
-      grid: { color: darkMode.isDark.value ? '#1E293B' : '#E2E8F0' },
+      ticks: { color: chartColors.value.text, callback: (v: string | number) => formatMoney(Number(v)) },
+      grid: { color: chartColors.value.grid },
+      border: { color: chartColors.value.axis },
     },
   },
 }))
@@ -235,8 +277,8 @@ const netWorthTrendData = computed(() => {
     datasets: [{
       label: '淨值',
       data: netWorthTrendLabels.value.map((_, i) => step * (i + 1)),
-      borderColor: '#10B981',
-      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      borderColor: chartColors.value.income,
+      backgroundColor: chartColors.value.incomeChartBg,
       fill: true,
       tension: 0.4,
       pointRadius: 4,
@@ -248,13 +290,25 @@ const netWorthTrendOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: { labels: { color: chartTextColor.value } },
+    legend: { labels: { color: chartColors.value.text } },
+    tooltip: {
+      backgroundColor: chartColors.value.surface,
+      titleColor: chartColors.value.primary,
+      bodyColor: chartColors.value.primary,
+      borderColor: chartColors.value.grid,
+      borderWidth: 1,
+    },
   },
   scales: {
-    x: { ticks: { color: chartTextColor.value }, grid: { color: 'transparent' } },
+    x: {
+      ticks: { color: chartColors.value.text },
+      grid: { color: 'transparent' },
+      border: { color: chartColors.value.axis },
+    },
     y: {
-      ticks: { color: chartTextColor.value, callback: (v: string | number) => formatMoney(Number(v)) },
-      grid: { color: darkMode.isDark.value ? '#1E293B' : '#E2E8F0' },
+      ticks: { color: chartColors.value.text, callback: (v: string | number) => formatMoney(Number(v)) },
+      grid: { color: chartColors.value.grid },
+      border: { color: chartColors.value.axis },
     },
   },
 }))
@@ -276,14 +330,14 @@ function selectCategory(item: CategoryDistribution) {
           <input
             v-model="startDate"
             type="date"
-            class="px-3 py-1.5 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30"
+            class="px-3 py-1.5 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring"
             @change="validateDateRange"
           />
           <span class="text-text-secondary text-sm">~</span>
           <input
             v-model="endDate"
             type="date"
-            class="px-3 py-1.5 border border-border-default rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-accent-primary/30"
+            class="px-3 py-1.5 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring"
             @change="validateDateRange"
           />
         </div>
@@ -318,15 +372,15 @@ function selectCategory(item: CategoryDistribution) {
       <Card>
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-text-primary">每月收支趨勢</h2>
-          <div class="flex gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+          <div class="flex gap-1 bg-bg-raised rounded-lg p-0.5">
             <button
               class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
-              :class="chartType === 'bar' ? 'bg-white dark:bg-gray-600 text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+              :class="chartType === 'bar' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
               @click="chartType = 'bar'"
             >長條圖</button>
             <button
               class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
-              :class="chartType === 'line' ? 'bg-white dark:bg-gray-600 text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+              :class="chartType === 'line' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
               @click="chartType = 'line'"
             >折線圖</button>
           </div>
@@ -352,13 +406,13 @@ function selectCategory(item: CategoryDistribution) {
             <button
               v-for="item in categoryData"
               :key="item.categoryId"
-              class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left cursor-pointer"
-              :class="selectedCategory?.categoryId === item.categoryId ? 'bg-gray-50 dark:bg-gray-800' : ''"
+              class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-bg-raised transition-colors text-left cursor-pointer"
+              :class="selectedCategory?.categoryId === item.categoryId ? 'bg-bg-raised' : ''"
               @click="selectCategory(item)"
             >
               <span
                 class="w-3 h-3 rounded-full flex-shrink-0"
-                :style="{ backgroundColor: item.color || '#94A3B8' }"
+                :style="{ backgroundColor: item.color || chartColors.info }"
               />
               <div class="flex-1 min-w-0">
                 <div class="text-sm font-medium text-text-primary truncate">{{ item.categoryName }}</div>
@@ -380,15 +434,15 @@ function selectCategory(item: CategoryDistribution) {
       <div class="grid grid-cols-3 gap-4 mb-6">
         <Card>
           <p class="text-xs text-text-secondary mb-1">總資產</p>
-          <p class="text-xl font-bold text-green-500">{{ formatMoney(netWorthData?.totalAssets ?? 0) }}</p>
+          <p class="text-xl font-bold text-color-income-text">{{ formatMoney(netWorthData?.totalAssets ?? 0) }}</p>
         </Card>
         <Card>
           <p class="text-xs text-text-secondary mb-1">總負債</p>
-          <p class="text-xl font-bold text-red-500">{{ formatMoney(netWorthData?.totalLiabilities ?? 0) }}</p>
+          <p class="text-xl font-bold text-color-expense-text">{{ formatMoney(netWorthData?.totalLiabilities ?? 0) }}</p>
         </Card>
         <Card>
           <p class="text-xs text-text-secondary mb-1">淨值</p>
-          <p class="text-xl font-bold" :class="(netWorthData?.netWorth ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'">
+          <p class="text-xl font-bold" :class="(netWorthData?.netWorth ?? 0) >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
             {{ formatMoney(netWorthData?.netWorth ?? 0) }}
           </p>
         </Card>
