@@ -63,18 +63,18 @@ const darkMode = inject<{ isDark: { value: boolean } }>('darkMode')!
 const chartColors = computed(() => {
   const theme = darkMode.isDark.value ? 'dark' : 'light'
   return {
-    text: getThemeColor('--color-text-secondary', theme === 'dark' ? '#B8C0CC' : '#334155'),
-    primary: getThemeColor('--color-text-primary', theme === 'dark' ? '#ECEFF4' : '#0F172A'),
-    grid: getThemeColor('--color-chart-grid', theme === 'dark' ? '#4B5563' : '#E2E8F0'),
-    axis: getThemeColor('--color-chart-axis', theme === 'dark' ? '#8794A8' : '#CBD5E1'),
-    surface: getThemeColor('--color-bg-card', theme === 'dark' ? '#3B4252' : '#FFFFFF'),
-    income: getThemeColor('--color-color-income-chart', theme === 'dark' ? '#A3BE8C' : '#10B981'),
-    incomeChartBg: getThemeColor('--color-color-income-chart-bg', theme === 'dark' ? 'rgb(163 190 140 / 14%)' : 'rgb(16 185 129 / 10%)'),
-    expense: getThemeColor('--color-color-expense', theme === 'dark' ? '#BF616A' : '#DC2626'),
-    expenseChart: getThemeColor('--color-color-expense-chart', theme === 'dark' ? '#E6A5AB' : '#EF4444'),
-    credit: getThemeColor('--color-color-credit', theme === 'dark' ? '#B48EAD' : '#7C3AED'),
-    creditChart: getThemeColor('--color-color-credit-chart', theme === 'dark' ? '#B48EAD' : '#8B5CF6'),
-    info: getThemeColor('--color-color-info', theme === 'dark' ? '#81A1C1' : '#2563EB'),
+    text: getThemeColor('--color-text-secondary', theme === 'dark' ? '#B8C0CC' : '#4C566A'),
+    primary: getThemeColor('--color-text-primary', theme === 'dark' ? '#ECEFF4' : '#2E3440'),
+    grid: getThemeColor('--color-chart-grid', theme === 'dark' ? '#4B5563' : '#D2DAE4'),
+    axis: getThemeColor('--color-chart-axis', theme === 'dark' ? '#8794A8' : '#758399'),
+    surface: getThemeColor('--color-bg-card', theme === 'dark' ? '#3B4252' : '#F8FAFC'),
+    income: getThemeColor('--color-color-income-chart', theme === 'dark' ? '#A3BE8C' : '#6F8F5E'),
+    incomeChartBg: getThemeColor('--color-color-income-chart-bg', theme === 'dark' ? 'rgb(163 190 140 / 14%)' : 'rgb(111 143 94 / 12%)'),
+    expense: getThemeColor('--color-color-expense', theme === 'dark' ? '#BF616A' : '#AA4F5A'),
+    expenseChart: getThemeColor('--color-color-expense-chart', theme === 'dark' ? '#E6A5AB' : '#AA4F5A'),
+    credit: getThemeColor('--color-color-credit', theme === 'dark' ? '#B48EAD' : '#8D6A88'),
+    creditChart: getThemeColor('--color-color-credit-chart', theme === 'dark' ? '#B48EAD' : '#8D6A88'),
+    info: getThemeColor('--color-color-info', theme === 'dark' ? '#81A1C1' : '#4F759D'),
   }
 })
 

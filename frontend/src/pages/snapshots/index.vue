@@ -55,17 +55,17 @@ const trendData = ref<TrendPoint[]>([])
 const chartColors = computed(() => {
   const theme = darkMode.isDark.value ? 'dark' : 'light'
   return {
-    text: getThemeColor('--color-text-secondary', theme === 'dark' ? '#B8C0CC' : '#334155'),
-    primary: getThemeColor('--color-text-primary', theme === 'dark' ? '#ECEFF4' : '#0F172A'),
-    grid: getThemeColor('--color-chart-grid', theme === 'dark' ? '#4B5563' : '#E2E8F0'),
-    axis: getThemeColor('--color-chart-axis', theme === 'dark' ? '#8794A8' : '#CBD5E1'),
-    surface: getThemeColor('--color-bg-card', theme === 'dark' ? '#3B4252' : '#FFFFFF'),
-    income: getThemeColor('--color-color-income-chart', theme === 'dark' ? '#A3BE8C' : '#10B981'),
-    incomeSoft: getThemeColor('--color-color-income-chart-bg', theme === 'dark' ? 'rgb(163 190 140 / 14%)' : 'rgb(16 185 129 / 10%)'),
-    info: getThemeColor('--color-color-info-chart', theme === 'dark' ? '#81A1C1' : '#3B82F6'),
-    infoSoft: getThemeColor('--color-color-info-chart-bg', theme === 'dark' ? 'rgb(129 161 193 / 14%)' : 'rgb(59 130 246 / 10%)'),
-    warning: getThemeColor('--color-color-warning-chart', theme === 'dark' ? '#EBCB8B' : '#F59E0B'),
-    warningSoft: getThemeColor('--color-color-warning-chart-bg', theme === 'dark' ? 'rgb(235 203 139 / 14%)' : 'rgb(245 158 11 / 10%)'),
+    text: getThemeColor('--color-text-secondary', theme === 'dark' ? '#B8C0CC' : '#4C566A'),
+    primary: getThemeColor('--color-text-primary', theme === 'dark' ? '#ECEFF4' : '#2E3440'),
+    grid: getThemeColor('--color-chart-grid', theme === 'dark' ? '#4B5563' : '#D2DAE4'),
+    axis: getThemeColor('--color-chart-axis', theme === 'dark' ? '#8794A8' : '#758399'),
+    surface: getThemeColor('--color-bg-card', theme === 'dark' ? '#3B4252' : '#F8FAFC'),
+    income: getThemeColor('--color-color-income-chart', theme === 'dark' ? '#A3BE8C' : '#6F8F5E'),
+    incomeSoft: getThemeColor('--color-color-income-chart-bg', theme === 'dark' ? 'rgb(163 190 140 / 14%)' : 'rgb(111 143 94 / 12%)'),
+    info: getThemeColor('--color-color-info-chart', theme === 'dark' ? '#81A1C1' : '#4F759D'),
+    infoSoft: getThemeColor('--color-color-info-chart-bg', theme === 'dark' ? 'rgb(129 161 193 / 14%)' : 'rgb(79 117 157 / 12%)'),
+    warning: getThemeColor('--color-color-warning-chart', theme === 'dark' ? '#EBCB8B' : '#A56C26'),
+    warningSoft: getThemeColor('--color-color-warning-chart-bg', theme === 'dark' ? 'rgb(235 203 139 / 14%)' : 'rgb(165 108 38 / 12%)'),
   }
 })
 

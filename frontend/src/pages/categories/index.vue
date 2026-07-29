@@ -220,7 +220,7 @@ watch(() => pagination.page.value, () => fetchList())
             <input
               v-model="form.color"
               type="color"
-              class="w-10 h-10 rounded-lg border border-border-default cursor-pointer"
+              class="w-10 h-10 rounded-lg border border-border-strong focus:outline-none focus:ring-2 focus:ring-focus-ring cursor-pointer"
             />
             <span class="text-sm text-text-secondary">{{ form.color }}</span>
           </div>
