@@ -25,16 +25,16 @@ test('dashboard consumes complete dashboard summary instead of reducing recent r
   assert.match(footer, /<Icon name="Receipt"/)
   assert.match(footer, /<Icon name="Wallet"/)
   assert.match(footer, /<Icon name="CreditCard"/)
-  assert.match(footer, /formatMoney\(totalWithdrawals\)/)
-  assert.match(footer, /formatMoney\(totalExpenses\)/)
-  assert.match(footer, /formatMoney\(disposableBalance\)/)
-  assert.match(footer, /formatMoney\(installmentMonthlyDue\)/)
+  assert.match(footer, /formatSummaryAmount\(totalWithdrawals\)/)
+  assert.match(footer, /formatSummaryAmount\(totalExpenses\)/)
+  assert.match(footer, /formatSummaryAmount\(disposableBalance\)/)
+  assert.match(footer, /formatSummaryAmount\(installmentMonthlyDue\)/)
 })
 
 test('list pages render server-provided summaries', () => {
-  assert.match(readSource('pages/expenses/index.vue'), /result\.summary/)
+  assert.match(readSource('pages/expenses/index.vue'), /transactionQuery\.data\.value\?\.summary/)
   assert.match(readSource('pages/withdrawals/index.vue'), /result\.summary/)
-  assert.match(readSource('pages/installments/index.vue'), /result\.summary/)
+  assert.match(readSource('pages/installments/index.vue'), /installmentListQuery\.data\.value\?\.summary/)
 })
 
 test('reports consumes actual net-worth trend points without synthetic current-value steps', () => {

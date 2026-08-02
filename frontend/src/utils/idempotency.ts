@@ -1,17 +1,25 @@
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
 interface IdempotencyKeyState {
+  begin(): void
   prepare(payload: unknown): string
   clear(): void
 }
 
+interface IdempotencyKeyStateOptions {
+  createKey?: () => string
+}
+
+const transientFinancialFields = new Set(['id', 'createdAt', 'perPeriod', 'remainingPeriods', 'status', 'payments'])
+
 // Creates stable JSON text so object property order does not change a command fingerprint.
 function stableSerialize(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value.trim())
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(item => stableSerialize(item)).join(',')}]`
 
   const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, item]) => item !== undefined)
+    .filter(([key, item]) => item !== undefined && item !== null && !transientFinancialFields.has(key))
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`)
   return `{${entries.join(',')}}`
@@ -29,22 +37,27 @@ function createUuid(): string {
 }
 
 // Keeps one idempotency key while a logical form payload is retried unchanged.
-export function createIdempotencyKeyState(): IdempotencyKeyState {
+export function createIdempotencyKeyState(options: IdempotencyKeyStateOptions = {}): IdempotencyKeyState {
   let key: string | null = null
   let fingerprint: string | null = null
+  const createKey = options.createKey ?? createUuid
 
   return {
+    // Starts a new logical form submission without retaining a prior uncertain key.
+    begin() {
+      key = null
+      fingerprint = null
+    },
     prepare(payload: unknown) {
       const nextFingerprint = stableSerialize(payload)
       if (key === null || fingerprint !== nextFingerprint) {
-        key = createUuid()
+        key = createKey()
         fingerprint = nextFingerprint
       }
       return key
     },
     clear() {
-      key = null
-      fingerprint = null
+      this.begin()
     },
   }
 }

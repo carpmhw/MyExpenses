@@ -8,36 +8,160 @@ import type {
   SystemTimeZoneSettings, InstallmentCommandResponse, InstallmentPurchaseRequest, InstallmentPurchaseResponse,
   StandaloneInstallmentRequest, UpdateInstallmentScheduleRequest,
 } from '../types'
+import {
+  ApiError,
+  type ApiFieldErrors,
+  RequestCancelledError,
+  safeStatusMessage,
+} from './errors.ts'
+export { ApiError, RequestCancelledError, isRequestCancelled } from './errors.ts'
 
 const BASE = '/api'
 
-function getAuthToken(): string | null {
-  return localStorage.getItem('authToken')
+export interface ApiRequestContext {
+  signal?: AbortSignal
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const token = getAuthToken()
+// Adds an optional owner signal to an API request without changing existing callers.
+function withRequestContext(options: RequestInit, context?: ApiRequestContext): RequestInit {
+  return context?.signal ? { ...options, signal: context.signal } : options
+}
+
+export interface ApiSessionConfig {
+  getToken: () => string | null
+  onSessionExpired: (token: string) => void | Promise<void>
+}
+
+const defaultApiSession: ApiSessionConfig = {
+  getToken: () => typeof localStorage === 'undefined' ? null : localStorage.getItem('authToken'),
+  onSessionExpired: () => undefined,
+}
+let apiSession: ApiSessionConfig = defaultApiSession
+let expiredToken: string | null = null
+let expirationPromise: Promise<void> | null = null
+
+// Configures the central session coordinator without coupling the API client to router or storage mutation.
+export function configureApiSession(config: Partial<ApiSessionConfig>): void {
+  apiSession = { ...apiSession, ...config }
+  expiredToken = null
+  expirationPromise = null
+}
+
+// Parses structured ProblemDetails fields into safe client-side error details.
+function parseProblemDetails(body: unknown): {
+  title: string | null
+  detail: string | null
+  fieldErrors: ApiFieldErrors
+  traceId: string | null
+} {
+  if (!body || typeof body !== 'object') {
+    return { title: null, detail: null, fieldErrors: {}, traceId: null }
+  }
+  const record = body as Record<string, unknown>
+  const errors = record.errors && typeof record.errors === 'object' ? record.errors as Record<string, unknown> : {}
+  const fieldErrors = Object.fromEntries(
+    Object.entries(errors).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? value.filter(item => typeof item === 'string') as string[] : [String(value)],
+    ]),
+  )
+  return {
+    title: typeof record.title === 'string' ? record.title : null,
+    detail: typeof record.detail === 'string' ? record.detail : null,
+    fieldErrors,
+    traceId: typeof record.traceId === 'string' ? record.traceId : null,
+  }
+}
+
+// Reads a response body once and returns JSON only when it is structurally parseable.
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text()
+  if (!text.trim()) return null
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return null
+  }
+}
+
+// Identifies auth endpoints that must not expire a session on their own 401 response.
+function isPublicAuthRequest(url: string): boolean {
+  return [
+    '/auth/status',
+    '/auth/register',
+    '/auth/login',
+    '/auth/2fa/login',
+    '/auth/2fa/recovery-login',
+    '/auth/logout',
+  ].some(path => url.startsWith(path))
+}
+
+// Starts one session-expired transition for the token that initiated the failing request.
+function expireCurrentSession(token: string | null): void {
+  if (!token || token !== apiSession.getToken() || expiredToken === token) return
+  expiredToken = token
+  expirationPromise = Promise.resolve(apiSession.onSessionExpired(token)).finally(() => {
+    expirationPromise = null
+  })
+  void expirationPromise
+}
+
+// Converts a browser abort or an already-aborted signal into the typed cancellation result.
+function isAbortError(error: unknown, signal?: AbortSignal | null): boolean {
+  return signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError')
+}
+
+// Performs one centrally controlled API request with cancellation and safe error semantics.
+export async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = apiSession.getToken()
   const headers = new Headers(options?.headers)
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
-  const res = await fetch(`${BASE}${url}`, {
-    ...options,
-    headers,
-  })
-  if (res.status === 401 && !url.startsWith('/auth/')) {
-    localStorage.removeItem('authToken')
-    window.location.href = '/login'
-    throw new Error('Unauthorized')
+  let response: Response
+  try {
+    response = await fetch(`${BASE}${url}`, {
+      ...options,
+      headers,
+    })
+  } catch (error) {
+    if (isAbortError(error, options?.signal)) throw new RequestCancelledError()
+    throw new ApiError({
+      status: null,
+      title: 'Network error',
+      detail: null,
+      userMessage: '無法連線至伺服器，請稍後再試',
+    })
   }
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || `HTTP ${res.status}`)
+
+  if (response.status === 401 && !isPublicAuthRequest(url)) {
+    expireCurrentSession(token)
   }
-  if (res.status === 204) return undefined as T
-  return res.json()
+  if (!response.ok) {
+    const body = await readResponseBody(response)
+    const details = parseProblemDetails(body)
+    throw new ApiError({
+      status: response.status,
+      title: details.title,
+      detail: details.detail,
+      fieldErrors: details.fieldErrors,
+      traceId: details.traceId,
+      userMessage: details.detail ?? details.title ?? safeStatusMessage(response.status),
+    })
+  }
+  if (response.status === 204) return undefined as T
+  try {
+    return await response.json() as T
+  } catch {
+    throw new ApiError({
+      status: response.status,
+      title: 'Invalid response',
+      detail: null,
+      userMessage: '伺服器回應格式錯誤，請稍後再試',
+    })
+  }
 }
 
 // Builds the bank accounts list query string, omitting blank optional filters.
@@ -76,25 +200,25 @@ export function buildStocksQuery(params?: { page?: number; pageSize?: number; sy
 
 export const api = {
   categories: {
-    list: (params?: { page?: number; pageSize?: number }) => {
+    list: (params?: { page?: number; pageSize?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
-      return request<PaginatedResponse<Category>>(`/categories?${q}`)
+      return request<PaginatedResponse<Category>>(`/categories?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<Category>(`/categories/${id}`),
-    create: (data: Omit<Category, 'id'>) =>
-      request<Category>('/categories', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<Category>) =>
-      request<Category>(`/categories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/categories/${id}`, { method: 'DELETE' }),
-    restoreDefaults: () =>
-      request<PaginatedResponse<Category>>('/categories/restore-defaults', { method: 'POST' }),
+    get: (id: number, context?: ApiRequestContext) => request<Category>(`/categories/${id}`, withRequestContext({}, context)),
+    create: (data: Omit<Category, 'id'>, context?: ApiRequestContext) =>
+      request<Category>('/categories', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    update: (id: number, data: Partial<Category>, context?: ApiRequestContext) =>
+      request<Category>(`/categories/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/categories/${id}`, withRequestContext({ method: 'DELETE' }, context)),
+    restoreDefaults: (context?: ApiRequestContext) =>
+      request<PaginatedResponse<Category>>('/categories/restore-defaults', withRequestContext({ method: 'POST' }, context)),
   },
 
   transactions: {
-    list: (params?: { page?: number; pageSize?: number; categoryId?: number; startDate?: string; endDate?: string; search?: string; type?: string }) => {
+    list: (params?: { page?: number; pageSize?: number; categoryId?: number; startDate?: string; endDate?: string; search?: string; type?: string }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
@@ -103,19 +227,19 @@ export const api = {
       if (params?.endDate) q.set('endDate', params.endDate)
       if (params?.search) q.set('search', params.search)
       if (params?.type) q.set('type', params.type)
-      return request<TransactionListResponse>(`/transactions?${q}`)
+      return request<TransactionListResponse>(`/transactions?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<Transaction>(`/transactions/${id}`),
-    create: (data: Omit<Transaction, 'id' | 'createdAt' | 'category' | 'paymentMethod'>) =>
-      request<Transaction>('/transactions', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<Omit<Transaction, 'paymentMethod'>>) =>
-      request<Transaction>(`/transactions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/transactions/${id}`, { method: 'DELETE' }),
+    get: (id: number, context?: ApiRequestContext) => request<Transaction>(`/transactions/${id}`, withRequestContext({}, context)),
+    create: (data: Omit<Transaction, 'id' | 'createdAt' | 'category' | 'paymentMethod'>, context?: ApiRequestContext) =>
+      request<Transaction>('/transactions', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    update: (id: number, data: Partial<Omit<Transaction, 'paymentMethod'>>, context?: ApiRequestContext) =>
+      request<Transaction>(`/transactions/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/transactions/${id}`, withRequestContext({ method: 'DELETE' }, context)),
   },
 
   installments: {
-    list: (params?: { page?: number; pageSize?: number; cardId?: number; dateStart?: string; dateEnd?: string; status?: string }) => {
+    list: (params?: { page?: number; pageSize?: number; cardId?: number; dateStart?: string; dateEnd?: string; status?: string }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
@@ -123,237 +247,240 @@ export const api = {
       if (params?.dateStart) q.set('dateStart', params.dateStart)
       if (params?.dateEnd) q.set('dateEnd', params.dateEnd)
       if (params?.status) q.set('status', params.status)
-      return request<InstallmentListResponse>(`/installments?${q}`)
+      return request<InstallmentListResponse>(`/installments?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<Installment>(`/installments/${id}`),
+    get: (id: number, context?: ApiRequestContext) => request<Installment>(`/installments/${id}`, withRequestContext({}, context)),
     // Creates a standalone installment with a caller-provided idempotency key.
-    create: (data: StandaloneInstallmentRequest, idempotencyKey: string) => request<InstallmentCommandResponse>('/installments', {
-      method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify(data),
-    }),
+    create: (data: StandaloneInstallmentRequest, idempotencyKey: string, context?: ApiRequestContext) =>
+      request<InstallmentCommandResponse>('/installments', withRequestContext({
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(data),
+      }, context)),
     // Updates schedule-affecting fields through the atomic schedule command.
-    update: (id: number, data: UpdateInstallmentScheduleRequest) =>
-      request<InstallmentCommandResponse>(`/installments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/installments/${id}`, { method: 'DELETE' }),
+    update: (id: number, data: UpdateInstallmentScheduleRequest, context?: ApiRequestContext) =>
+      request<InstallmentCommandResponse>(`/installments/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/installments/${id}`, withRequestContext({ method: 'DELETE' }, context)),
     // Sends an explicit payment target state instead of a toggle request.
-    markPayment: (id: number, paymentId: number, data: { isPaid: boolean; paidDate?: string }) =>
-      request<InstallmentCommandResponse>(`/installments/${id}/payments/${paymentId}`, {
+    markPayment: (id: number, paymentId: number, data: { isPaid: boolean; paidDate?: string }, context?: ApiRequestContext) =>
+      request<InstallmentCommandResponse>(`/installments/${id}/payments/${paymentId}`, withRequestContext({
         method: 'PATCH',
         body: JSON.stringify(data),
-      }),
+      }, context)),
   },
 
   installmentPurchases: {
     // Creates the transaction and its complete installment schedule atomically.
-    create: (data: InstallmentPurchaseRequest, idempotencyKey: string) =>
-      request<InstallmentPurchaseResponse>('/installment-purchases', {
+    create: (data: InstallmentPurchaseRequest, idempotencyKey: string, context?: ApiRequestContext) =>
+      request<InstallmentPurchaseResponse>('/installment-purchases', withRequestContext({
         method: 'POST',
         headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(data),
-      }),
+      }, context)),
   },
 
   creditCards: {
-    list: (params?: { page?: number; pageSize?: number }) => {
+    list: (params?: { page?: number; pageSize?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
-      return request<PaginatedResponse<CreditCard>>(`/credit-cards?${q}`)
+      return request<PaginatedResponse<CreditCard>>(`/credit-cards?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<CreditCard>(`/credit-cards/${id}`),
-    create: (data: Omit<CreditCard, 'id' | 'createdAt' | 'updatedAt'>) =>
-      request<CreditCard>('/credit-cards', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<CreditCard>) =>
-      request<CreditCard>(`/credit-cards/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/credit-cards/${id}`, { method: 'DELETE' }),
+    get: (id: number, context?: ApiRequestContext) => request<CreditCard>(`/credit-cards/${id}`, withRequestContext({}, context)),
+    create: (data: Omit<CreditCard, 'id' | 'createdAt' | 'updatedAt'>, context?: ApiRequestContext) =>
+      request<CreditCard>('/credit-cards', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    update: (id: number, data: Partial<CreditCard>, context?: ApiRequestContext) =>
+      request<CreditCard>(`/credit-cards/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/credit-cards/${id}`, withRequestContext({ method: 'DELETE' }, context)),
   },
 
   creditCardBills: {
-    list: (params?: { cardId?: number; isPaid?: boolean; dateStart?: string; dateEnd?: string }) => {
+    list: (params?: { cardId?: number; isPaid?: boolean; dateStart?: string; dateEnd?: string }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.cardId) q.set('cardId', String(params.cardId))
       if (params?.isPaid !== undefined) q.set('isPaid', String(params.isPaid))
       if (params?.dateStart) q.set('dateStart', params.dateStart)
       if (params?.dateEnd) q.set('dateEnd', params.dateEnd)
       const qs = q.toString()
-      return request<CreditCardBill[]>(`/credit-card-bills${qs ? `?${qs}` : ''}`)
+      return request<CreditCardBill[]>(`/credit-card-bills${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<CreditCardBill>(`/credit-card-bills/${id}`),
+    get: (id: number, context?: ApiRequestContext) => request<CreditCardBill>(`/credit-card-bills/${id}`, withRequestContext({}, context)),
   },
 
   bankAccounts: {
-    list: (params?: { page?: number; pageSize?: number; bankName?: string }) => {
+    list: (params?: { page?: number; pageSize?: number; bankName?: string }, context?: ApiRequestContext) => {
       const q = buildBankAccountsQuery(params)
-      return request<BankAccountListResponse>(`/bank-accounts?${q}`)
+      return request<BankAccountListResponse>(`/bank-accounts?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<BankAccount>(`/bank-accounts/${id}`),
-    create: (data: Omit<BankAccount, 'id' | 'createdAt' | 'updatedAt'>) =>
-      request<BankAccount>('/bank-accounts', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<BankAccount>) =>
-      request<BankAccount>(`/bank-accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/bank-accounts/${id}`, { method: 'DELETE' }),
+    get: (id: number, context?: ApiRequestContext) => request<BankAccount>(`/bank-accounts/${id}`, withRequestContext({}, context)),
+    create: (data: Omit<BankAccount, 'id' | 'createdAt' | 'updatedAt'>, context?: ApiRequestContext) =>
+      request<BankAccount>('/bank-accounts', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    update: (id: number, data: Partial<BankAccount>, context?: ApiRequestContext) =>
+      request<BankAccount>(`/bank-accounts/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/bank-accounts/${id}`, withRequestContext({ method: 'DELETE' }, context)),
   },
 
   stocks: {
-    list: (params?: { page?: number; pageSize?: number; symbol?: string; broker?: string }) => {
+    list: (params?: { page?: number; pageSize?: number; symbol?: string; broker?: string }, context?: ApiRequestContext) => {
       const q = buildStocksQuery(params)
-      return request<StockListResponse>(`/stocks?${q}`)
+      return request<StockListResponse>(`/stocks?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<Stock>(`/stocks/${id}`),
-    create: (data: Omit<Stock, 'id'>) =>
-      request<Stock>('/stocks', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<Stock>) =>
-      request<Stock>(`/stocks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/stocks/${id}`, { method: 'DELETE' }),
-    lookup: (symbol: string) =>
-      request<{ name: string | null; currentPrice: number | null }>(`/stocks/lookup?symbol=${encodeURIComponent(symbol)}`),
+    get: (id: number, context?: ApiRequestContext) => request<Stock>(`/stocks/${id}`, withRequestContext({}, context)),
+    create: (data: Omit<Stock, 'id'>, context?: ApiRequestContext) =>
+      request<Stock>('/stocks', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    update: (id: number, data: Partial<Stock>, context?: ApiRequestContext) =>
+      request<Stock>(`/stocks/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/stocks/${id}`, withRequestContext({ method: 'DELETE' }, context)),
+    lookup: (symbol: string, context?: ApiRequestContext) =>
+      request<{ name: string | null; currentPrice: number | null }>(`/stocks/lookup?symbol=${encodeURIComponent(symbol)}`, withRequestContext({}, context)),
   },
 
   withdrawals: {
-    list: (params?: { page?: number; pageSize?: number; startDate?: string; endDate?: string }) => {
+    list: (params?: { page?: number; pageSize?: number; startDate?: string; endDate?: string }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
       if (params?.startDate) q.set('startDate', params.startDate)
       if (params?.endDate) q.set('endDate', params.endDate)
-      return request<WithdrawalListResponse>(`/withdrawals?${q}`)
+      return request<WithdrawalListResponse>(`/withdrawals?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<Withdrawal>(`/withdrawals/${id}`),
-    create: (data: Omit<Withdrawal, 'id' | 'bankAccount'>) =>
-      request<Withdrawal>('/withdrawals', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<Withdrawal>) =>
-      request<Withdrawal>(`/withdrawals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/withdrawals/${id}`, { method: 'DELETE' }),
+    get: (id: number, context?: ApiRequestContext) => request<Withdrawal>(`/withdrawals/${id}`, withRequestContext({}, context)),
+    create: (data: Omit<Withdrawal, 'id' | 'bankAccount'>, context?: ApiRequestContext) =>
+      request<Withdrawal>('/withdrawals', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    update: (id: number, data: Partial<Withdrawal>, context?: ApiRequestContext) =>
+      request<Withdrawal>(`/withdrawals/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/withdrawals/${id}`, withRequestContext({ method: 'DELETE' }, context)),
   },
 
   paymentMethods: {
-    list: (params?: { page?: number; pageSize?: number }) => {
+    list: (params?: { page?: number; pageSize?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
-      return request<PaginatedResponse<PaymentMethod>>(`/payment-methods?${q}`)
+      return request<PaginatedResponse<PaymentMethod>>(`/payment-methods?${q}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<PaymentMethod>(`/payment-methods/${id}`),
-    create: (data: Omit<PaymentMethod, 'id'>) =>
-      request<PaymentMethod>('/payment-methods', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<PaymentMethod>) =>
-      request<PaymentMethod>(`/payment-methods/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: number) =>
-      request<void>(`/payment-methods/${id}`, { method: 'DELETE' }),
-    restoreDefaults: () =>
-      request<PaginatedResponse<PaymentMethod>>('/payment-methods/restore-defaults', { method: 'POST' }),
+    get: (id: number, context?: ApiRequestContext) => request<PaymentMethod>(`/payment-methods/${id}`, withRequestContext({}, context)),
+    create: (data: Omit<PaymentMethod, 'id'>, context?: ApiRequestContext) =>
+      request<PaymentMethod>('/payment-methods', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    update: (id: number, data: Partial<PaymentMethod>, context?: ApiRequestContext) =>
+      request<PaymentMethod>(`/payment-methods/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    delete: (id: number, context?: ApiRequestContext) =>
+      request<void>(`/payment-methods/${id}`, withRequestContext({ method: 'DELETE' }, context)),
+    restoreDefaults: (context?: ApiRequestContext) =>
+      request<PaginatedResponse<PaymentMethod>>('/payment-methods/restore-defaults', withRequestContext({ method: 'POST' }, context)),
   },
 
   reports: {
-    incomeExpenseTrend: (params?: { dateStart?: string; dateEnd?: string }) => {
+    incomeExpenseTrend: (params?: { dateStart?: string; dateEnd?: string }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.dateStart) q.set('dateStart', params.dateStart)
       if (params?.dateEnd) q.set('dateEnd', params.dateEnd)
       const qs = q.toString()
-      return request<MonthlyTrend[]>(`/reports/income-expense-trend${qs ? `?${qs}` : ''}`)
+      return request<MonthlyTrend[]>(`/reports/income-expense-trend${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
-    categoryDistribution: (params?: { dateStart?: string; dateEnd?: string }) => {
+    categoryDistribution: (params?: { dateStart?: string; dateEnd?: string }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.dateStart) q.set('dateStart', params.dateStart)
       if (params?.dateEnd) q.set('dateEnd', params.dateEnd)
       const qs = q.toString()
-      return request<CategoryDistribution[]>(`/reports/category-distribution${qs ? `?${qs}` : ''}`)
+      return request<CategoryDistribution[]>(`/reports/category-distribution${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
-    netWorth: () => request<NetWorth>('/reports/net-worth'),
-    installmentForecast: (params?: { months?: number }) => {
+    netWorth: (context?: ApiRequestContext) => request<NetWorth>('/reports/net-worth', withRequestContext({}, context)),
+    installmentForecast: (params?: { months?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.months) q.set('months', String(params.months))
       const qs = q.toString()
-      return request<MonthlyForecast[]>(`/reports/installment-forecast${qs ? `?${qs}` : ''}`)
+      return request<MonthlyForecast[]>(`/reports/installment-forecast${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
-    monthlySummary: (params?: { year?: number; month?: number }) => {
+    monthlySummary: (params?: { year?: number; month?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.year) q.set('year', String(params.year))
       if (params?.month) q.set('month', String(params.month))
       const qs = q.toString()
-      return request<MonthlySummary>(`/reports/monthly-summary${qs ? `?${qs}` : ''}`)
+      return request<MonthlySummary>(`/reports/monthly-summary${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
-    dashboardSummary: (params?: { year?: number; month?: number }) => {
+    dashboardSummary: (params?: { year?: number; month?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.year) q.set('year', String(params.year))
       if (params?.month) q.set('month', String(params.month))
       const qs = q.toString()
-      return request<DashboardSummary>(`/reports/dashboard-summary${qs ? `?${qs}` : ''}`)
+      return request<DashboardSummary>(`/reports/dashboard-summary${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
-    netWorthTrend: (params?: { months?: number }) => {
+    netWorthTrend: (params?: { months?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.months) q.set('months', String(params.months))
       const qs = q.toString()
-      return request<NetWorthTrendPoint[]>(`/reports/net-worth-trend${qs ? `?${qs}` : ''}`)
+      return request<NetWorthTrendPoint[]>(`/reports/net-worth-trend${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
   },
 
   auth: {
-    status: () => request<{ authenticated: boolean; user: User | null; hasUsers: boolean }>('/auth/status'),
-    register: (data: { email: string; displayName: string; password: string }) =>
-      request<AuthResponse>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
-    login: (data: { email: string; password: string }) =>
-      request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
-    verify2fa: (data: { tempToken: string; code: string }) =>
-      request<AuthResponse>('/auth/2fa/login', { method: 'POST', body: JSON.stringify(data) }),
-    recoveryLogin: (data: { tempToken: string; recoveryCode: string }) =>
-      request<AuthResponse>('/auth/2fa/recovery-login', { method: 'POST', body: JSON.stringify(data) }),
-    setup2fa: () =>
-      request<TwoFactorSetupResponse>('/auth/2fa/setup', { method: 'POST' }),
-    verify2faSetup: (data: { code: string }) =>
-      request<{ enabled: boolean; recoveryCodes: string[] }>('/auth/2fa/verify', { method: 'POST', body: JSON.stringify(data) }),
-    disable2fa: () =>
-      request<{ disabled: boolean }>('/auth/2fa/disable', { method: 'POST' }),
-    updateProfile: (data: { displayName: string }) =>
-      request<User>('/auth/profile', { method: 'PUT', body: JSON.stringify(data) }),
-    changePassword: (data: { currentPassword: string; newPassword: string }) =>
-      request<{ message: string }>('/auth/password', { method: 'PUT', body: JSON.stringify(data) }),
-    getRecoveryCodes: () =>
-      request<{ recoveryCodes: string[] }>('/auth/2fa/recovery-codes'),
-    logoutAll: () =>
-      request<{ message: string }>('/auth/logout-all', { method: 'POST' }),
+    status: (context?: ApiRequestContext) => request<{ authenticated: boolean; user: User | null; hasUsers: boolean }>('/auth/status', withRequestContext({}, context)),
+    register: (data: { email: string; displayName: string; password: string }, context?: ApiRequestContext) =>
+      request<AuthResponse>('/auth/register', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    login: (data: { email: string; password: string }, context?: ApiRequestContext) =>
+      request<AuthResponse>('/auth/login', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    verify2fa: (data: { tempToken: string; code: string }, context?: ApiRequestContext) =>
+      request<AuthResponse>('/auth/2fa/login', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    recoveryLogin: (data: { tempToken: string; recoveryCode: string }, context?: ApiRequestContext) =>
+      request<AuthResponse>('/auth/2fa/recovery-login', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    setup2fa: (context?: ApiRequestContext) =>
+      request<TwoFactorSetupResponse>('/auth/2fa/setup', withRequestContext({ method: 'POST' }, context)),
+    verify2faSetup: (data: { code: string }, context?: ApiRequestContext) =>
+      request<{ enabled: boolean; recoveryCodes: string[] }>('/auth/2fa/verify', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    disable2fa: (context?: ApiRequestContext) =>
+      request<{ disabled: boolean }>('/auth/2fa/disable', withRequestContext({ method: 'POST' }, context)),
+    updateProfile: (data: { displayName: string }, context?: ApiRequestContext) =>
+      request<User>('/auth/profile', withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    changePassword: (data: { currentPassword: string; newPassword: string }, context?: ApiRequestContext) =>
+      request<{ message: string }>('/auth/password', withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+    getRecoveryCodes: (context?: ApiRequestContext) =>
+      request<{ recoveryCodes: string[] }>('/auth/2fa/recovery-codes', withRequestContext({}, context)),
+    logout: (context?: ApiRequestContext) =>
+      request<{ message: string }>('/auth/logout', withRequestContext({ method: 'POST' }, context)),
+    logoutAll: (context?: ApiRequestContext) =>
+      request<{ message: string }>('/auth/logout-all', withRequestContext({ method: 'POST' }, context)),
   },
   settings: {
-    getTimeZone: () => request<SystemTimeZoneSettings>('/settings/timezone'),
-    updateTimeZone: (timeZoneId: string) =>
-      request<SystemTimeZoneSettings>('/settings/timezone', {
+    getTimeZone: (context?: ApiRequestContext) => request<SystemTimeZoneSettings>('/settings/timezone', withRequestContext({}, context)),
+    updateTimeZone: (timeZoneId: string, context?: ApiRequestContext) =>
+      request<SystemTimeZoneSettings>('/settings/timezone', withRequestContext({
         method: 'PUT',
         body: JSON.stringify({ timeZoneId }),
-      }),
+      }, context)),
   },
 
   snapshots: {
-    list: (params?: { page?: number; pageSize?: number; dateStart?: string; dateEnd?: string }) => {
+    list: (params?: { page?: number; pageSize?: number; dateStart?: string; dateEnd?: string }, context?: ApiRequestContext) => {
       const q = buildSnapshotQuery(params)
-      return request<SnapshotListResponse>(`/snapshots${q ? `?${q}` : ''}`)
+      return request<SnapshotListResponse>(`/snapshots${q ? `?${q}` : ''}`, withRequestContext({}, context))
     },
-    get: (id: number) => request<SnapshotBatch>(`/snapshots/${id}`),
-    create: () => request<SnapshotBatch>('/snapshots', { method: 'POST' }),
-    delete: (id: number) => request<void>(`/snapshots/${id}`, { method: 'DELETE' }),
-    compare: (id1: number, id2: number) =>
-      request<SnapshotCompareResult>(`/snapshots/${id1}/compare/${id2}`),
-    trend: (params?: { dateStart?: string; dateEnd?: string }) => {
+    get: (id: number, context?: ApiRequestContext) => request<SnapshotBatch>(`/snapshots/${id}`, withRequestContext({}, context)),
+    create: (context?: ApiRequestContext) => request<SnapshotBatch>('/snapshots', withRequestContext({ method: 'POST' }, context)),
+    delete: (id: number, context?: ApiRequestContext) => request<void>(`/snapshots/${id}`, withRequestContext({ method: 'DELETE' }, context)),
+    compare: (id1: number, id2: number, context?: ApiRequestContext) =>
+      request<SnapshotCompareResult>(`/snapshots/${id1}/compare/${id2}`, withRequestContext({}, context)),
+    trend: (params?: { dateStart?: string; dateEnd?: string }, context?: ApiRequestContext) => {
       const q = buildSnapshotQuery(params)
-      return request<TrendPoint[]>(`/snapshots/trend${q ? `?${q}` : ''}`)
+      return request<TrendPoint[]>(`/snapshots/trend${q ? `?${q}` : ''}`, withRequestContext({}, context))
     },
-    getSchedule: () => request<AutoSnapshotConfig>('/snapshots/auto-schedule'),
-    updateSchedule: (data: Partial<AutoSnapshotConfig>) =>
-      request<AutoSnapshotConfig>('/snapshots/auto-schedule', { method: 'PUT', body: JSON.stringify(data) }),
+    getSchedule: (context?: ApiRequestContext) => request<AutoSnapshotConfig>('/snapshots/auto-schedule', withRequestContext({}, context)),
+    updateSchedule: (data: Partial<AutoSnapshotConfig>, context?: ApiRequestContext) =>
+      request<AutoSnapshotConfig>('/snapshots/auto-schedule', withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
   },
   exchangeRates: {
-    get: () => request<ExchangeRateResponse>('/exchange-rates'),
+    get: (context?: ApiRequestContext) => request<ExchangeRateResponse>('/exchange-rates', withRequestContext({}, context)),
   },
   apiTokens: {
-    list: (): Promise<ApiToken[]> => request('/auth/api-tokens'),
-    create: (name: string, scopes: string[]): Promise<{ id: number; name: string; prefix: string; createdAt: string; scopes: string[] | null; token: string }> =>
-      request('/auth/api-tokens', { method: 'POST', body: JSON.stringify({ name, scopes }) }),
-    revoke: (id: number): Promise<void> =>
-      request(`/auth/api-tokens/${id}`, { method: 'DELETE' }),
+    list: (context?: ApiRequestContext): Promise<ApiToken[]> => request('/auth/api-tokens', withRequestContext({}, context)),
+    create: (name: string, scopes: string[], context?: ApiRequestContext): Promise<{ id: number; name: string; prefix: string; createdAt: string; scopes: string[] | null; token: string }> =>
+      request('/auth/api-tokens', withRequestContext({ method: 'POST', body: JSON.stringify({ name, scopes }) }, context)),
+    revoke: (id: number, context?: ApiRequestContext): Promise<void> =>
+      request(`/auth/api-tokens/${id}`, withRequestContext({ method: 'DELETE' }, context)),
   },
 }

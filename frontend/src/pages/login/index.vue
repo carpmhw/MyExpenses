@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../../api'
+import { ApiError, api } from '../../api'
 import { useAuth } from '../../composables/useAuth'
 
 const router = useRouter()
@@ -23,21 +23,23 @@ const showRecovery = ref(false)
 
 onMounted(async () => {
   try {
-    const status = await api.auth.status()
+    const status = await auth.initialize()
     if (status.authenticated && status.user) {
       router.push('/dashboard')
     } else {
-      mode.value = status.hasUsers ? 'login' : 'register'
+      mode.value = auth.hasUsers.value ? 'login' : 'register'
     }
   } catch {
     mode.value = 'login'
   }
 })
 
+// Clears the current authentication form error before a new action.
 function clearError() {
   error.value = ''
 }
 
+// Validates and submits a new user registration through the central API.
 async function handleRegister() {
   clearError()
   if (!email.value || !password.value || !displayName.value) {
@@ -62,11 +64,12 @@ async function handleRegister() {
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '註冊失敗'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '註冊失敗'
   }
 }
 
+// Validates credentials and advances to password or two-factor authentication.
 async function handleLogin() {
   clearError()
   if (!email.value || !password.value) {
@@ -85,11 +88,12 @@ async function handleLogin() {
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '登入失敗'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '登入失敗'
   }
 }
 
+// Submits the temporary two-factor token and verification code.
 async function handleVerify2fa() {
   clearError()
   if (!verifyCode.value) {
@@ -105,11 +109,12 @@ async function handleVerify2fa() {
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '驗證失敗'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '驗證失敗'
   }
 }
 
+// Uses a recovery code to complete a two-factor login.
 async function handleRecoveryLogin() {
   clearError()
   if (!recoveryCode.value) {
@@ -125,11 +130,12 @@ async function handleRecoveryLogin() {
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '備用碼無效'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '備用碼無效'
   }
 }
 
+// Resets the two-factor view back to the ordinary login form.
 function goBackToLogin() {
   mode.value = 'login'
   verifyCode.value = ''

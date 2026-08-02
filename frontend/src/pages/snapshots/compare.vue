@@ -1,46 +1,46 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api'
 import type { SnapshotCompareResult } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
+import QueryState from '../../components/ui/QueryState.vue'
 import { formatMoney } from '../../utils/format'
 import { useTimeZone } from '../../composables/useTimeZone'
+import { useAsyncQuery } from '../../composables/useAsyncQuery'
 
 const route = useRoute()
 const router = useRouter()
 const timeZone = useTimeZone()
 
-const result = ref<SnapshotCompareResult | null>(null)
-const loading = ref(true)
-const error = ref('')
+// Parses the two selected snapshot IDs from the route query string.
+const compareIds = computed<[number, number] | null>(() => {
+  const raw = route.query.ids
+  if (typeof raw !== 'string' || !raw) return null
+  const parts = raw.split(',').map(Number)
+  return parts.length === 2 && parts.every(Number.isFinite) ? [parts[0], parts[1]] : null
+})
 
+const compareQuery = useAsyncQuery<SnapshotCompareResult>({
+  key: () => ({ resource: 'snapshot-compare', ids: compareIds.value }),
+  query: ({ signal }) => {
+    if (!compareIds.value) return Promise.reject(new Error('缺少或無效的快照 ID'))
+    return api.snapshots.compare(compareIds.value[0], compareIds.value[1], { signal })
+  },
+})
+
+const result = computed(() => compareQuery.data.value ?? null)
+
+// Returns a safe message for failed comparison requests.
+function queryErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '載入比對資料失敗，請重試。'
+}
+
+// Formats comparison timestamps using the configured application time zone.
 function formatDate(dateStr: string) {
   return timeZone.formatDateTime(dateStr)
 }
-
-onMounted(async () => {
-  const ids = route.query.ids as string
-  if (!ids) {
-    error.value = '缺少快照 ID'
-    loading.value = false
-    return
-  }
-  const parts = ids.split(',').map(Number)
-  if (parts.length !== 2 || parts.some(isNaN)) {
-    error.value = '無效的快照 ID'
-    loading.value = false
-    return
-  }
-  try {
-    result.value = await api.snapshots.compare(parts[0], parts[1])
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '載入比對資料失敗'
-  } finally {
-    loading.value = false
-  }
-})
 </script>
 
 <template>
@@ -55,9 +55,12 @@ onMounted(async () => {
       </Button>
     </div>
 
-    <div v-if="loading" class="text-center py-12 text-text-tertiary">載入中...</div>
-    <div v-else-if="error" class="text-center py-12 text-color-expense-text">{{ error }}</div>
-    <div v-else-if="result" class="space-y-6">
+    <QueryState
+      :status="compareQuery.status.value"
+      :error-message="queryErrorMessage(compareQuery.error.value)"
+      :retry="compareQuery.retry"
+    >
+    <div v-if="result" class="space-y-6">
       <div class="grid grid-cols-2 gap-4">
         <Card>
           <p class="text-xs text-text-secondary mb-1">{{ formatDate(result.snapshot1.date) }}</p>
@@ -199,5 +202,6 @@ onMounted(async () => {
         </div>
       </Card>
     </div>
+    </QueryState>
   </div>
 </template>

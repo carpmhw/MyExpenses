@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, inject } from 'vue'
+import { ref, computed, onMounted, watch, onScopeDispose, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../../api'
-import type { Category, Transaction, PaymentMethod, CreditCard, TransactionListSummary } from '../../types'
+import { ApiError, api } from '../../api'
+import type { Category, Transaction, PaymentMethod, CreditCard } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -16,6 +16,8 @@ import { formatMoney } from '../../utils/format'
 import { addCalendarDays, getCurrentMonthRange } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { createIdempotencyKeyState } from '../../utils/idempotency'
+import { useAsyncQuery } from '../../composables/useAsyncQuery'
+import { useAsyncMutation } from '../../composables/useAsyncMutation'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
@@ -25,27 +27,17 @@ const route = useRoute()
 const router = useRouter()
 const pagination = usePagination(1, 15)
 
-const transactions = ref<Transaction[]>([])
-const summary = ref<TransactionListSummary>({
-  totalAmount: 0,
-  totalIncome: 0,
-  totalExpense: 0,
-  count: 0,
-  dailyAverage: 0,
-  maxAmount: 0,
-})
 const categories = ref<Category[]>([])
 const paymentMethods = ref<PaymentMethod[]>([])
-const loading = ref(false)
-const saving = ref(false)
 
 const activeTab = ref<'all' | 'Income' | 'Expense'>((route.query.type as 'all' | 'Income' | 'Expense') || 'all')
 const search = ref((route.query.search as string) || '')
 const selectedCategory = ref((route.query.categoryId as string) || '')
 const startDate = ref((route.query.startDate as string) || getDefaultStartDate())
 const endDate = ref((route.query.endDate as string) || getDefaultEndDate())
-
-
+const debouncedSearch = ref(search.value)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+// Validates the transaction date range before it becomes a query identity.
 function validateDateRange() {
   const s = startDate.value
   const e = endDate.value
@@ -114,7 +106,61 @@ const isCreditCardSelected = computed(() =>
   selectedPaymentMethod.value?.systemCode === 'credit-card'
 )
 
+type TransactionMutationInput =
+  | { operation: 'create'; data: Omit<Transaction, 'id' | 'createdAt' | 'category' | 'paymentMethod'> }
+  | { operation: 'purchase'; data: Parameters<typeof api.installmentPurchases.create>[0]; idempotencyKey: string }
+  | { operation: 'update'; id: number; data: Partial<Omit<Transaction, 'paymentMethod'>> }
+
+const transactionQuery = useAsyncQuery({
+  key: () => [
+    'transactions',
+    pagination.page.value,
+    pagination.pageSize.value,
+    activeTab.value,
+    selectedCategory.value,
+    startDate.value,
+    endDate.value,
+    debouncedSearch.value,
+  ],
+  query: ({ signal }) => api.transactions.list({
+    page: pagination.page.value,
+    pageSize: pagination.pageSize.value,
+    categoryId: selectedCategory.value ? Number(selectedCategory.value) : undefined,
+    startDate: startDate.value || undefined,
+    endDate: endDate.value || undefined,
+    search: debouncedSearch.value || undefined,
+    type: activeTab.value !== 'all' ? activeTab.value : undefined,
+  }, { signal }),
+  isEmpty: result => result.items.length === 0,
+})
+
+const transactions = computed(() => transactionQuery.data.value?.items ?? [])
+const summary = computed(() => transactionQuery.data.value?.summary ?? null)
+const loading = computed(() => transactionQuery.status.value === 'loading' || transactionQuery.status.value === 'refreshing')
+const saving = computed(() => transactionMutation.status.value === 'submitting' || deleteMutation.status.value === 'submitting')
+
+const transactionMutation = useAsyncMutation<TransactionMutationInput, unknown>({
+  mutate: input => {
+    if (input.operation === 'create') return api.transactions.create(input.data)
+    if (input.operation === 'purchase') return api.installmentPurchases.create(input.data, input.idempotencyKey)
+    return api.transactions.update(input.id, input.data)
+  },
+  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 404, 409, 422].includes(error.status ?? 0)) }),
+})
+
+const deleteMutation = useAsyncMutation<number, void>({
+  mutate: id => api.transactions.delete(id),
+  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 404, 409, 422].includes(error.status ?? 0)) }),
+})
+
+watch(() => transactionQuery.data.value?.total, total => {
+  if (total !== undefined) pagination.total.value = total
+})
+
 const stats = computed(() => {
+  if (!summary.value) {
+    return { total: null, income: null, expense: null, count: null, dailyAvg: null, max: null }
+  }
   if (activeTab.value === 'all') {
     return {
       total: summary.value.totalAmount,
@@ -135,6 +181,16 @@ const stats = computed(() => {
     dailyAvg: summary.value.dailyAverage,
   }
 })
+
+// Formats nullable transaction summary values without turning failed queries into zero totals.
+function formatSummaryValue(value: number | null): string {
+  return value === null ? '—' : formatMoney(value)
+}
+
+// Converts query errors into safe inline messages for the transaction table.
+function queryErrorMessage(error: unknown): string {
+  return error instanceof ApiError ? error.userMessage : '交易資料載入失敗，請重試。'
+}
 
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
@@ -161,39 +217,23 @@ const categoryOptions = computed(() =>
     .map(c => ({ value: c.id, label: c.name }))
 )
 
+// Returns the default transaction start date in the configured time zone.
 function getDefaultStartDate() {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).start
 }
 
+// Returns the default transaction end date in the configured time zone.
 function getDefaultEndDate() {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).end
 }
 
+// Loads category options used by the transaction form.
 async function fetchCategories() {
   const result = await api.categories.list({ pageSize: 999 })
   categories.value = result.items
 }
 
-async function fetchTransactions() {
-  loading.value = true
-  try {
-    const result = await api.transactions.list({
-      page: pagination.page.value,
-      pageSize: pagination.pageSize.value,
-      categoryId: selectedCategory.value ? Number(selectedCategory.value) : undefined,
-      startDate: startDate.value || undefined,
-      endDate: endDate.value || undefined,
-      search: search.value || undefined,
-      type: activeTab.value !== 'all' ? activeTab.value : undefined,
-    })
-    transactions.value = result.items
-    summary.value = result.summary
-    pagination.total.value = result.total
-  } finally {
-    loading.value = false
-  }
-}
-
+// Mirrors transaction filters in the route without changing query ownership.
 function syncQueryString() {
   router.replace({
     query: {
@@ -207,15 +247,26 @@ function syncQueryString() {
   })
 }
 
-watch([search, selectedCategory, startDate, endDate, activeTab], () => {
+watch([selectedCategory, startDate, endDate, activeTab], () => {
   pagination.reset()
   syncQueryString()
-  fetchTransactions()
 })
 
 watch(() => pagination.page.value, () => {
   syncQueryString()
-  fetchTransactions()
+})
+
+watch(search, value => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    debouncedSearch.value = value
+    pagination.reset()
+    syncQueryString()
+  }, 300)
+})
+
+onScopeDispose(() => {
+  if (searchTimer) clearTimeout(searchTimer)
 })
 
 watch(() => form.value.paymentMethodId, (newVal, oldVal) => {
@@ -229,6 +280,7 @@ watch(() => form.value.paymentMethodId, (newVal, oldVal) => {
   }
 })
 
+// Resets the transaction form for a new logical create action.
 function openCreate() {
   editingItem.value = null
   form.value = {
@@ -245,6 +297,7 @@ function openCreate() {
   modalOpen.value = true
 }
 
+// Loads a server transaction into the edit form without optimistic changes.
 function openEdit(item: Transaction) {
   editingItem.value = item
   form.value = {
@@ -264,11 +317,10 @@ async function save() {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
 
-  saving.value = true
   let mutationSucceeded = false
   try {
     if (editingItem.value) {
-      await api.transactions.update(editingItem.value.id, form.value)
+      await transactionMutation.submit({ operation: 'update', id: editingItem.value.id, data: form.value })
       toast.success('交易已更新')
     } else {
       if (isCreditCardSelected.value && installmentCardId.value) {
@@ -288,54 +340,59 @@ async function save() {
           },
         }
         const idempotencyKey = installmentPurchaseIdempotency.prepare(purchaseRequest)
-        await api.installmentPurchases.create(purchaseRequest, idempotencyKey)
+        await transactionMutation.submit({ operation: 'purchase', data: purchaseRequest, idempotencyKey })
         installmentPurchaseIdempotency.clear()
         toast.success('交易與分期已建立')
       } else {
-        await api.transactions.create(form.value)
+        await transactionMutation.submit({ operation: 'create', data: form.value })
         toast.success('交易已建立')
       }
     }
     modalOpen.value = false
     mutationSucceeded = true
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : '儲存失敗')
-  } finally {
-    saving.value = false
+    toast.error(e instanceof ApiError ? e.userMessage : '儲存失敗')
   }
 
   if (mutationSucceeded) {
-    try {
-      await fetchTransactions()
-    } catch {
+    await transactionQuery.refresh()
+    if (transactionQuery.status.value === 'stale') {
       toast.error('已儲存，但交易列表重新整理失敗')
     }
   }
 }
 
+// Opens the delete confirmation for one transaction ID.
 function confirmDelete(id: number) {
   deletingId.value = id
   confirmOpen.value = true
 }
 
+// Confirms transaction deletion before refreshing the current query identity.
 async function doDelete() {
   if (deletingId.value !== null) {
+    const id = deletingId.value
     try {
-      await api.transactions.delete(deletingId.value)
+      await deleteMutation.submit(id)
       confirmOpen.value = false
       deletingId.value = null
       toast.success('交易已刪除')
-      await fetchTransactions()
+      await transactionQuery.refresh()
+      if (transactionQuery.status.value === 'stale') {
+        toast.error('已刪除，但交易列表重新整理失敗')
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '刪除失敗')
+      toast.error(e instanceof ApiError ? e.userMessage : '刪除失敗')
     }
   }
 }
 
+// Formats transaction amounts consistently with the rest of the financial UI.
 function formatAmount(amount: number) {
   return formatMoney(amount)
 }
 
+// Loads payment method options used by the transaction form.
 async function fetchPaymentMethods() {
   const result = await api.paymentMethods.list({ pageSize: 999 })
   paymentMethods.value = result.items
@@ -344,7 +401,6 @@ async function fetchPaymentMethods() {
 onMounted(async () => {
   await fetchCategories()
   await fetchPaymentMethods()
-  await fetchTransactions()
   const result = await api.creditCards.list({ pageSize: 999 })
   creditCards.value = result.items
 })
@@ -381,7 +437,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-xs text-text-secondary">總金額</p>
-              <p class="text-xl font-bold text-text-primary">{{ formatMoney(stats.total) }}</p>
+              <p class="text-xl font-bold text-text-primary">{{ formatSummaryValue(stats.total) }}</p>
             </div>
           </div>
         </Card>
@@ -392,7 +448,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-xs text-text-secondary">總收入</p>
-              <p class="text-xl font-bold text-color-income-text">{{ formatMoney(stats.income) }}</p>
+              <p class="text-xl font-bold text-color-income-text">{{ formatSummaryValue(stats.income) }}</p>
             </div>
           </div>
         </Card>
@@ -403,7 +459,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-xs text-text-secondary">總支出</p>
-              <p class="text-xl font-bold text-color-expense-text">{{ formatMoney(stats.expense) }}</p>
+              <p class="text-xl font-bold text-color-expense-text">{{ formatSummaryValue(stats.expense) }}</p>
             </div>
           </div>
         </Card>
@@ -427,7 +483,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-xs text-text-secondary">{{ activeTab === 'Income' ? '總收入' : '總支出' }}</p>
-              <p class="text-xl font-bold text-text-primary">{{ formatMoney(stats.total) }}</p>
+              <p class="text-xl font-bold text-text-primary">{{ formatSummaryValue(stats.total) }}</p>
             </div>
           </div>
         </Card>
@@ -438,7 +494,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-xs text-text-secondary">{{ activeTab === 'Income' ? '日均收入' : '日均支出' }}</p>
-              <p class="text-xl font-bold text-text-primary">{{ formatMoney(stats.dailyAvg) }}</p>
+              <p class="text-xl font-bold text-text-primary">{{ formatSummaryValue(stats.dailyAvg) }}</p>
             </div>
           </div>
         </Card>
@@ -460,7 +516,7 @@ onMounted(async () => {
             </div>
             <div>
               <p class="text-xs text-text-secondary">單筆最高</p>
-              <p class="text-xl font-bold text-text-primary">{{ formatMoney(stats.max) }}</p>
+              <p class="text-xl font-bold text-text-primary">{{ formatSummaryValue(stats.max) }}</p>
             </div>
           </div>
         </Card>
@@ -499,7 +555,14 @@ onMounted(async () => {
         />
       </div>
 
-      <DataTable :columns="columns" :loading="loading" :items="transactions">
+      <DataTable
+        :columns="columns"
+        :loading="loading"
+        :items="transactions"
+        :error="transactionQuery.status.value === 'error' || transactionQuery.status.value === 'stale' ? queryErrorMessage(transactionQuery.error.value) : null"
+        :refreshing="transactionQuery.status.value === 'refreshing'"
+        :retry="transactionQuery.retry"
+      >
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無交易資料</div>
         </template>

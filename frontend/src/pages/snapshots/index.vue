@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, inject, watch, onMounted } from 'vue'
+import { ref, computed, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api'
-import type { SnapshotBatch, TrendPoint, AutoSnapshotConfig } from '../../types'
+import type { SnapshotBatch, TrendPoint, AutoSnapshotConfig, SnapshotListResponse } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
+import QueryState from '../../components/ui/QueryState.vue'
 import Modal from '../../components/ui/Modal.vue'
 import SnapshotDetailModal from '../../components/snapshots/SnapshotDetailModal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
@@ -17,6 +18,8 @@ import { useTimeZone } from '../../composables/useTimeZone'
 import { getSystemDateParts } from '../../utils/timezone'
 import { getThemeColor } from '../../utils/themeColor'
 import { Line } from 'vue-chartjs'
+import { useAsyncQuery } from '../../composables/useAsyncQuery'
+import { useAsyncMutation } from '../../composables/useAsyncMutation'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -36,21 +39,86 @@ const toast = inject<{ success: (m: string) => void; error: (m: string) => void 
 const timeZone = useTimeZone()
 const darkMode = inject<{ isDark: { value: boolean } }>('darkMode')!
 
-const snapshots = ref<SnapshotBatch[]>([])
-const loading = ref(false)
 const pagination = usePagination(1, 15)
 const defaultSnapshotRange = createDefaultSnapshotDateRange(new Date(), timeZone.timeZoneId.value)
 const dateStart = ref(defaultSnapshotRange.dateStart)
 const dateEnd = ref(defaultSnapshotRange.dateEnd)
 
 const selectedIds = ref<number[]>([])
-const detailSnapshot = ref<SnapshotBatch | null>(null)
+const detailId = ref<number | null>(null)
 const detailOpen = ref(false)
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
 
-const trendData = ref<TrendPoint[]>([])
+const defaultSchedule: AutoSnapshotConfig = {
+  id: 0,
+  isEnabled: false,
+  frequency: 'Daily',
+  dayOfWeek: null,
+  dayOfMonth: null,
+  timeOfDay: '08:00',
+  lastRunAt: null,
+}
+const scheduleOpen = ref(false)
+const scheduleForm = ref<AutoSnapshotConfig>({ ...defaultSchedule })
+
+const snapshotsQuery = useAsyncQuery<SnapshotListResponse>({
+  key: () => ({
+    resource: 'snapshots',
+    page: pagination.page.value,
+    pageSize: pagination.pageSize.value,
+    dateStart: dateStart.value,
+    dateEnd: dateEnd.value,
+  }),
+  query: ({ signal }) => api.snapshots.list({
+    page: pagination.page.value,
+    pageSize: pagination.pageSize.value,
+    dateStart: dateStart.value,
+    dateEnd: dateEnd.value,
+  }, { signal }),
+  isEmpty: result => result.items.length === 0,
+})
+
+const trendQuery = useAsyncQuery<TrendPoint[]>({
+  key: () => ({ resource: 'snapshot-trend', dateStart: dateStart.value, dateEnd: dateEnd.value }),
+  query: ({ signal }) => api.snapshots.trend({ dateStart: dateStart.value, dateEnd: dateEnd.value }, { signal }),
+  isEmpty: data => data.length === 0,
+})
+
+const detailQuery = useAsyncQuery<SnapshotBatch>({
+  key: () => ({ resource: 'snapshot-detail', id: detailId.value }),
+  query: ({ signal }) => api.snapshots.get(detailId.value!, { signal }),
+  immediate: false,
+})
+
+const scheduleQuery = useAsyncQuery<AutoSnapshotConfig>({
+  key: () => ({ resource: 'snapshot-schedule' }),
+  query: ({ signal }) => api.snapshots.getSchedule({ signal }),
+  immediate: false,
+})
+
+const deleteMutation = useAsyncMutation<number, void>({
+  mutate: (id, { signal }) => api.snapshots.delete(id, { signal }),
+  onSuccess: async () => {
+    if (deletingId.value !== null) selectedIds.value = selectedIds.value.filter(id => id !== deletingId.value)
+    await Promise.all([snapshotsQuery.refresh(), trendQuery.refresh()])
+  },
+})
+
+const scheduleMutation = useAsyncMutation<AutoSnapshotConfig, AutoSnapshotConfig>({
+  mutate: (data, { signal }) => api.snapshots.updateSchedule(data, { signal }),
+  onSuccess: data => {
+    scheduleForm.value = { ...data }
+    scheduleOpen.value = false
+    toast.success('排程設定已儲存')
+  },
+})
+
+const snapshots = computed(() => snapshotsQuery.data.value?.items ?? [])
+const snapshotTotal = computed(() => snapshotsQuery.data.value?.total ?? 0)
+const detailSnapshot = computed(() => detailQuery.data.value ?? null)
+const trendData = computed(() => trendQuery.data.value ?? [])
 
 const chartColors = computed(() => {
   const theme = darkMode.isDark.value ? 'dark' : 'light'
@@ -69,19 +137,6 @@ const chartColors = computed(() => {
   }
 })
 
-const scheduleOpen = ref(false)
-const scheduleLoading = ref(false)
-const scheduleSaving = ref(false)
-const scheduleForm = ref<AutoSnapshotConfig>({
-  id: 0,
-  isEnabled: false,
-  frequency: 'Daily',
-  dayOfWeek: null,
-  dayOfMonth: null,
-  timeOfDay: '08:00',
-  lastRunAt: null,
-})
-
 const columns = [
   { key: 'select', label: '選取' },
   { key: 'seq', label: '序號' },
@@ -92,6 +147,7 @@ const columns = [
   { key: 'totalStockValue', label: '股票預估賣出淨值', align: 'right' as const },
 ]
 
+// Formats snapshot timestamps using the configured application time zone.
 function formatDate(dateStr: string) {
   return timeZone.formatDateTime(dateStr)
 }
@@ -109,6 +165,7 @@ function snapshotBasisLabel(snapshot: SnapshotBatch): string {
 const canCompare = computed(() => selectedIds.value.length === 2)
 const hasCompleteTrend = computed(() => trendData.value.some(hasCompleteNetWorthBasis))
 
+// Maintains at most two selected snapshot IDs for comparison.
 function toggleSelect(id: number) {
   const idx = selectedIds.value.indexOf(id)
   if (idx >= 0) {
@@ -121,6 +178,7 @@ function toggleSelect(id: number) {
   }
 }
 
+// Navigates to comparison only when exactly two snapshots are selected.
 function goCompare() {
   if (selectedIds.value.length !== 2) return
   const [id1, id2] = selectedIds.value
@@ -202,30 +260,6 @@ const trendChartOptions = computed(() => ({
   },
 }))
 
-async function fetchList() {
-  loading.value = true
-  try {
-    const result = await api.snapshots.list({
-      page: pagination.page.value,
-      pageSize: pagination.pageSize.value,
-      dateStart: dateStart.value,
-      dateEnd: dateEnd.value,
-    })
-    snapshots.value = result.items
-    pagination.total.value = result.total
-  } finally {
-    loading.value = false
-  }
-}
-
-async function fetchTrend() {
-  try {
-    trendData.value = await api.snapshots.trend({ dateStart: dateStart.value, dateEnd: dateEnd.value })
-  } catch {
-    // trend data is optional
-  }
-}
-
 // Keeps the snapshot date range valid before it is used in list and trend requests.
 function normalizeSnapshotDateRange() {
   const normalized = coerceSnapshotDateRange({ dateStart: dateStart.value, dateEnd: dateEnd.value })
@@ -244,85 +278,61 @@ function normalizeSnapshotDateRange() {
   return true
 }
 
-// Reloads snapshot list and trend data using the current shared date range.
-async function refreshSnapshotsForDateRange() {
+// Resets pagination when the date range changes; query keys own the resulting reloads.
+function refreshSnapshotsForDateRange() {
   if (!normalizeSnapshotDateRange()) return
 
   if (pagination.page.value !== 1) {
     pagination.page.value = 1
-  } else {
-    await fetchList()
   }
-  await fetchTrend()
 }
 
+// Loads the selected snapshot through its own detail query identity.
 function showDetail(snapshot: SnapshotBatch) {
-  detailSnapshot.value = snapshot
+  detailId.value = snapshot.id
   detailOpen.value = true
+  void detailQuery.refresh()
 }
 
+// Opens the confirmation dialog for one snapshot without changing query state.
 function confirmDelete(id: number) {
   deletingId.value = id
   confirmOpen.value = true
 }
 
+// Submits deletion and keeps refresh failures separate from confirmed command success.
 async function doDelete() {
-  if (deletingId.value !== null) {
-    try {
-      await api.snapshots.delete(deletingId.value)
-      confirmOpen.value = false
-      deletingId.value = null
-      toast.success('快照已刪除')
-      selectedIds.value = selectedIds.value.filter(id => id !== deletingId.value)
-      await fetchList()
-      await fetchTrend()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '刪除失敗')
-    }
+  if (deletingId.value === null) return
+  try {
+    await deleteMutation.submit(deletingId.value)
+    confirmOpen.value = false
+    toast.success('快照已刪除')
+    deletingId.value = null
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : '刪除失敗')
   }
 }
 
+// Opens the schedule dialog and loads its configuration through the schedule query.
 async function openSchedule() {
-  scheduleLoading.value = true
   scheduleOpen.value = true
-  try {
-    const config = await api.snapshots.getSchedule()
-    scheduleForm.value = { ...config }
-  } catch {
-    scheduleForm.value = {
-      id: 0,
-      isEnabled: false,
-      frequency: 'Daily',
-      dayOfWeek: null,
-      dayOfMonth: null,
-      timeOfDay: '08:00',
-      lastRunAt: null,
-    }
-  } finally {
-    scheduleLoading.value = false
-  }
+  await scheduleQuery.refresh()
+  scheduleForm.value = { ...(scheduleQuery.data.value ?? defaultSchedule) }
 }
 
+// Submits schedule changes and leaves server-confirmed values as the canonical form state.
 async function saveSchedule() {
-  scheduleSaving.value = true
   try {
-    await api.snapshots.updateSchedule(scheduleForm.value)
-    toast.success('排程設定已儲存')
-    scheduleOpen.value = false
+    await scheduleMutation.submit({ ...scheduleForm.value })
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '儲存失敗')
-  } finally {
-    scheduleSaving.value = false
   }
 }
 
-onMounted(() => {
-  fetchList()
-  fetchTrend()
+watch(() => snapshotsQuery.data.value?.total, total => {
+  pagination.total.value = total ?? 0
 })
-
-watch(() => pagination.page.value, () => fetchList())
-watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
+watch([dateStart, dateEnd], refreshSnapshotsForDateRange)
 </script>
 
 <template>
@@ -373,21 +383,35 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
 
     <Card class="mb-6">
       <div class="p-4">
-         <h2 class="text-sm font-semibold text-text-primary mb-3">資產/淨值趨勢</h2>
-         <div class="h-64" v-if="trendData.length > 0">
-           <Line :data="trendChartData" :options="trendChartOptions" />
-         </div>
-         <div v-else class="h-64 flex items-center justify-center text-text-tertiary text-sm">
-           尚無快照資料，無法顯示趨勢圖
-         </div>
-         <p v-if="trendData.length > 0 && !hasCompleteTrend" class="mt-3 text-xs text-text-secondary">
-           尚無完整淨值歷史，目前僅顯示資產總額
-         </p>
+        <QueryState
+          :status="trendQuery.status.value"
+          :error-message="trendQuery.error.value instanceof Error ? trendQuery.error.value.message : '載入趨勢失敗，請重試。'"
+          :empty-message="'尚無快照資料，無法顯示趨勢圖'"
+          :last-success-at="trendQuery.lastSuccessAt.value"
+          :retry="trendQuery.retry"
+        >
+          <h2 class="text-sm font-semibold text-text-primary mb-3">資產/淨值趨勢</h2>
+          <div class="h-64">
+            <Line :data="trendChartData" :options="trendChartOptions" />
+          </div>
+          <p v-if="trendData.length > 0 && !hasCompleteTrend" class="mt-3 text-xs text-text-secondary">
+             尚無完整淨值歷史，目前僅顯示資產總額
+          </p>
+        </QueryState>
       </div>
     </Card>
 
     <Card>
-      <DataTable :columns="columns" :loading="loading" :items="snapshots">
+      <DataTable
+        :columns="columns"
+        :loading="snapshotsQuery.status.value === 'loading'"
+        :items="snapshots"
+        :error="snapshotsQuery.status.value === 'error' || snapshotsQuery.status.value === 'stale'
+          ? (snapshotsQuery.error.value instanceof Error ? snapshotsQuery.error.value.message : '載入快照失敗，請重試。')
+          : null"
+        :refreshing="snapshotsQuery.status.value === 'refreshing'"
+        :retry="snapshotsQuery.retry"
+      >
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無快照資料</div>
         </template>
@@ -433,7 +457,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
       </DataTable>
 
       <div class="flex items-center justify-between px-4 py-3 border-t border-border-default">
-        <span class="text-sm text-text-secondary">共 {{ pagination.total.value }} 筆</span>
+        <span class="text-sm text-text-secondary">共 {{ snapshotTotal }} 筆</span>
         <div class="flex items-center gap-2">
           <Button variant="ghost" :disabled="!pagination.hasPrev.value" @click="pagination.prev()">上一頁</Button>
           <span class="text-sm text-text-secondary">{{ pagination.page.value }} / {{ pagination.totalPages.value }}</span>
@@ -443,12 +467,26 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
     </Card>
 
     <SnapshotDetailModal
+      v-if="detailQuery.status.value === 'success'"
       v-model:open="detailOpen"
       :snapshot="detailSnapshot"
     />
 
+    <Modal v-else-if="detailOpen" :open="detailOpen" title="快照明細" @update:open="detailOpen = $event">
+      <QueryState
+        :status="detailQuery.status.value"
+        :error-message="detailQuery.error.value instanceof Error ? detailQuery.error.value.message : '載入明細失敗，請重試。'"
+        :retry="detailQuery.retry"
+      />
+    </Modal>
+
     <Modal :open="scheduleOpen" title="自動排程設定" @update:open="scheduleOpen = $event">
-      <div v-if="scheduleLoading" class="text-center py-4 text-text-tertiary">載入中...</div>
+      <QueryState
+        v-if="scheduleQuery.status.value === 'loading' || scheduleQuery.status.value === 'error'"
+        :status="scheduleQuery.status.value"
+        :error-message="scheduleQuery.error.value instanceof Error ? scheduleQuery.error.value.message : '載入排程失敗，請重試。'"
+        :retry="openSchedule"
+      />
       <form v-else class="space-y-4" @submit.prevent="saveSchedule">
         <div class="flex items-center gap-3">
           <label class="text-sm font-medium text-text-primary">啟用自動排程</label>
@@ -516,7 +554,7 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
 
         <div class="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" @click="scheduleOpen = false">取消</Button>
-          <Button type="submit" :loading="scheduleSaving">儲存</Button>
+          <Button type="submit" :loading="scheduleMutation.status.value === 'submitting'">儲存</Button>
         </div>
       </form>
     </Modal>

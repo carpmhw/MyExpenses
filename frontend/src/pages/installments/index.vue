@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, inject, watch, onMounted } from 'vue'
-import { api } from '../../api'
-import type { Installment, CreditCard, CreditCardBill, InstallmentListSummary } from '../../types'
+import { ref, computed, inject, onMounted, watch } from 'vue'
+import { ApiError, api } from '../../api'
+import type { Installment, CreditCard, CreditCardBill } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -10,34 +10,29 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Input from '../../components/ui/Input.vue'
 import Select from '../../components/ui/Select.vue'
 import Icon from '../../components/ui/Icon.vue'
+import QueryState from '../../components/ui/QueryState.vue'
 import { formatMoney } from '../../utils/format'
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { addCalendarDays, formatDateOnly, getCurrentMonthRange, isDateOnlyBefore } from '../../utils/timezone'
 import { createIdempotencyKeyState } from '../../utils/idempotency'
+import { useAsyncQuery } from '../../composables/useAsyncQuery'
+import { useAsyncMutation } from '../../composables/useAsyncMutation'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
 
-const installments = ref<Installment[]>([])
-const summary = ref<InstallmentListSummary>({
-  totalCount: 0,
-  activeCount: 0,
-  dueAmount: 0,
-  duePaymentCount: 0,
-})
 const creditCards = ref<CreditCard[]>([])
-const unpaidBills = ref<CreditCardBill[]>([])
-const loading = ref(false)
-const saving = ref(false)
 const pagination = usePagination(1, 15)
 
 const filterCardId = ref<number | ''>('')
 const filterStatus = ref<string>('')
 
+// Returns the default installment start date in the configured time zone.
 function getDefaultStartDate(): string {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).start
 }
+// Returns the default installment end date in the configured time zone.
 function getDefaultEndDate(): string {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).end
 }
@@ -45,6 +40,48 @@ function getDefaultEndDate(): string {
 const startDate = ref(getDefaultStartDate())
 const endDate = ref(getDefaultEndDate())
 
+const installmentListQuery = useAsyncQuery({
+  key: () => [
+    'installments',
+    pagination.page.value,
+    pagination.pageSize.value,
+    filterCardId.value,
+    filterStatus.value,
+    startDate.value,
+    endDate.value,
+  ],
+  query: ({ signal }) => api.installments.list({
+    page: pagination.page.value,
+    pageSize: pagination.pageSize.value,
+    cardId: filterCardId.value || undefined,
+    dateStart: startDate.value || undefined,
+    dateEnd: endDate.value || undefined,
+    status: filterStatus.value || undefined,
+  }, { signal }),
+  isEmpty: result => result.items.length === 0,
+})
+const billQuery = useAsyncQuery<CreditCardBill[]>({
+  key: () => ['unpaid-bills', filterCardId.value],
+  query: ({ signal }) => api.creditCardBills.list({ isPaid: false, cardId: filterCardId.value || undefined }, { signal }),
+  isEmpty: result => result.length === 0,
+})
+const scheduleInstallmentId = ref<number | null>(null)
+const scheduleQuery = useAsyncQuery<Installment | null>({
+  key: () => ['installment-detail', scheduleInstallmentId.value],
+  query: ({ signal }) => scheduleInstallmentId.value === null
+    ? Promise.resolve(null)
+    : api.installments.get(scheduleInstallmentId.value, { signal }),
+  isEmpty: result => result === null,
+})
+
+const installments = computed(() => installmentListQuery.data.value?.items ?? [])
+const summary = computed(() => installmentListQuery.data.value?.summary ?? null)
+const unpaidBills = computed(() => billQuery.data.value ?? [])
+const scheduleInstallment = computed(() => scheduleQuery.data.value)
+const loading = computed(() => installmentListQuery.status.value === 'loading' || installmentListQuery.status.value === 'refreshing')
+const saving = computed(() => mutation.status.value === 'submitting' || deleteMutation.status.value === 'submitting' || paymentMutation.status.value === 'submitting')
+
+// Validates the installment date range before it becomes a query identity.
 function validateDateRange() {
   const s = startDate.value
   const e = endDate.value
@@ -79,7 +116,6 @@ const form = ref({
 })
 
 const scheduleOpen = ref(false)
-const scheduleInstallment = ref<Installment | null>(null)
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
@@ -89,6 +125,28 @@ const payingPaymentId = ref<number | null>(null)
 const markingAsPaid = ref(true)
 const paidDate = ref(timeZone.getToday())
 const standaloneInstallmentIdempotency = createIdempotencyKeyState()
+
+type InstallmentMutationInput =
+  | { operation: 'create'; data: Parameters<typeof api.installments.create>[0]; idempotencyKey: string }
+  | { operation: 'update'; id: number; data: Parameters<typeof api.installments.update>[1] }
+
+const mutation = useAsyncMutation<InstallmentMutationInput, unknown>({
+  mutate: input => input.operation === 'create'
+    ? api.installments.create(input.data, input.idempotencyKey)
+    : api.installments.update(input.id, input.data),
+  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 404, 409, 422].includes(error.status ?? 0)) }),
+})
+const deleteMutation = useAsyncMutation<number, void>({
+  mutate: id => api.installments.delete(id),
+  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 404, 409, 422].includes(error.status ?? 0)) }),
+})
+const paymentMutation = useAsyncMutation<
+  { id: number; paymentId: number; data: { isPaid: boolean; paidDate?: string } },
+  ReturnType<typeof api.installments.markPayment> extends Promise<infer T> ? T : never
+>({
+  mutate: input => api.installments.markPayment(input.id, input.paymentId, input.data),
+  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 404, 409, 422].includes(error.status ?? 0)) }),
+})
 
 const columns = [
   { key: 'seq', label: '序號' },
@@ -111,12 +169,23 @@ const cardOptions = computed(() =>
 )
 
 const stats = computed(() => {
+  if (!summary.value) return { total: null, active: null, monthlyDue: null }
   return {
     total: summary.value.totalCount,
     active: summary.value.activeCount,
     monthlyDue: summary.value.dueAmount,
   }
 })
+
+// Formats nullable installment summary values without presenting query failure as zero.
+function formatSummaryValue(value: number | null): string {
+  return value === null ? '—' : formatMoney(value)
+}
+
+// Converts list or detail errors into safe inline messages.
+function queryErrorMessage(error: unknown): string {
+  return error instanceof ApiError ? error.userMessage : '分期資料載入失敗，請重試。'
+}
 
 const hasPaidPayments = computed(() =>
   editingItem.value?.payments?.some(p => p.isPaid) ?? false
@@ -140,38 +209,15 @@ watch([() => form.value.totalAmount, () => form.value.periods], () => {
   }
 })
 
-async function fetchList() {
-  loading.value = true
-  try {
-    const result = await api.installments.list({
-      page: pagination.page.value,
-      pageSize: pagination.pageSize.value,
-      cardId: filterCardId.value || undefined,
-      dateStart: startDate.value || undefined,
-      dateEnd: endDate.value || undefined,
-      status: filterStatus.value || undefined,
-    })
-    installments.value = result.items
-    summary.value = result.summary
-    pagination.total.value = result.total
-  } finally {
-    loading.value = false
-  }
-  await fetchUnpaidBills()
-}
+watch(() => installmentListQuery.data.value?.total, total => {
+  if (total !== undefined) pagination.total.value = total
+})
 
-async function fetchUnpaidBills() {
-  try {
-    const result = await api.creditCardBills.list({
-      isPaid: false,
-      cardId: filterCardId.value || undefined,
-    })
-    unpaidBills.value = result
-  } catch {
-    unpaidBills.value = []
-  }
-}
+watch([filterCardId, filterStatus, startDate, endDate], () => {
+  pagination.reset()
+})
 
+// Loads credit-card options used by installment filters and forms.
 async function fetchCreditCards() {
   const result = await api.creditCards.list({ pageSize: 999 })
   creditCards.value = result.items
@@ -193,6 +239,7 @@ function openCreate() {
   modalOpen.value = true
 }
 
+// Loads a server installment into the edit form without optimistic changes.
 function openEdit(item: Installment) {
   editingItem.value = item
   form.value = {
@@ -212,17 +259,16 @@ async function save() {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
 
-  saving.value = true
   let mutationSucceeded = false
   try {
     if (editingItem.value) {
-      await api.installments.update(editingItem.value.id, {
+      await mutation.submit({ operation: 'update', id: editingItem.value.id, data: {
         cardId: form.value.cardId,
         totalAmount: form.value.totalAmount,
         periods: form.value.periods,
         purchaseDate: form.value.purchaseDate,
         description: form.value.description,
-      })
+      } })
       toast.success('分期已更新')
     } else {
       const createRequest = {
@@ -234,32 +280,31 @@ async function save() {
         description: form.value.description,
       }
       const idempotencyKey = standaloneInstallmentIdempotency.prepare(createRequest)
-      await api.installments.create(createRequest, idempotencyKey)
+      await mutation.submit({ operation: 'create', data: createRequest, idempotencyKey })
       standaloneInstallmentIdempotency.clear()
       toast.success('分期已建立')
     }
     modalOpen.value = false
     mutationSucceeded = true
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : '儲存失敗')
-  } finally {
-    saving.value = false
+    toast.error(e instanceof ApiError ? e.userMessage : '儲存失敗')
   }
 
   if (mutationSucceeded) {
-    try {
-      await fetchList()
-    } catch {
+    await installmentListQuery.refresh()
+    if (installmentListQuery.status.value === 'stale') {
       toast.error('已儲存，但分期列表重新整理失敗')
     }
   }
 }
 
+// Opens the delete confirmation for one installment ID.
 function confirmDelete(id: number) {
   deletingId.value = id
   confirmOpen.value = true
 }
 
+// Confirms installment deletion before refreshing the current query identity.
 async function doDelete() {
   if (deletingId.value !== null) {
     const id = deletingId.value
@@ -267,20 +312,25 @@ async function doDelete() {
     deletingId.value = null
 
     try {
-      await api.installments.delete(id)
+      await deleteMutation.submit(id)
       toast.success('分期已刪除')
-      await fetchList()
+      await installmentListQuery.refresh()
+      if (installmentListQuery.status.value === 'stale') {
+        toast.error('已刪除，但分期列表重新整理失敗')
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '刪除失敗')
+      toast.error(e instanceof ApiError ? e.userMessage : '刪除失敗')
     }
   }
 }
 
+// Selects an installment ID and opens its independently owned schedule query.
 function openSchedule(item: Installment) {
-  scheduleInstallment.value = item
+  scheduleInstallmentId.value = item.id
   scheduleOpen.value = true
 }
 
+// Opens the payment dialog with an explicit target state rather than a toggle.
 function confirmMarkPayment(paymentId: number, isPaid: boolean) {
   payingPaymentId.value = paymentId
   markingAsPaid.value = !isPaid
@@ -300,42 +350,44 @@ async function doMarkPayment() {
     return
   }
 
-  saving.value = true
-
   try {
     const paymentRequest = markingAsPaid.value
       ? { isPaid: true, paidDate: paidDate.value }
       : { isPaid: false }
-    const updated = await api.installments.markPayment(id, paymentId, paymentRequest)
+    const updated = await paymentMutation.submit({ id, paymentId, data: paymentRequest })
     paymentConfirmOpen.value = false
     payingPaymentId.value = null
     toast.success(markingAsPaid.value ? '已標記為已繳款' : '已取消繳款標記')
-    await fetchList()
-    if (scheduleInstallment.value) {
-      scheduleInstallment.value = {
-        ...scheduleInstallment.value,
+    if (scheduleQuery.data.value) {
+      scheduleQuery.data.value = {
+        ...scheduleQuery.data.value,
         remainingPeriods: updated.remainingPeriods,
         status: updated.status,
         payments: updated.payments,
       }
     }
+    await installmentListQuery.refresh()
+    if (installmentListQuery.status.value === 'stale') {
+      toast.error('付款狀態已更新，但分期列表重新整理失敗')
+    }
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : '標記失敗')
-  } finally {
-    saving.value = false
+    toast.error(e instanceof ApiError ? e.userMessage : '標記失敗')
   }
 }
 
+// Formats the linked card label for an installment row.
 function getCardDisplay(inst: Installment): string {
   if (inst.card) return `${inst.card.bankName} (${inst.card.lastFourDigits})`
   return '-'
 }
 
+// Formats optional installment dates without inventing a fallback date.
 function formatDate(dateStr: string | undefined | null) {
   if (!dateStr) return '-'
   return formatDateOnly(dateStr)
 }
 
+// Calculates the paid-period percentage for an installment row.
 function progressPercent(inst: Installment): number {
   if (inst.periods === 0) return 0
   return Math.round(((inst.periods - inst.remainingPeriods) / inst.periods) * 100)
@@ -343,13 +395,6 @@ function progressPercent(inst: Installment): number {
 
 onMounted(async () => {
   await fetchCreditCards()
-  await fetchList()
-})
-
-watch(() => pagination.page.value, () => fetchList())
-watch([filterCardId, filterStatus, startDate, endDate], () => {
-  pagination.reset()
-  fetchList()
 })
 </script>
 
@@ -371,7 +416,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           </div>
           <div>
             <p class="text-xs text-text-secondary">總分期筆數</p>
-            <p class="text-xl font-bold text-text-primary">{{ stats.total }} 筆</p>
+            <p class="text-xl font-bold text-text-primary">{{ stats.total ?? '—' }} 筆</p>
           </div>
         </div>
       </Card>
@@ -382,7 +427,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           </div>
           <div>
             <p class="text-xs text-text-secondary">進行中</p>
-            <p class="text-xl font-bold text-text-primary">{{ stats.active }} 筆</p>
+            <p class="text-xl font-bold text-text-primary">{{ stats.active ?? '—' }} 筆</p>
           </div>
         </div>
       </Card>
@@ -393,13 +438,25 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           </div>
           <div>
             <p class="text-xs text-text-secondary">本月應繳總額</p>
-            <p class="text-xl font-bold text-color-credit-text">{{ formatMoney(stats.monthlyDue) }}</p>
+            <p class="text-xl font-bold text-color-credit-text">{{ formatSummaryValue(stats.monthlyDue) }}</p>
           </div>
         </div>
       </Card>
     </div>
 
-    <div v-if="unpaidBills.length > 0" class="mb-6">
+    <div v-if="billQuery.status.value === 'loading'" class="mb-6">
+      <Card><QueryState :status="billQuery.status.value" /></Card>
+    </div>
+    <div v-else-if="billQuery.status.value === 'error'" class="mb-6">
+      <Card>
+        <QueryState
+          :status="billQuery.status.value"
+          :error-message="queryErrorMessage(billQuery.error.value)"
+          :retry="billQuery.retry"
+        />
+      </Card>
+    </div>
+    <div v-else-if="unpaidBills.length > 0" class="mb-6">
       <Card>
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-sm font-semibold text-text-primary">未繳帳單</h2>
@@ -477,7 +534,14 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           <option value="PaidOff">已結清</option>
         </select>
       </div>
-      <DataTable :columns="columns" :loading="loading" :items="installments">
+      <DataTable
+        :columns="columns"
+        :loading="loading"
+        :items="installments"
+        :error="installmentListQuery.status.value === 'error' || installmentListQuery.status.value === 'stale' ? queryErrorMessage(installmentListQuery.error.value) : null"
+        :refreshing="installmentListQuery.status.value === 'refreshing'"
+        :retry="installmentListQuery.retry"
+      >
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無分期資料</div>
         </template>
@@ -613,6 +677,11 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
     </Modal>
 
     <Modal :open="scheduleOpen" title="付款時程" size="lg" @update:open="scheduleOpen = $event">
+      <QueryState
+        :status="scheduleQuery.status.value"
+        :error-message="queryErrorMessage(scheduleQuery.error.value)"
+        :retry="scheduleQuery.retry"
+      >
       <div v-if="scheduleInstallment" class="space-y-4">
         <div class="flex items-center justify-between text-sm">
           <span class="text-text-secondary">
@@ -667,6 +736,7 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
           </tbody>
         </table>
       </div>
+      </QueryState>
     </Modal>
 
     <ConfirmDialog

@@ -28,3 +28,23 @@ test('idempotency key state clears completed submissions', () => {
 
   assert.notEqual(first, state.prepare({ amount: 100 }))
 })
+
+// Verifies a new form submission receives a new key even when its payload matches an older form.
+test('idempotency key state starts a new logical form submission', () => {
+  const state = createIdempotencyKeyState({ createKey: () => `key-${++keyCounter}` })
+  const first = state.prepare({ amount: 100 })
+  state.begin()
+
+  assert.notEqual(first, state.prepare({ amount: 100 }))
+})
+
+// Verifies canonical payload fingerprints ignore transport-only null and whitespace differences.
+test('idempotency key state canonicalizes supported financial payloads', () => {
+  const state = createIdempotencyKeyState({ createKey: () => `key-${++keyCounter}` })
+  const first = state.prepare({ description: ' 早餐 ', notes: null, perPeriod: 50 })
+  const second = state.prepare({ description: '早餐', notes: undefined, perPeriod: 99 })
+
+  assert.equal(first, second)
+})
+
+let keyCounter = 0

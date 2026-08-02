@@ -102,15 +102,14 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to, _from, next) => {
-  const { isAuthenticated } = useAuth()
+// Waits for shared auth initialization before allowing public or protected navigation.
+router.beforeEach(async (to) => {
+  const auth = useAuth()
+  await auth.initialize()
   if (to.meta.public) {
-    next()
-  } else if (!isAuthenticated.value) {
-    next('/login')
-  } else {
-    next()
+    return auth.isAuthenticated.value && to.name === 'login' ? '/dashboard' : true
   }
+  return auth.isAuthenticated.value ? true : '/login'
 })
 
 export default router

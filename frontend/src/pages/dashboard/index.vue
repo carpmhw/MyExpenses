@@ -1,28 +1,32 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, inject } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../../api'
+import { ApiError, api } from '../../api'
 import type { Withdrawal, Transaction, Installment, DashboardSummary } from '../../types'
 import Icon from '../../components/ui/Icon.vue'
+import QueryState from '../../components/ui/QueryState.vue'
 import { formatMoney } from '../../utils/format'
 import { formatDateOnly, getSystemDateParts } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
+import { useAsyncQuery } from '../../composables/useAsyncQuery'
 
 const router = useRouter()
-const toast = inject<{ error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
 const initialSystemDate = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
 
 const year = ref(initialSystemDate.year)
 const month = ref(initialSystemDate.month)
 
+// Returns the first calendar day for the selected dashboard month.
 function getMonthStart(y: number, m: number): string {
   return `${y}-${String(m).padStart(2, '0')}-01`
 }
+// Returns the last calendar day for the selected dashboard month.
 function getMonthEnd(y: number, m: number): string {
   const d = new Date(y, m, 0)
   return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+// Calculates the previous dashboard month while preserving year boundaries.
 function prevMonthKey(y: number, m: number): { year: number; month: number } {
   return m === 1 ? { year: y - 1, month: 12 } : { year: y, month: m - 1 }
 }
@@ -30,14 +34,17 @@ function prevMonthKey(y: number, m: number): { year: number; month: number } {
 const startDate = computed(() => getMonthStart(year.value, month.value))
 const endDate = computed(() => getMonthEnd(year.value, month.value))
 
+// Moves the dashboard period one month backward.
 function goPrev() {
   const k = prevMonthKey(year.value, month.value)
   year.value = k.year; month.value = k.month
 }
+// Moves the dashboard period one month forward.
 function goNext() {
   if (month.value === 12) { year.value++; month.value = 1 }
   else month.value++
 }
+// Restores the dashboard period to the current system month.
 function goCurrent() {
   const current = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
   year.value = current.year
@@ -48,54 +55,71 @@ const isCurrentMonth = computed(() =>
   && month.value === getSystemDateParts(new Date(), timeZone.timeZoneId.value).month
 )
 
-const loading = ref(true)
-const withdrawals = ref<Withdrawal[]>([])
-const expenses = ref<Transaction[]>([])
-const activeInstallments = ref<Installment[]>([])
-const dashboardSummary = ref<DashboardSummary | null>(null)
+const summaryQuery = useAsyncQuery<DashboardSummary>({
+  key: () => ['dashboard-summary', year.value, month.value],
+  query: ({ signal }) => api.reports.dashboardSummary({ year: year.value, month: month.value }, { signal }),
+})
+const withdrawalsQuery = useAsyncQuery<{ items: Withdrawal[] }>({
+  key: () => ['dashboard-withdrawals', year.value, month.value],
+  query: ({ signal }) => api.withdrawals.list({ page: 1, startDate: startDate.value, endDate: endDate.value, pageSize: 50 }, { signal }),
+  isEmpty: result => result.items.length === 0,
+})
+const expensesQuery = useAsyncQuery<{ items: Transaction[] }>({
+  key: () => ['dashboard-expenses', year.value, month.value],
+  query: ({ signal }) => api.transactions.list({ page: 1, startDate: startDate.value, endDate: endDate.value, type: 'Expense', pageSize: 50 }, { signal }),
+  isEmpty: result => result.items.length === 0,
+})
+const installmentsQuery = useAsyncQuery<{ items: Installment[] }>({
+  key: () => ['dashboard-installments', year.value, month.value],
+  query: ({ signal }) => api.installments.list({ page: 1, status: 'Active', pageSize: 50 }, { signal }),
+  isEmpty: result => result.items.length === 0,
+})
 
-async function loadData() {
-  loading.value = true
-  dashboardSummary.value = null
-  try {
-    const [summary, wd, exp, inst] = await Promise.all([
-      api.reports.dashboardSummary({ year: year.value, month: month.value }),
-      api.withdrawals.list({ page: 1, startDate: startDate.value, endDate: endDate.value, pageSize: 50 }),
-      api.transactions.list({ page: 1, startDate: startDate.value, endDate: endDate.value, type: 'Expense', pageSize: 50 }),
-      api.installments.list({ page: 1, status: 'Active', pageSize: 50 }),
-    ])
-    dashboardSummary.value = summary
-    withdrawals.value = wd.items ?? []
-    expenses.value = exp.items ?? []
-    activeInstallments.value = inst.items ?? []
-  } catch {
-    toast.error('載入儀表板資料失敗')
-  } finally {
-    loading.value = false
-  }
+const dashboardSummary = computed(() => summaryQuery.data.value ?? null)
+const withdrawals = computed(() => withdrawalsQuery.data.value?.items ?? [])
+const expenses = computed(() => expensesQuery.data.value?.items ?? [])
+const activeInstallments = computed(() => installmentsQuery.data.value?.items ?? [])
+const loading = computed(() => [
+  summaryQuery.status.value,
+  withdrawalsQuery.status.value,
+  expensesQuery.status.value,
+  installmentsQuery.status.value,
+].some(status => status === 'loading'))
+const hasAnyData = computed(() => Boolean(
+  dashboardSummary.value
+  || withdrawalsQuery.data.value
+  || expensesQuery.data.value
+  || installmentsQuery.data.value,
+))
+
+// Converts typed query errors into safe inline messages without exposing raw responses.
+function queryErrorMessage(error: unknown): string {
+  return error instanceof ApiError ? error.userMessage : '載入失敗，請重試。'
 }
 
-watch([year, month], loadData)
-onMounted(loadData)
+// Formats nullable summary amounts without presenting unavailable data as zero.
+function formatSummaryAmount(amount: number | null): string {
+  return amount === null ? '—' : formatMoney(amount)
+}
 
 const totalWithdrawals = computed(() =>
-  dashboardSummary.value?.totalWithdrawals ?? 0
+  dashboardSummary.value?.totalWithdrawals ?? null
 )
 const totalExpenses = computed(() =>
-  dashboardSummary.value?.totalExpenses ?? 0
+  dashboardSummary.value?.totalExpenses ?? null
 )
-const disposableBalance = computed(() => dashboardSummary.value?.disposableBalance ?? 0)
+const disposableBalance = computed(() => dashboardSummary.value?.disposableBalance ?? null)
 
 const prevDisposable = computed(() =>
-  dashboardSummary.value?.previousDisposableBalance ?? 0
+  dashboardSummary.value?.previousDisposableBalance ?? null
 )
 const comparisonPct = computed(() => {
-  if (prevDisposable.value === 0) return null
+  if (prevDisposable.value === null || disposableBalance.value === null || prevDisposable.value === 0) return null
   return ((disposableBalance.value - prevDisposable.value) / Math.abs(prevDisposable.value) * 100)
 })
 
 const installmentMonthlyDue = computed(() =>
-  dashboardSummary.value?.installmentDueAmount ?? 0
+  dashboardSummary.value?.installmentDueAmount ?? null
 )
 
 const recentWithdrawals = computed(() =>
@@ -118,11 +142,13 @@ const recentInstallments = computed(() =>
     .slice(0, 4)
 )
 
+// Formats the paid-period progress shown for an installment row.
 function progressLabel(i: Installment): string {
   const paid = i.periods - i.remainingPeriods
   return `${paid}/${i.periods}`
 }
 
+// Formats a date-only value as the dashboard month/day label.
 function formatDateMMDD(d: string): string {
   const formatted = formatDateOnly(d)
   return formatted.includes('/') ? formatted.slice(5) : d
@@ -151,6 +177,7 @@ function formatEventDateMMDD(timestamp: string): string {
       <div class="flex items-center gap-2">
         <div class="flex items-center gap-1 bg-bg-card border border-border-subtle rounded-lg px-3 py-2">
           <button
+            aria-label="上一個月"
             class="p-0.5 text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
             :disabled="loading"
             @click="goPrev"
@@ -158,6 +185,7 @@ function formatEventDateMMDD(timestamp: string): string {
             <Icon name="ChevronLeft" :size="16" />
           </button>
           <button
+            aria-label="回到當月"
             class="text-xs font-medium text-text-primary px-2 cursor-pointer disabled:opacity-50"
             :disabled="isCurrentMonth"
             @click="goCurrent"
@@ -165,6 +193,7 @@ function formatEventDateMMDD(timestamp: string): string {
             {{ year }}/{{ String(month).padStart(2, '0') }}
           </button>
           <button
+            aria-label="下一個月"
             class="p-0.5 text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
             :disabled="isCurrentMonth || loading"
             @click="goNext"
@@ -182,16 +211,22 @@ function formatEventDateMMDD(timestamp: string): string {
       </div>
     </div>
 
-    <div v-if="loading" class="flex items-center justify-center py-32">
+    <div v-if="loading && !hasAnyData" class="flex items-center justify-center py-32" role="status" aria-live="polite">
       <Icon name="Loader2" :size="32" class="animate-spin text-text-secondary" />
     </div>
 
     <template v-else>
       <!-- Hero Card -->
-      <div
-        class="flex rounded-2xl overflow-hidden"
-        style="background: linear-gradient(135deg, var(--color-bg-hero-start), var(--color-bg-hero-mid) 50%, var(--color-bg-hero-end))"
+      <QueryState
+        :status="summaryQuery.status.value"
+        :error-message="queryErrorMessage(summaryQuery.error.value)"
+        :last-success-at="summaryQuery.lastSuccessAt.value"
+        :retry="summaryQuery.retry"
       >
+        <div
+          class="flex rounded-2xl overflow-hidden"
+          style="background: linear-gradient(135deg, var(--color-bg-hero-start), var(--color-bg-hero-mid) 50%, var(--color-bg-hero-end))"
+        >
         <div class="flex-1 flex flex-col justify-between p-7 gap-3">
           <div class="space-y-3">
             <div class="inline-flex items-center gap-1.5 bg-color-income-hero-bg rounded-full px-3 py-1">
@@ -199,7 +234,7 @@ function formatEventDateMMDD(timestamp: string): string {
               <span class="text-xs font-medium text-color-income-hero-text">本月可支配餘額</span>
             </div>
             <p class="text-4xl font-bold text-text-on-dark tracking-tight">
-              {{ formatMoney(disposableBalance) }}
+              {{ formatSummaryAmount(disposableBalance) }}
             </p>
             <div class="flex items-center gap-4">
               <div v-if="comparisonPct !== null" class="flex items-center gap-1.5">
@@ -215,7 +250,9 @@ function formatEventDateMMDD(timestamp: string): string {
               <span class="w-px h-3 bg-bg-hero-divider" />
               <div class="flex items-center gap-1.5">
                 <Icon name="CircleDot" :size="14" class="text-text-on-hero-muted" />
-                <span class="text-xs text-text-on-hero-muted">已更新於剛剛</span>
+                <span class="text-xs text-text-on-hero-muted">
+                  {{ summaryQuery.lastSuccessAt.value ? timeZone.formatDateTime(new Date(summaryQuery.lastSuccessAt.value)) : '尚未成功更新' }}
+                </span>
               </div>
             </div>
           </div>
@@ -236,7 +273,7 @@ function formatEventDateMMDD(timestamp: string): string {
             </div>
             <div>
                <p class="text-xs text-text-on-hero-muted">本期提款</p>
-              <p class="text-base font-bold text-text-on-dark">{{ formatMoney(totalWithdrawals) }}</p>
+               <p class="text-base font-bold text-text-on-dark">{{ formatSummaryAmount(totalWithdrawals) }}</p>
             </div>
           </div>
           <div class="flex items-center gap-3">
@@ -245,7 +282,7 @@ function formatEventDateMMDD(timestamp: string): string {
             </div>
             <div>
               <p class="text-xs text-text-on-hero-muted">本期支出</p>
-              <p class="text-base font-bold text-text-on-dark">{{ formatMoney(totalExpenses) }}</p>
+               <p class="text-base font-bold text-text-on-dark">{{ formatSummaryAmount(totalExpenses) }}</p>
             </div>
           </div>
           <div class="flex items-center gap-3">
@@ -254,16 +291,23 @@ function formatEventDateMMDD(timestamp: string): string {
             </div>
             <div>
               <p class="text-xs text-text-on-hero-muted">本期分期</p>
-              <p class="text-base font-bold text-text-on-dark">{{ formatMoney(installmentMonthlyDue) }}</p>
+               <p class="text-base font-bold text-text-on-dark">{{ formatSummaryAmount(installmentMonthlyDue) }}</p>
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      </QueryState>
 
       <!-- Cards Row -->
       <div class="flex gap-5">
         <!-- Withdraw Card -->
         <div class="w-[340px] bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
+          <QueryState
+            :status="withdrawalsQuery.status.value"
+            :error-message="queryErrorMessage(withdrawalsQuery.error.value)"
+            :last-success-at="withdrawalsQuery.lastSuccessAt.value"
+            :retry="withdrawalsQuery.retry"
+          >
           <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-income-panel-start to-color-income-panel-end">
             <div class="flex items-center gap-3.5 flex-1 min-w-0">
               <div class="w-11 h-11 rounded-xl bg-color-income flex items-center justify-center shrink-0">
@@ -272,14 +316,14 @@ function formatEventDateMMDD(timestamp: string): string {
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <p class="text-base font-bold text-color-income-text">提款</p>
-                   <span class="bg-bg-card text-color-income-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ dashboardSummary?.withdrawalCount ?? 0 }} 筆</span>
+                    <span class="bg-bg-card text-color-income-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ dashboardSummary ? dashboardSummary.withdrawalCount : '—' }} 筆</span>
                 </div>
                 <p class="text-xs text-color-income-text">Withdrawals</p>
               </div>
             </div>
             <div class="text-right">
                <p class="text-[10px] text-color-income-text">本期提款合計</p>
-              <p class="text-2xl font-bold text-color-income-text">{{ formatMoney(totalWithdrawals) }}</p>
+              <p class="text-2xl font-bold text-color-income-text">{{ formatSummaryAmount(totalWithdrawals) }}</p>
             </div>
           </div>
           <div
@@ -302,10 +346,17 @@ function formatEventDateMMDD(timestamp: string): string {
           >
             尚無提款記錄
           </div>
+          </QueryState>
         </div>
 
         <!-- Expense Card -->
         <div class="flex-1 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
+          <QueryState
+            :status="expensesQuery.status.value"
+            :error-message="queryErrorMessage(expensesQuery.error.value)"
+            :last-success-at="expensesQuery.lastSuccessAt.value"
+            :retry="expensesQuery.retry"
+          >
           <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-expense-panel-start to-color-expense-panel-end">
             <div class="flex items-center gap-3.5 flex-1 min-w-0">
               <div class="w-11 h-11 rounded-xl bg-color-expense-action flex items-center justify-center shrink-0">
@@ -314,14 +365,14 @@ function formatEventDateMMDD(timestamp: string): string {
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <p class="text-base font-bold text-color-expense-text">支出</p>
-                   <span class="bg-bg-card text-color-expense-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ dashboardSummary?.expenseCount ?? 0 }} 筆</span>
+                    <span class="bg-bg-card text-color-expense-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ dashboardSummary ? dashboardSummary.expenseCount : '—' }} 筆</span>
                 </div>
                 <p class="text-xs text-color-expense-text">Expenses</p>
               </div>
             </div>
             <div class="text-right">
                <p class="text-[10px] text-color-expense-text">本期支出合計</p>
-              <p class="text-2xl font-bold text-color-expense-text">{{ formatMoney(totalExpenses) }}</p>
+              <p class="text-2xl font-bold text-color-expense-text">{{ formatSummaryAmount(totalExpenses) }}</p>
             </div>
           </div>
           <div class="flex items-center gap-3 px-5 py-2.5 bg-bg-raised border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
@@ -348,10 +399,17 @@ function formatEventDateMMDD(timestamp: string): string {
           >
             尚無支出記錄
           </div>
+          </QueryState>
         </div>
 
         <!-- Installment Card -->
         <div class="flex-1 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
+          <QueryState
+            :status="installmentsQuery.status.value"
+            :error-message="queryErrorMessage(installmentsQuery.error.value)"
+            :last-success-at="installmentsQuery.lastSuccessAt.value"
+            :retry="installmentsQuery.retry"
+          >
           <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-credit-panel-start to-color-credit-panel-end">
             <div class="flex items-center gap-3.5 flex-1 min-w-0">
               <div class="w-11 h-11 rounded-xl bg-color-credit flex items-center justify-center shrink-0">
@@ -361,7 +419,7 @@ function formatEventDateMMDD(timestamp: string): string {
                 <div class="flex items-center gap-2">
                   <p class="text-base font-bold text-color-credit-text">信用卡分期</p>
                   <span class="bg-bg-card text-color-credit-text text-[10px] font-semibold rounded-full px-2 py-0.5">
-                    {{ dashboardSummary?.activeInstallmentCount ?? 0 }} 筆
+                    {{ dashboardSummary ? dashboardSummary.activeInstallmentCount : '—' }} 筆
                   </span>
                 </div>
                 <p class="text-xs text-color-credit-text">Credit Card Installments</p>
@@ -374,7 +432,7 @@ function formatEventDateMMDD(timestamp: string): string {
               >
                 檢視全部
               </button>
-              <p class="text-2xl font-bold text-color-credit-text">{{ formatMoney(installmentMonthlyDue) }}</p>
+              <p class="text-2xl font-bold text-color-credit-text">{{ formatSummaryAmount(installmentMonthlyDue) }}</p>
             </div>
           </div>
           <div class="flex items-center gap-2 px-5 py-2.5 bg-bg-raised border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
@@ -408,6 +466,7 @@ function formatEventDateMMDD(timestamp: string): string {
           >
             尚無分期記錄
           </div>
+          </QueryState>
         </div>
       </div>
 
@@ -418,24 +477,24 @@ function formatEventDateMMDD(timestamp: string): string {
             <Icon name="TrendingDown" :size="15" class="text-color-income-text" />
             <p class="text-xs text-text-secondary">提款合計</p>
           </div>
-          <p class="mt-1 text-lg font-bold text-color-income-text">{{ formatMoney(totalWithdrawals) }}</p>
-          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary?.withdrawalCount ?? 0 }} 筆</p>
+          <p class="mt-1 text-lg font-bold text-color-income-text">{{ formatSummaryAmount(totalWithdrawals) }}</p>
+          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary ? dashboardSummary.withdrawalCount : '—' }} 筆</p>
         </div>
         <div class="bg-bg-card rounded-xl border border-border-subtle px-4 py-3">
           <div class="flex items-center gap-2">
             <Icon name="Receipt" :size="15" class="text-color-expense-text" />
             <p class="text-xs text-text-secondary">支出合計</p>
           </div>
-          <p class="mt-1 text-lg font-bold text-color-expense-text">{{ formatMoney(totalExpenses) }}</p>
-          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary?.expenseCount ?? 0 }} 筆</p>
+          <p class="mt-1 text-lg font-bold text-color-expense-text">{{ formatSummaryAmount(totalExpenses) }}</p>
+          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary ? dashboardSummary.expenseCount : '—' }} 筆</p>
         </div>
         <div class="bg-bg-card rounded-xl border border-border-subtle px-4 py-3">
           <div class="flex items-center gap-2">
             <Icon name="Wallet" :size="15" class="text-text-secondary" />
             <p class="text-xs text-text-secondary">剩餘合計</p>
           </div>
-          <p class="mt-1 text-lg font-bold" :class="disposableBalance >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
-            {{ formatMoney(disposableBalance) }}
+          <p class="mt-1 text-lg font-bold" :class="disposableBalance !== null && disposableBalance >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
+            {{ formatSummaryAmount(disposableBalance) }}
           </p>
           <p class="text-[11px] text-text-tertiary">提款減支出</p>
         </div>
@@ -444,8 +503,8 @@ function formatEventDateMMDD(timestamp: string): string {
             <Icon name="CreditCard" :size="15" class="text-color-credit-text" />
             <p class="text-xs text-text-secondary">信用卡分期</p>
           </div>
-          <p class="mt-1 text-lg font-bold text-color-credit-text">{{ formatMoney(installmentMonthlyDue) }}</p>
-          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary?.installmentDuePaymentCount ?? 0 }} 筆未繳應付款</p>
+          <p class="mt-1 text-lg font-bold text-color-credit-text">{{ formatSummaryAmount(installmentMonthlyDue) }}</p>
+          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary ? dashboardSummary.installmentDuePaymentCount : '—' }} 筆未繳應付款</p>
         </div>
       </div>
 

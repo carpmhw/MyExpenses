@@ -1,14 +1,5 @@
-import { ref } from 'vue'
-
-/**
- * 匯率 API 回應介面
- */
-interface ExchangeRateResponse {
-  base: string
-  rates: Record<string, number>
-  updatedAt: string
-  warning?: string
-}
+import { onScopeDispose, ref } from 'vue'
+import { ApiError, api, isRequestCancelled } from '../api'
 
 /**
  * 匯率查詢 composable，封裝 API 請求、載入/錯誤狀態。
@@ -19,50 +10,48 @@ export function useExchangeRates() {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const warning = ref<string | null>(null)
+  let generation = 0
+  let activeController: AbortController | null = null
 
   /**
    * 從後端獲取最新匯率資料。
    */
   async function fetchRates(): Promise<void> {
+    const currentGeneration = ++generation
+    activeController?.abort()
+    const controller = new AbortController()
+    activeController = controller
+    const hadData = Object.keys(rates.value).length > 0
     loading.value = true
     error.value = null
     warning.value = null
 
     try {
-      const token = localStorage.getItem('authToken')
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-
-      const response = await fetch('/api/exchange-rates', { headers })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-
-      const data: ExchangeRateResponse = await response.json()
-      
+      const data = await api.exchangeRates.get({ signal: controller.signal })
+      if (currentGeneration !== generation) return
       rates.value = data.rates
       updatedAt.value = data.updatedAt
-      
       if (data.warning) {
         warning.value = data.warning
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '未知錯誤'
-      error.value = `無法獲取匯率資料: ${message}`
-      
-      // 如果有舊的匯率資料，保留它們
-      if (Object.keys(rates.value).length === 0) {
-        // 完全沒有資料
+      if (currentGeneration !== generation || isRequestCancelled(err)) return
+      error.value = err instanceof ApiError ? err.userMessage : '無法獲取匯率資料，請稍後再試'
+      if (!hadData) {
         rates.value = {}
         updatedAt.value = ''
       }
     } finally {
-      loading.value = false
+      if (currentGeneration === generation) loading.value = false
     }
   }
+
+  // Aborts the owned request when the dialog or consuming scope is disposed.
+  onScopeDispose(() => {
+    generation++
+    activeController?.abort()
+    activeController = null
+  })
 
   /**
    * 將金額從一種貨幣轉換為另一種貨幣。

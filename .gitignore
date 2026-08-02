@@ -316,6 +316,12 @@ FakesAssemblies/
 .ntvs_analysis.dat
 node_modules/
 
+# Python browser verification output
+.venv/
+browser-tests/.pytest_cache/
+browser-tests/test-results/
+browser-tests/playwright-report/
+
 # Visual Studio 6 build log
 *.plg
 

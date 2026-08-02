@@ -1,0 +1,15 @@
+[project]
+name = "myexpenses-browser-tests"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "pytest>=8.0",
+  "pytest-playwright>=0.7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--browser firefox --base-url http://127.0.0.1:5199 --tracing retain-on-failure --screenshot only-on-failure --output test-results"
+markers = [
+  "real_stack: requires the Docker backend and is opt-in",
+]
