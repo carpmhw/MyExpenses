@@ -16,30 +16,29 @@ public static class TransactionEndpoints
         group.MapGet("/", async (int? categoryId, DateOnly? startDate, DateOnly? endDate,
             string? search, TransactionType? type, int? page, int? pageSize, int? limit, AppDbContext db) =>
         {
-            var query = db.Transactions.AsQueryable();
-
-            if (categoryId.HasValue) query = query.Where(t => t.CategoryId == categoryId);
-            if (startDate.HasValue) query = query.Where(t => t.Date >= startDate);
-            if (endDate.HasValue) query = query.Where(t => t.Date <= endDate);
-            if (!string.IsNullOrEmpty(search))
-                query = query.Where(t => t.Description!.Contains(search) || t.Notes!.Contains(search));
-            if (type.HasValue) query = query.Where(t => t.Type == type);
-
-            query = query.OrderByDescending(t => t.Date);
-
-            query = query.Include(t => t.Category).Include(t => t.PaymentMethod);
+            var query = BuildFilteredQuery(db, categoryId, startDate, endDate, search, type);
 
             var safeLimit = PaginationPolicy.NormalizeLimit(limit);
             if (safeLimit.HasValue)
             {
-                return Results.Ok(await query.Take(safeLimit.Value).ToListAsync());
+                var limitedItems = await query
+                    .OrderByDescending(t => t.Date)
+                    .Include(t => t.Category)
+                    .Include(t => t.PaymentMethod)
+                    .Take(safeLimit.Value)
+                    .ToListAsync();
+                return Results.Ok(limitedItems);
             }
 
-            var p = PaginationPolicy.NormalizePage(page);
-            var ps = PaginationPolicy.NormalizePageSize(pageSize);
-            var items = await query.Skip((p - 1) * ps).Take(ps).ToListAsync();
-            var total = await query.CountAsync();
-            return Results.Ok(new { items, total, page = p, pageSize = ps });
+            return Results.Ok(await ListTransactionsAsync(
+                categoryId,
+                startDate,
+                endDate,
+                search,
+                type,
+                page,
+                pageSize,
+                db));
         })
         .RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
 
@@ -196,4 +195,108 @@ public static class TransactionEndpoints
         })
         .RequireApiTokenScope(ApiTokenScopes.TransactionsUndo);
     }
+
+    /// <summary>Returns a paginated transaction list with aggregates over the complete filtered result.</summary>
+    public static async Task<TransactionListResponse> ListTransactionsAsync(
+        int? categoryId,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        string? search,
+        TransactionType? type,
+        int? page,
+        int? pageSize,
+        AppDbContext db)
+    {
+        var query = BuildFilteredQuery(db, categoryId, startDate, endDate, search, type);
+        var totalIncome = await query
+            .Where(transaction => transaction.Type == TransactionType.Income)
+            .SumAsync(transaction => (decimal?)transaction.Amount) ?? 0m;
+        var totalExpense = await query
+            .Where(transaction => transaction.Type == TransactionType.Expense)
+            .SumAsync(transaction => (decimal?)transaction.Amount) ?? 0m;
+        var count = await query.CountAsync();
+        var maxAmount = await query
+            .Select(transaction => (decimal?)transaction.Amount)
+            .MaxAsync() ?? 0m;
+        var p = PaginationPolicy.NormalizePage(page);
+        var ps = PaginationPolicy.NormalizePageSize(pageSize);
+        var items = await query
+            .OrderByDescending(transaction => transaction.Date)
+            .Include(transaction => transaction.Category)
+            .Include(transaction => transaction.PaymentMethod)
+            .Skip((p - 1) * ps)
+            .Take(ps)
+            .ToListAsync();
+
+        var totalAmount = totalIncome + totalExpense;
+        var dailyAverage = type.HasValue
+            ? Math.Round((type == TransactionType.Income ? totalIncome : totalExpense) / GetDayCount(startDate, endDate), 2)
+            : 0m;
+
+        return new TransactionListResponse(
+            items,
+            count,
+            p,
+            ps,
+            new TransactionListSummary(
+                totalAmount,
+                totalIncome,
+                totalExpense,
+                count,
+                dailyAverage,
+                maxAmount));
+    }
+
+    /// <summary>Builds the unpaged transaction query shared by list items and summary aggregates.</summary>
+    private static IQueryable<Transaction> BuildFilteredQuery(
+        AppDbContext db,
+        int? categoryId,
+        DateOnly? startDate,
+        DateOnly? endDate,
+        string? search,
+        TransactionType? type)
+    {
+        var query = db.Transactions.AsQueryable();
+
+        if (categoryId.HasValue)
+            query = query.Where(transaction => transaction.CategoryId == categoryId.Value);
+        if (startDate.HasValue)
+            query = query.Where(transaction => transaction.Date >= startDate.Value);
+        if (endDate.HasValue)
+            query = query.Where(transaction => transaction.Date <= endDate.Value);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(transaction =>
+                (transaction.Description != null && transaction.Description.Contains(search))
+                || (transaction.Notes != null && transaction.Notes.Contains(search)));
+        }
+        if (type.HasValue)
+            query = query.Where(transaction => transaction.Type == type.Value);
+
+        return query;
+    }
+
+    /// <summary>Calculates the inclusive calendar-day count used for transaction daily averages.</summary>
+    private static int GetDayCount(DateOnly? startDate, DateOnly? endDate)
+    {
+        if (!startDate.HasValue || !endDate.HasValue)
+            return 1;
+
+        return Math.Max(1, endDate.Value.DayNumber - startDate.Value.DayNumber + 1);
+    }
 }
+
+public sealed record TransactionListResponse(
+    IReadOnlyList<Transaction> Items,
+    int Total,
+    int Page,
+    int PageSize,
+    TransactionListSummary Summary);
+
+public sealed record TransactionListSummary(
+    decimal TotalAmount,
+    decimal TotalIncome,
+    decimal TotalExpense,
+    int Count,
+    decimal DailyAverage,
+    decimal MaxAmount);

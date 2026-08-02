@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, inject, onMounted, watch } from 'vue'
 import { api } from '../../api'
-import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast } from '../../types'
+import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, NetWorthTrendPoint } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
-import { addCalendarDays, getCurrentYearRange, getSystemDateParts } from '../../utils/timezone'
+import { addCalendarDays, getCurrentYearRange } from '../../utils/timezone'
 import { getThemeColor } from '../../utils/themeColor'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
@@ -37,6 +37,7 @@ const selectedCategory = ref<CategoryDistribution | null>(null)
 const trendData = ref<MonthlyTrend[]>([])
 const categoryData = ref<CategoryDistribution[]>([])
 const netWorthData = ref<NetWorth | null>(null)
+const netWorthTrend = ref<NetWorthTrendPoint[]>([])
 const forecastData = ref<MonthlyForecast[]>([])
 const loading = ref(false)
 
@@ -108,6 +109,16 @@ async function loadNetWorth() {
   }
 }
 
+// Loads only actual complete snapshot points for the historical net-worth chart.
+async function loadNetWorthTrend() {
+  try {
+    netWorthTrend.value = await api.reports.netWorthTrend({ months: 6 })
+  } catch {
+    netWorthTrend.value = []
+    toast.error('載入淨值歷史失敗')
+  }
+}
+
 async function loadForecast() {
   try {
     forecastData.value = await api.reports.installmentForecast({ months: 6 })
@@ -118,7 +129,7 @@ async function loadForecast() {
 
 async function loadAll() {
   loading.value = true
-  await Promise.all([loadTrend(), loadCategory(), loadNetWorth(), loadForecast()])
+  await Promise.all([loadTrend(), loadCategory(), loadNetWorth(), loadNetWorthTrend(), loadForecast()])
   loading.value = false
 }
 
@@ -259,24 +270,12 @@ const forecastChartOptions = computed(() => ({
   },
 }))
 
-const netWorthTrendLabels = computed(() => {
-  const labels: string[] = []
-  const current = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(current.year, current.month - 1 - i, 1)
-    labels.push(`${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`)
-  }
-  return labels
-})
-
 const netWorthTrendData = computed(() => {
-  const current = netWorthData.value?.netWorth ?? 0
-  const step = current / 6
   return {
-    labels: netWorthTrendLabels.value,
+    labels: netWorthTrend.value.map(point => point.month),
     datasets: [{
       label: '淨值',
-      data: netWorthTrendLabels.value.map((_, i) => step * (i + 1)),
+      data: netWorthTrend.value.map(point => point.netWorth),
       borderColor: chartColors.value.income,
       backgroundColor: chartColors.value.incomeChartBg,
       fill: true,
@@ -495,7 +494,14 @@ function selectCategory(item: CategoryDistribution) {
       </div>
       <Card class="mt-6">
         <h3 class="text-sm font-semibold text-text-primary mb-4">近 6 個月淨值趨勢</h3>
-        <div class="h-[300px]">
+        <div v-if="netWorthTrend.length === 0" class="h-[300px] flex items-center justify-center text-text-tertiary text-sm">
+          尚無完整淨值歷史
+        </div>
+        <div v-else-if="netWorthTrend.length === 1" class="h-[300px] flex flex-col items-center justify-center gap-2 text-text-tertiary text-sm">
+          <span>目前只有 1 筆完整快照</span>
+          <span>尚不足以形成趨勢</span>
+        </div>
+        <div v-else class="h-[300px]">
           <Line :data="netWorthTrendData" :options="netWorthTrendOptions" />
         </div>
       </Card>

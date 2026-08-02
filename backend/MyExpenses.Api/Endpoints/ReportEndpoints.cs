@@ -112,6 +112,32 @@ public static class ReportEndpoints
             return Results.Ok(forecast);
         });
 
+        group.MapGet("/dashboard-summary", async (int? year, int? month, AppDbContext db, TimeZoneService timeZoneService) =>
+        {
+            try
+            {
+                return Results.Ok(await GetDashboardSummaryAsync(year, month, db, timeZoneService));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        })
+        .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
+
+        group.MapGet("/net-worth-trend", async (int? months, AppDbContext db, TimeZoneService timeZoneService) =>
+        {
+            try
+            {
+                return Results.Ok(await GetNetWorthTrendAsync(months, db, timeZoneService));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        })
+        .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
+
         group.MapGet("/monthly-summary", async (int? year, int? month, AppDbContext db, TimeZoneService timeZoneService) =>
         {
             var now = timeZoneService.GetLocalNow();
@@ -138,6 +164,141 @@ public static class ReportEndpoints
             });
         })
         .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
+    }
+
+    /// <summary>Builds complete selected and previous month aggregates for the dashboard.</summary>
+    public static async Task<DashboardSummaryResponse> GetDashboardSummaryAsync(
+        int? year,
+        int? month,
+        AppDbContext db,
+        TimeZoneService timeZoneService)
+    {
+        var current = timeZoneService.GetLocalDate();
+        var selectedYear = year ?? current.Year;
+        var selectedMonth = month ?? current.Month;
+        if (selectedYear is < 1 or > 9999)
+            throw new ArgumentException("年份不在支援範圍內");
+        if (selectedMonth is < 1 or > 12)
+            throw new ArgumentException("月份必須介於 1 到 12 之間");
+
+        var selectedStart = new DateOnly(selectedYear, selectedMonth, 1);
+        var selectedEnd = selectedStart.AddMonths(1).AddDays(-1);
+        var previousStart = selectedStart.AddMonths(-1);
+        var previousEnd = selectedStart.AddDays(-1);
+        var selected = await GetDashboardPeriodAsync(db, selectedStart, selectedEnd);
+        var previous = await GetDashboardPeriodAsync(db, previousStart, previousEnd);
+        var activeInstallmentCount = await db.Installments
+            .CountAsync(installment => installment.Payments.Any(payment => !payment.IsPaid));
+
+        return new DashboardSummaryResponse(
+            selected.TotalWithdrawals,
+            selected.WithdrawalCount,
+            selected.TotalExpenses,
+            selected.ExpenseCount,
+            selected.TotalWithdrawals - selected.TotalExpenses,
+            selected.InstallmentDueAmount,
+            selected.InstallmentDuePaymentCount,
+            activeInstallmentCount,
+            previous.TotalWithdrawals - previous.TotalExpenses);
+    }
+
+    /// <summary>Returns actual complete net-worth snapshot points, selecting the latest point in each local month.</summary>
+    public static async Task<IReadOnlyList<NetWorthTrendPoint>> GetNetWorthTrendAsync(
+        int? months,
+        AppDbContext db,
+        TimeZoneService timeZoneService,
+        DateOnly? asOfDate = null)
+    {
+        var monthCount = months ?? 6;
+        if (monthCount is < 1 or > 60)
+            throw new ArgumentException("月份數必須介於 1 到 60 之間");
+
+        var localEndDate = asOfDate ?? timeZoneService.GetLocalDate();
+        var currentMonthStart = new DateOnly(localEndDate.Year, localEndDate.Month, 1);
+        var firstMonthStart = currentMonthStart.AddMonths(-(monthCount - 1));
+        var utcStart = timeZoneService.ConvertLocalToUtc(
+            firstMonthStart.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified));
+        var utcEndExclusive = timeZoneService.ConvertLocalToUtc(
+            currentMonthStart.AddMonths(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified));
+
+        var snapshots = await db.SnapshotBatches
+            .Where(snapshot =>
+                snapshot.NetWorthBasis == NetWorthBasis.AssetsMinusLiabilities
+                && snapshot.TotalLiabilities.HasValue
+                && snapshot.SnapshotDate >= utcStart
+                && snapshot.SnapshotDate < utcEndExclusive)
+            .Select(snapshot => new
+            {
+                snapshot.Id,
+                snapshot.Name,
+                snapshot.SnapshotDate,
+                snapshot.TotalAssets,
+                TotalLiabilities = snapshot.TotalLiabilities!.Value,
+                snapshot.TotalNetWorth,
+            })
+            .ToListAsync();
+
+        return snapshots
+            .GroupBy(snapshot =>
+            {
+                var localDate = timeZoneService.ConvertUtcToLocal(snapshot.SnapshotDate);
+                return (localDate.Year, localDate.Month);
+            })
+            .Select(group => new
+            {
+                group.Key.Year,
+                group.Key.Month,
+                Snapshot = group.OrderByDescending(snapshot => snapshot.SnapshotDate).First(),
+            })
+            .OrderBy(item => item.Snapshot.SnapshotDate)
+            .Select(item => new NetWorthTrendPoint(
+                $"{item.Year:D4}/{item.Month:D2}",
+                item.Snapshot.SnapshotDate,
+                item.Snapshot.Name,
+                item.Snapshot.TotalAssets,
+                item.Snapshot.TotalLiabilities,
+                item.Snapshot.TotalNetWorth))
+            .ToList();
+    }
+
+    /// <summary>Aggregates withdrawals, expenses, and unpaid due payments for one inclusive local period.</summary>
+    private static async Task<DashboardPeriodAggregate> GetDashboardPeriodAsync(
+        AppDbContext db,
+        DateOnly start,
+        DateOnly end)
+    {
+        var totalWithdrawals = await db.Withdrawals
+            .Where(withdrawal => withdrawal.Date >= start && withdrawal.Date <= end)
+            .SumAsync(withdrawal => (decimal?)withdrawal.Amount) ?? 0m;
+        var withdrawalCount = await db.Withdrawals
+            .CountAsync(withdrawal => withdrawal.Date >= start && withdrawal.Date <= end);
+        var totalExpenses = await db.Transactions
+            .Where(transaction =>
+                transaction.Type == TransactionType.Expense
+                && transaction.Date >= start
+                && transaction.Date <= end)
+            .SumAsync(transaction => (decimal?)transaction.Amount) ?? 0m;
+        var expenseCount = await db.Transactions
+            .CountAsync(transaction =>
+                transaction.Type == TransactionType.Expense
+                && transaction.Date >= start
+                && transaction.Date <= end);
+        var duePayments = db.InstallmentPayments.Where(payment =>
+            !payment.IsPaid
+            && payment.DueDate.HasValue
+            && payment.DueDate.Value >= start
+            && payment.DueDate.Value <= end);
+        var installmentDueAmount = await duePayments
+            .SumAsync(payment => (decimal?)payment.Amount) ?? 0m;
+        var installmentDuePaymentCount = await duePayments.CountAsync();
+
+        return new DashboardPeriodAggregate(
+            totalWithdrawals,
+            withdrawalCount,
+            totalExpenses,
+            expenseCount,
+            installmentDueAmount,
+            installmentDuePaymentCount);
     }
 
     /// <summary>Builds the net-worth report using estimated net sell value for stock assets.</summary>
@@ -201,3 +362,31 @@ public sealed record NetWorthStockRow(
     decimal CurrentPrice,
     decimal GrossMarketValue,
     decimal EstimatedNetSellValue);
+
+public sealed record DashboardSummaryResponse(
+    decimal TotalWithdrawals,
+    int WithdrawalCount,
+    decimal TotalExpenses,
+    int ExpenseCount,
+    decimal DisposableBalance,
+    decimal InstallmentDueAmount,
+    int InstallmentDuePaymentCount,
+    int ActiveInstallmentCount,
+    decimal PreviousDisposableBalance);
+
+public sealed record NetWorthTrendPoint(
+    string Month,
+    DateTime SnapshotDate,
+    string Name,
+    decimal TotalAssets,
+    decimal TotalLiabilities,
+    decimal NetWorth);
+
+/// <summary>Holds one local-period aggregate used to build a dashboard response.</summary>
+internal sealed record DashboardPeriodAggregate(
+    decimal TotalWithdrawals,
+    int WithdrawalCount,
+    decimal TotalExpenses,
+    int ExpenseCount,
+    decimal InstallmentDueAmount,
+    int InstallmentDuePaymentCount);

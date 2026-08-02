@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MyExpenses.Api.Data;
 
@@ -10,9 +11,11 @@ using MyExpenses.Api.Data;
 namespace MyExpenses.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260802051450_AddSnapshotNetWorthBasis")]
+    partial class AddSnapshotNetWorthBasis
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -250,46 +253,6 @@ namespace MyExpenses.Api.Migrations
                     b.ToTable("CreditCardBills", (string)null);
                 });
 
-            modelBuilder.Entity("MyExpenses.Api.Models.IdempotencyRecord", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("InstallmentId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Operation")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RequestHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("TransactionId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique();
-
-                    b.HasIndex("Operation", "RequestHash");
-
-                    b.ToTable("IdempotencyRecords", (string)null);
-                });
-
             modelBuilder.Entity("MyExpenses.Api.Models.Installment", b =>
                 {
                     b.Property<int>("Id")
@@ -313,6 +276,14 @@ namespace MyExpenses.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateOnly>("PurchaseDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RemainingPeriods")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("TotalAmount")
@@ -358,10 +329,7 @@ namespace MyExpenses.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("InstallmentId", "IsPaid");
-
-                    b.HasIndex("InstallmentId", "Period")
-                        .IsUnique();
+                    b.HasIndex("InstallmentId");
 
                     b.ToTable("InstallmentPayments", (string)null);
                 });

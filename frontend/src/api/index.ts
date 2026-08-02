@@ -1,10 +1,12 @@
 import type {
   Category, Transaction, Installment, CreditCard, CreditCardBill,
-  BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, PaymentMethod, PaginatedResponse, InstallmentPayment,
-  MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary,
-  SnapshotBatch, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
+  BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, WithdrawalListResponse, PaymentMethod, PaginatedResponse,
+  TransactionListResponse, InstallmentListResponse,
+  MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary, DashboardSummary, NetWorthTrendPoint,
+  SnapshotBatch, SnapshotListResponse, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
   AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
-  SystemTimeZoneSettings,
+  SystemTimeZoneSettings, InstallmentCommandResponse, InstallmentPurchaseRequest, InstallmentPurchaseResponse,
+  StandaloneInstallmentRequest, UpdateInstallmentScheduleRequest,
 } from '../types'
 
 const BASE = '/api'
@@ -15,14 +17,15 @@ function getAuthToken(): string | null {
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const token = getAuthToken()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers = new Headers(options?.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+    headers.set('Authorization', `Bearer ${token}`)
   }
 
   const res = await fetch(`${BASE}${url}`, {
-    headers,
     ...options,
+    headers,
   })
   if (res.status === 401 && !url.startsWith('/auth/')) {
     localStorage.removeItem('authToken')
@@ -100,7 +103,7 @@ export const api = {
       if (params?.endDate) q.set('endDate', params.endDate)
       if (params?.search) q.set('search', params.search)
       if (params?.type) q.set('type', params.type)
-      return request<PaginatedResponse<Transaction>>(`/transactions?${q}`)
+      return request<TransactionListResponse>(`/transactions?${q}`)
     },
     get: (id: number) => request<Transaction>(`/transactions/${id}`),
     create: (data: Omit<Transaction, 'id' | 'createdAt' | 'category' | 'paymentMethod'>) =>
@@ -120,19 +123,35 @@ export const api = {
       if (params?.dateStart) q.set('dateStart', params.dateStart)
       if (params?.dateEnd) q.set('dateEnd', params.dateEnd)
       if (params?.status) q.set('status', params.status)
-      return request<PaginatedResponse<Installment>>(`/installments?${q}`)
+      return request<InstallmentListResponse>(`/installments?${q}`)
     },
     get: (id: number) => request<Installment>(`/installments/${id}`),
-    create: (data: Omit<Installment, 'id' | 'createdAt' | 'transaction' | 'card' | 'payments' | 'remainingPeriods' | 'status'>) =>
-      request<Installment>('/installments', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<Installment>) =>
-      request<Installment>(`/installments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    // Creates a standalone installment with a caller-provided idempotency key.
+    create: (data: StandaloneInstallmentRequest, idempotencyKey: string) => request<InstallmentCommandResponse>('/installments', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(data),
+    }),
+    // Updates schedule-affecting fields through the atomic schedule command.
+    update: (id: number, data: UpdateInstallmentScheduleRequest) =>
+      request<InstallmentCommandResponse>(`/installments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: number) =>
       request<void>(`/installments/${id}`, { method: 'DELETE' }),
-    markPayment: (id: number, paymentId: number, paidDate?: string) =>
-      request<InstallmentPayment>(`/installments/${id}/payments/${paymentId}`, {
+    // Sends an explicit payment target state instead of a toggle request.
+    markPayment: (id: number, paymentId: number, data: { isPaid: boolean; paidDate?: string }) =>
+      request<InstallmentCommandResponse>(`/installments/${id}/payments/${paymentId}`, {
         method: 'PATCH',
-        body: JSON.stringify(paidDate ? { paidDate } : {}),
+        body: JSON.stringify(data),
+      }),
+  },
+
+  installmentPurchases: {
+    // Creates the transaction and its complete installment schedule atomically.
+    create: (data: InstallmentPurchaseRequest, idempotencyKey: string) =>
+      request<InstallmentPurchaseResponse>('/installment-purchases', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(data),
       }),
   },
 
@@ -202,7 +221,7 @@ export const api = {
       if (params?.pageSize) q.set('pageSize', String(params.pageSize))
       if (params?.startDate) q.set('startDate', params.startDate)
       if (params?.endDate) q.set('endDate', params.endDate)
-      return request<PaginatedResponse<Withdrawal>>(`/withdrawals?${q}`)
+      return request<WithdrawalListResponse>(`/withdrawals?${q}`)
     },
     get: (id: number) => request<Withdrawal>(`/withdrawals/${id}`),
     create: (data: Omit<Withdrawal, 'id' | 'bankAccount'>) =>
@@ -260,6 +279,19 @@ export const api = {
       const qs = q.toString()
       return request<MonthlySummary>(`/reports/monthly-summary${qs ? `?${qs}` : ''}`)
     },
+    dashboardSummary: (params?: { year?: number; month?: number }) => {
+      const q = new URLSearchParams()
+      if (params?.year) q.set('year', String(params.year))
+      if (params?.month) q.set('month', String(params.month))
+      const qs = q.toString()
+      return request<DashboardSummary>(`/reports/dashboard-summary${qs ? `?${qs}` : ''}`)
+    },
+    netWorthTrend: (params?: { months?: number }) => {
+      const q = new URLSearchParams()
+      if (params?.months) q.set('months', String(params.months))
+      const qs = q.toString()
+      return request<NetWorthTrendPoint[]>(`/reports/net-worth-trend${qs ? `?${qs}` : ''}`)
+    },
   },
 
   auth: {
@@ -299,7 +331,7 @@ export const api = {
   snapshots: {
     list: (params?: { page?: number; pageSize?: number; dateStart?: string; dateEnd?: string }) => {
       const q = buildSnapshotQuery(params)
-      return request<PaginatedResponse<SnapshotBatch>>(`/snapshots${q ? `?${q}` : ''}`)
+      return request<SnapshotListResponse>(`/snapshots${q ? `?${q}` : ''}`)
     },
     get: (id: number) => request<SnapshotBatch>(`/snapshots/${id}`),
     create: () => request<SnapshotBatch>('/snapshots', { method: 'POST' }),

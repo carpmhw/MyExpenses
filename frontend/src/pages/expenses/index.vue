@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api'
-import type { Category, Transaction, PaymentMethod, CreditCard } from '../../types'
+import type { Category, Transaction, PaymentMethod, CreditCard, TransactionListSummary } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -15,6 +15,7 @@ import { usePagination } from '../../composables/usePagination'
 import { formatMoney } from '../../utils/format'
 import { addCalendarDays, getCurrentMonthRange } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
+import { createIdempotencyKeyState } from '../../utils/idempotency'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
@@ -25,6 +26,14 @@ const router = useRouter()
 const pagination = usePagination(1, 15)
 
 const transactions = ref<Transaction[]>([])
+const summary = ref<TransactionListSummary>({
+  totalAmount: 0,
+  totalIncome: 0,
+  totalExpense: 0,
+  count: 0,
+  dailyAverage: 0,
+  maxAmount: 0,
+})
 const categories = ref<Category[]>([])
 const paymentMethods = ref<PaymentMethod[]>([])
 const loading = ref(false)
@@ -91,6 +100,7 @@ const paymentMethodItems = computed(() => paymentMethods.value.map(p => ({ value
 const installmentPeriods = ref(3)
 const installmentCardId = ref<number | null>(null)
 const creditCards = ref<CreditCard[]>([])
+const installmentPurchaseIdempotency = createIdempotencyKeyState()
 
 const creditCardOptions = computed(() =>
   creditCards.value.map(c => ({ value: c.id, label: `${c.bankName} (${c.lastFourDigits})` }))
@@ -105,22 +115,25 @@ const isCreditCardSelected = computed(() =>
 )
 
 const stats = computed(() => {
-  const list = transactions.value
-  const daysDiff = startDate.value && endDate.value
-    ? Math.max(1, Math.ceil((new Date(endDate.value).getTime() - new Date(startDate.value).getTime()) / 86400000) + 1)
-    : 1
   if (activeTab.value === 'all') {
-    const total = list.reduce((sum, t) => sum + t.amount, 0)
-    const income = list.filter(t => t.type === 'Income').reduce((sum, t) => sum + t.amount, 0)
-    const expense = list.filter(t => t.type === 'Expense').reduce((sum, t) => sum + t.amount, 0)
-    return { total, income, expense, count: list.length, dailyAvg: 0, max: 0 }
+    return {
+      total: summary.value.totalAmount,
+      income: summary.value.totalIncome,
+      expense: summary.value.totalExpense,
+      count: summary.value.count,
+      dailyAvg: 0,
+      max: 0,
+    }
   }
-  const filtered = list.filter(t => t.type === activeTab.value)
-  const total = filtered.reduce((sum, t) => sum + t.amount, 0)
-  const count = filtered.length
-  const max = count ? Math.max(...filtered.map(t => t.amount)) : 0
-  const dailyAvg = count ? Math.round(total / daysDiff) : 0
-  return { total, income: 0, expense: 0, count, max, dailyAvg }
+  const total = activeTab.value === 'Income' ? summary.value.totalIncome : summary.value.totalExpense
+  return {
+    total,
+    income: 0,
+    expense: 0,
+    count: summary.value.count,
+    max: summary.value.maxAmount,
+    dailyAvg: summary.value.dailyAverage,
+  }
 })
 
 const formErrors = computed(() => {
@@ -128,6 +141,12 @@ const formErrors = computed(() => {
   if (!form.value.amount || form.value.amount <= 0) errs.amount = '金額必須大於零'
   if (!form.value.categoryId || form.value.categoryId <= 0) errs.categoryId = '請選擇類別'
   if (!form.value.description?.trim()) errs.description = '請填寫項目名稱'
+  if (isCreditCardSelected.value && !editingItem.value && installmentPeriods.value <= 1) {
+    errs.installmentPeriods = '期數必須大於 1'
+  }
+  if (isCreditCardSelected.value && !editingItem.value && !installmentCardId.value) {
+    errs.installmentCardId = '請選擇信用卡'
+  }
   return errs
 })
 
@@ -168,6 +187,7 @@ async function fetchTransactions() {
       type: activeTab.value !== 'all' ? activeTab.value : undefined,
     })
     transactions.value = result.items
+    summary.value = result.summary
     pagination.total.value = result.total
   } finally {
     loading.value = false
@@ -239,40 +259,57 @@ function openEdit(item: Transaction) {
   modalOpen.value = true
 }
 
+// Saves an ordinary transaction or one atomic installment purchase command.
 async function save() {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
 
   saving.value = true
+  let mutationSucceeded = false
   try {
     if (editingItem.value) {
       await api.transactions.update(editingItem.value.id, form.value)
       toast.success('交易已更新')
     } else {
-      const transaction = await api.transactions.create(form.value)
-
       if (isCreditCardSelected.value && installmentCardId.value) {
-        const perPeriod = Math.floor(transaction.amount / installmentPeriods.value)
-        await api.installments.create({
-          transactionId: transaction.id,
-          cardId: installmentCardId.value,
-          totalAmount: transaction.amount,
-          periods: installmentPeriods.value,
-          perPeriod,
-          purchaseDate: transaction.date.slice(0, 10),
-          description: transaction.description || '',
-        })
+        const purchaseRequest = {
+          transaction: {
+            type: 'Expense' as const,
+            amount: form.value.amount,
+            date: form.value.date,
+            categoryId: form.value.categoryId,
+            description: form.value.description,
+            notes: form.value.notes,
+            paymentMethodId: form.value.paymentMethodId ?? undefined,
+          },
+          installment: {
+            cardId: installmentCardId.value,
+            periods: installmentPeriods.value,
+          },
+        }
+        const idempotencyKey = installmentPurchaseIdempotency.prepare(purchaseRequest)
+        await api.installmentPurchases.create(purchaseRequest, idempotencyKey)
+        installmentPurchaseIdempotency.clear()
         toast.success('交易與分期已建立')
       } else {
+        await api.transactions.create(form.value)
         toast.success('交易已建立')
       }
     }
     modalOpen.value = false
-    await fetchTransactions()
+    mutationSucceeded = true
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '儲存失敗')
   } finally {
     saving.value = false
+  }
+
+  if (mutationSucceeded) {
+    try {
+      await fetchTransactions()
+    } catch {
+      toast.error('已儲存，但交易列表重新整理失敗')
+    }
   }
 }
 
@@ -596,9 +633,10 @@ onMounted(async () => {
               <Input
                 :model-value="installmentPeriods || ''"
                 type="number"
-                :min="1"
+                :min="2"
                 @update:model-value="installmentPeriods = Number($event) || 3"
               />
+              <p v-if="formErrors.installmentPeriods" class="mt-1 text-xs text-color-expense-text">{{ formErrors.installmentPeriods }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-text-primary mb-1">信用卡</label>
@@ -608,6 +646,7 @@ onMounted(async () => {
                 placeholder="選擇信用卡"
                 @update:model-value="installmentCardId = Number($event) || null"
               />
+              <p v-if="formErrors.installmentCardId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.installmentCardId }}</p>
             </div>
           </div>
         </template>

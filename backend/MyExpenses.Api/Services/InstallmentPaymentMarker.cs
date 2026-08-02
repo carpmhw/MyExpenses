@@ -4,13 +4,13 @@ namespace MyExpenses.Api.Services;
 
 public static class InstallmentPaymentMarker
 {
-    /// <summary>Toggles an installment payment status and stores the provided paid date when marking paid.</summary>
-    public static void TogglePaid(InstallmentPayment payment, DateOnly? paidDate)
+    /// <summary>Sets an installment payment to the requested target state without toggle semantics.</summary>
+    public static void SetPaidState(InstallmentPayment payment, bool isPaid, DateOnly? paidDate)
     {
-        if (!payment.IsPaid && !paidDate.HasValue)
+        if (isPaid && !paidDate.HasValue)
             throw new ArgumentException("請選擇實際繳款日");
 
-        payment.IsPaid = !payment.IsPaid;
-        payment.PaidDate = payment.IsPaid ? paidDate : null;
+        payment.IsPaid = isPaid;
+        payment.PaidDate = isPaid ? paidDate : null;
     }
 }

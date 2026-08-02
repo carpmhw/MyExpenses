@@ -26,6 +26,50 @@ public class SnapshotEndpointsTests
         Assert.Equal(46033m, stockDetail.GainLoss);
     }
 
+    /// <summary>Verifies manual snapshots capture unpaid installment liabilities and complete net worth.</summary>
+    [Fact]
+    public async Task CreateSnapshot_CapturesUnpaidInstallmentLiabilities()
+    {
+        await using var db = await CreateDbContextAsync();
+        var installment = new Installment
+        {
+            TotalAmount = 900m,
+            Periods = 3,
+            PerPeriod = 300m,
+            RemainingPeriods = 3,
+            PurchaseDate = new DateOnly(2026, 6, 1),
+            Status = InstallmentStatus.Active,
+            Description = "未繳分期",
+        };
+        db.Installments.Add(installment);
+        await db.SaveChangesAsync();
+        db.InstallmentPayments.AddRange(
+            new InstallmentPayment
+            {
+                InstallmentId = installment.Id,
+                Period = 1,
+                Amount = 300m,
+                IsPaid = false,
+                DueDate = new DateOnly(2026, 6, 20),
+            },
+            new InstallmentPayment
+            {
+                InstallmentId = installment.Id,
+                Period = 2,
+                Amount = 300m,
+                IsPaid = true,
+                DueDate = new DateOnly(2026, 5, 20),
+            });
+        await db.SaveChangesAsync();
+
+        var snapshot = await SnapshotEndpoints.CreateSnapshotAsync(db);
+
+        Assert.Equal(300m, snapshot.TotalLiabilities);
+        Assert.Equal(1047432m, snapshot.TotalAssets);
+        Assert.Equal(1047132m, snapshot.TotalNetWorth);
+        Assert.Equal(NetWorthBasis.AssetsMinusLiabilities, snapshot.NetWorthBasis);
+    }
+
     /// <summary>Verifies snapshot list date filtering includes snapshots on both boundary dates.</summary>
     [Fact]
     public async Task ListSnapshots_FiltersDateRangeInclusively()

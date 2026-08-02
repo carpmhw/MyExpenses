@@ -84,7 +84,9 @@ onMounted(async () => {
             </thead>
             <tbody>
               <tr class="border-b border-border-default">
-                <td class="py-3 px-3 text-text-primary font-medium">總淨值</td>
+                 <td class="py-3 px-3 text-text-primary font-medium">
+                   {{ result.differences.netWorthBasis === 'AssetsMinusLiabilities' ? '完整淨值' : '資產總額' }}
+                 </td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.netWorth.old) }}</td>
                 <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.netWorth.new) }}</td>
                 <td class="py-3 px-3 text-right" :class="result.differences.netWorth.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
@@ -92,6 +94,28 @@ onMounted(async () => {
                 </td>
                 <td class="py-3 px-3 text-right" :class="result.differences.netWorth.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
                   {{ result.differences.netWorth.changePercent }}%
+                </td>
+              </tr>
+              <tr class="border-b border-border-default">
+                <td class="py-3 px-3 text-text-primary">總資產</td>
+                <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.assets.old) }}</td>
+                <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.assets.new) }}</td>
+                <td class="py-3 px-3 text-right" :class="result.differences.assets.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
+                  {{ formatMoney(result.differences.assets.change) }}
+                </td>
+                <td class="py-3 px-3 text-right" :class="result.differences.assets.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
+                  {{ result.differences.assets.changePercent }}%
+                </td>
+              </tr>
+              <tr v-if="result.differences.liabilities" class="border-b border-border-default">
+                <td class="py-3 px-3 text-text-primary">總負債</td>
+                <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.liabilities.old) }}</td>
+                <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(result.differences.liabilities.new) }}</td>
+                <td class="py-3 px-3 text-right" :class="result.differences.liabilities.change >= 0 ? 'text-color-expense-text' : 'text-color-income-text'">
+                  {{ formatMoney(result.differences.liabilities.change) }}
+                </td>
+                <td class="py-3 px-3 text-right" :class="result.differences.liabilities.changePercent >= 0 ? 'text-color-expense-text' : 'text-color-income-text'">
+                  {{ result.differences.liabilities.changePercent }}%
                 </td>
               </tr>
               <tr class="border-b border-border-default">

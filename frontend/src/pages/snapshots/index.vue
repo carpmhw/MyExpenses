@@ -11,7 +11,7 @@ import SnapshotDetailModal from '../../components/snapshots/SnapshotDetailModal.
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
-import { coerceSnapshotDateRange, createDefaultSnapshotDateRange } from '../../utils/snapshot'
+import { coerceSnapshotDateRange, createDefaultSnapshotDateRange, hasCompleteNetWorthBasis } from '../../utils/snapshot'
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { getSystemDateParts } from '../../utils/timezone'
@@ -87,7 +87,7 @@ const columns = [
   { key: 'seq', label: '序號' },
   { key: 'snapshotDate', label: '快照日期' },
   { key: 'name', label: '名稱' },
-  { key: 'totalNetWorth', label: '總淨值', align: 'right' as const },
+  { key: 'totalNetWorth', label: '資產/淨值', align: 'right' as const },
   { key: 'totalBankBalance', label: '銀行總額', align: 'right' as const },
   { key: 'totalStockValue', label: '股票預估賣出淨值', align: 'right' as const },
 ]
@@ -96,7 +96,18 @@ function formatDate(dateStr: string) {
   return timeZone.formatDateTime(dateStr)
 }
 
+// Formats the truthful aggregate for a legacy or complete snapshot row.
+function formatSnapshotAggregate(snapshot: SnapshotBatch): string {
+  return formatMoney(hasCompleteNetWorthBasis(snapshot) ? snapshot.totalNetWorth : snapshot.totalAssets)
+}
+
+// Labels the aggregate basis so legacy asset totals cannot be mistaken for net worth.
+function snapshotBasisLabel(snapshot: SnapshotBatch): string {
+  return hasCompleteNetWorthBasis(snapshot) ? '完整淨值' : '資產總額'
+}
+
 const canCompare = computed(() => selectedIds.value.length === 2)
+const hasCompleteTrend = computed(() => trendData.value.some(hasCompleteNetWorthBasis))
 
 function toggleSelect(id: number) {
   const idx = selectedIds.value.indexOf(id)
@@ -123,11 +134,19 @@ const trendChartData = computed(() => ({
   }),
   datasets: [
     {
-      label: '總淨值',
-      data: trendData.value.map(t => t.totalNetWorth),
-       borderColor: chartColors.value.income,
-       backgroundColor: chartColors.value.incomeSoft,
+      label: '資產總額',
+      data: trendData.value.map(t => t.totalAssets),
+      borderColor: chartColors.value.income,
+      backgroundColor: chartColors.value.incomeSoft,
       fill: true,
+      tension: 0.3,
+    },
+    {
+      label: '完整淨值',
+      data: trendData.value.map(t => hasCompleteNetWorthBasis(t) ? t.totalNetWorth : null),
+      borderColor: chartColors.value.warning,
+      backgroundColor: 'transparent',
+      fill: false,
       tension: 0.3,
     },
     {
@@ -354,13 +373,16 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
 
     <Card class="mb-6">
       <div class="p-4">
-        <h2 class="text-sm font-semibold text-text-primary mb-3">淨值趨勢</h2>
-        <div class="h-64" v-if="trendData.length > 0">
-          <Line :data="trendChartData" :options="trendChartOptions" />
-        </div>
-        <div v-else class="h-64 flex items-center justify-center text-text-tertiary text-sm">
-          尚無快照資料，無法顯示趨勢圖
-        </div>
+         <h2 class="text-sm font-semibold text-text-primary mb-3">資產/淨值趨勢</h2>
+         <div class="h-64" v-if="trendData.length > 0">
+           <Line :data="trendChartData" :options="trendChartOptions" />
+         </div>
+         <div v-else class="h-64 flex items-center justify-center text-text-tertiary text-sm">
+           尚無快照資料，無法顯示趨勢圖
+         </div>
+         <p v-if="trendData.length > 0 && !hasCompleteTrend" class="mt-3 text-xs text-text-secondary">
+           尚無完整淨值歷史，目前僅顯示資產總額
+         </p>
       </div>
     </Card>
 
@@ -381,7 +403,10 @@ watch([dateStart, dateEnd], () => refreshSnapshotsForDateRange())
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + index + 1 }}</td>
           <td class="py-3 px-4 text-text-secondary w-[160px]">{{ formatDate(item.snapshotDate) }}</td>
           <td class="py-3 px-4 text-text-primary font-medium">{{ item.name }}</td>
-          <td class="py-3 px-4 text-text-primary font-bold text-sm text-right">{{ formatMoney(item.totalNetWorth) }}</td>
+           <td class="py-3 px-4 text-text-primary font-bold text-sm text-right">
+             <div>{{ formatSnapshotAggregate(item) }}</div>
+             <div class="text-[10px] font-normal text-text-secondary">{{ snapshotBasisLabel(item) }}</div>
+           </td>
           <td class="py-3 px-4 text-text-secondary text-sm text-right">{{ formatMoney(item.totalBankBalance) }}</td>
           <td class="py-3 px-4 text-text-secondary text-sm text-right">{{ formatMoney(item.totalStockValue) }}</td>
           <td class="py-3 px-4 w-[120px]">

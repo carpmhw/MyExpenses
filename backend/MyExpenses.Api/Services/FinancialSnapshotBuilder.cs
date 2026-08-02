@@ -4,8 +4,14 @@ namespace MyExpenses.Api.Services;
 
 public static class FinancialSnapshotBuilder
 {
-    /// <summary>Builds a snapshot batch from current bank and stock data without persisting it.</summary>
-    public static SnapshotBatch Build(string name, string? notes, DateTime now, IEnumerable<BankAccount> bankAccounts, IEnumerable<Stock> stocks)
+    /// <summary>Builds a complete asset-and-liability snapshot without persisting it.</summary>
+    public static SnapshotBatch Build(
+        string name,
+        string? notes,
+        DateTime now,
+        IEnumerable<BankAccount> bankAccounts,
+        IEnumerable<Stock> stocks,
+        decimal totalLiabilities = 0m)
     {
         var bankDetails = bankAccounts.Select(b => new BankDetail
         {
@@ -36,14 +42,18 @@ public static class FinancialSnapshotBuilder
 
         var totalStockValue = stockDetails.Sum(s => s.MarketValue);
         var totalStockCost = stockValuations.Sum(s => s.Valuation.EstimatedBuyCost);
-        var totalNetWorth = totalBankBalance + totalStockValue;
+        var totalAssets = totalBankBalance + totalStockValue;
+        var totalNetWorth = totalAssets - totalLiabilities;
 
         return new SnapshotBatch
         {
             Name = name,
             SnapshotDate = now,
             Notes = notes,
+            TotalAssets = totalAssets,
+            TotalLiabilities = totalLiabilities,
             TotalNetWorth = totalNetWorth,
+            NetWorthBasis = NetWorthBasis.AssetsMinusLiabilities,
             TotalBankBalance = totalBankBalance,
             TotalStockValue = totalStockValue,
             TotalStockCost = totalStockCost,

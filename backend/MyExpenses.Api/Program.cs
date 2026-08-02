@@ -98,6 +98,7 @@ builder.Services.AddOpenApi();
 builder.Services.Configure<TimeZoneOptions>(
     builder.Configuration.GetSection(TimeZoneOptions.SectionName));
 builder.Services.AddSingleton<TimeZoneService>();
+builder.Services.AddScoped<InstallmentCommandService>();
 builder.Services.AddHostedService<SnapshotBackgroundService>();
 builder.Services.AddHostedService<StockPriceUpdateService>();
 
@@ -106,6 +107,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await InstallmentIntegrityPreflight.ValidateAsync(db);
     db.Database.Migrate();
     var timeZoneService = scope.ServiceProvider.GetRequiredService<TimeZoneService>();
     await timeZoneService.InitializeAsync(db);

@@ -21,6 +21,19 @@ export interface Transaction {
   paymentMethod: PaymentMethod | null
 }
 
+export interface TransactionListSummary {
+  totalAmount: number
+  totalIncome: number
+  totalExpense: number
+  count: number
+  dailyAverage: number
+  maxAmount: number
+}
+
+export interface TransactionListResponse extends PaginatedResponse<Transaction> {
+  summary: TransactionListSummary
+}
+
 export type InstallmentStatus = 'Active' | 'PaidOff'
 
 export interface Installment {
@@ -48,6 +61,76 @@ export interface InstallmentPayment {
   paidDate: string | null
   dueDate: string | null
   isPaid: boolean
+}
+
+export interface InstallmentListSummary {
+  totalCount: number
+  activeCount: number
+  dueAmount: number
+  duePaymentCount: number
+}
+
+export interface InstallmentListResponse extends PaginatedResponse<Installment> {
+  summary: InstallmentListSummary
+}
+
+export interface InstallmentCommandResponse {
+  id: number
+  transactionId: number | null
+  cardId: number | null
+  totalAmount: number
+  periods: number
+  perPeriod: number
+  remainingPeriods: number
+  status: InstallmentStatus
+  purchaseDate: string
+  createdAt: string
+  description: string | null
+  transaction: Pick<Transaction, 'id' | 'type' | 'amount' | 'date' | 'description' | 'notes' | 'categoryId' | 'paymentMethodId' | 'createdAt'> | null
+  card: Pick<CreditCard, 'id' | 'bankName' | 'lastFourDigits' | 'cardNetwork' | 'statementDay' | 'dueDay' | 'creditLimit'> | null
+  payments: InstallmentPayment[]
+}
+
+export interface InstallmentPurchaseRequest {
+  transaction: {
+    type: 'Expense'
+    amount: number
+    date?: string
+    description: string
+    notes?: string | null
+    categoryId?: number
+    categoryCode?: string
+    category?: string
+    paymentMethodId?: number
+    paymentMethodCode?: string
+    paymentMethod?: string
+  }
+  installment: {
+    cardId: number
+    periods: number
+  }
+}
+
+export interface InstallmentPurchaseResponse {
+  transaction: InstallmentCommandResponse['transaction']
+  installment: InstallmentCommandResponse
+}
+
+export interface StandaloneInstallmentRequest {
+  transactionId: number | null
+  cardId: number | null
+  totalAmount: number
+  periods: number
+  purchaseDate: string
+  description: string | null
+}
+
+export interface UpdateInstallmentScheduleRequest {
+  cardId?: number | null
+  totalAmount?: number
+  periods?: number
+  purchaseDate?: string
+  description?: string | null
 }
 
 export interface CreditCard {
@@ -134,6 +217,17 @@ export interface Withdrawal {
   bankAccount: BankAccount
 }
 
+export interface WithdrawalListSummary {
+  totalAmount: number
+  count: number
+  averageAmount: number
+  maxAmount: number
+}
+
+export interface WithdrawalListResponse extends PaginatedResponse<Withdrawal> {
+  summary: WithdrawalListSummary
+}
+
 export interface MonthlyTrend {
   month: string
   income: number
@@ -177,6 +271,18 @@ export interface MonthlySummary {
   totalBankBalance: number
 }
 
+export interface DashboardSummary {
+  totalWithdrawals: number
+  withdrawalCount: number
+  totalExpenses: number
+  expenseCount: number
+  disposableBalance: number
+  installmentDueAmount: number
+  installmentDuePaymentCount: number
+  activeInstallmentCount: number
+  previousDisposableBalance: number
+}
+
 export interface BankDetail {
   bankName: string
   accountNumber: string
@@ -200,7 +306,10 @@ export interface SnapshotBatch {
   name: string
   snapshotDate: string
   notes: string | null
+  totalAssets: number
+  totalLiabilities: number | null
   totalNetWorth: number
+  netWorthBasis: 'AssetsOnly' | 'AssetsMinusLiabilities'
   totalBankBalance: number
   totalStockValue: number
   totalStockCost: number
@@ -222,10 +331,24 @@ export interface TrendPoint {
   id: number
   date: string
   name: string
+  totalAssets: number
+  totalLiabilities: number | null
   totalNetWorth: number
+  netWorthBasis: 'AssetsOnly' | 'AssetsMinusLiabilities'
   totalBankBalance: number
   totalStockValue: number
   totalStockCost: number
+}
+
+export interface SnapshotListResponse extends PaginatedResponse<SnapshotBatch> {}
+
+export interface NetWorthTrendPoint {
+  month: string
+  snapshotDate: string
+  name: string
+  totalAssets: number
+  totalLiabilities: number
+  netWorth: number
 }
 
 export interface SnapshotDiff {
@@ -262,7 +385,10 @@ export interface SnapshotCompareResult {
     id: number
     date: string
     name: string
+    totalAssets: number
+    totalLiabilities: number | null
     totalNetWorth: number
+    netWorthBasis: 'AssetsOnly' | 'AssetsMinusLiabilities'
     totalBankBalance: number
     totalStockValue: number
     totalStockCost: number
@@ -271,13 +397,19 @@ export interface SnapshotCompareResult {
     id: number
     date: string
     name: string
+    totalAssets: number
+    totalLiabilities: number | null
     totalNetWorth: number
+    netWorthBasis: 'AssetsOnly' | 'AssetsMinusLiabilities'
     totalBankBalance: number
     totalStockValue: number
     totalStockCost: number
   }
   differences: {
     netWorth: SnapshotDiff
+    netWorthBasis: 'AssetsOnly' | 'AssetsMinusLiabilities'
+    assets: SnapshotDiff
+    liabilities: SnapshotDiff | null
     bankBalance: SnapshotDiff
     stockValue: SnapshotDiff
     bankDetails: CompareBankDetail[]

@@ -102,6 +102,7 @@ public class EndpointInputValidationTests
         builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
         builder.Services.Configure<TimeZoneOptions>(_ => { });
         builder.Services.AddSingleton<TimeZoneService>();
+        builder.Services.AddScoped<InstallmentCommandService>();
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;

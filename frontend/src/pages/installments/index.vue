@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted } from 'vue'
 import { api } from '../../api'
-import type { Installment, CreditCard, CreditCardBill } from '../../types'
+import type { Installment, CreditCard, CreditCardBill, InstallmentListSummary } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -14,11 +14,18 @@ import { formatMoney } from '../../utils/format'
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { addCalendarDays, formatDateOnly, getCurrentMonthRange, isDateOnlyBefore } from '../../utils/timezone'
+import { createIdempotencyKeyState } from '../../utils/idempotency'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
 
 const installments = ref<Installment[]>([])
+const summary = ref<InstallmentListSummary>({
+  totalCount: 0,
+  activeCount: 0,
+  dueAmount: 0,
+  duePaymentCount: 0,
+})
 const creditCards = ref<CreditCard[]>([])
 const unpaidBills = ref<CreditCardBill[]>([])
 const loading = ref(false)
@@ -81,6 +88,7 @@ const paymentConfirmOpen = ref(false)
 const payingPaymentId = ref<number | null>(null)
 const markingAsPaid = ref(true)
 const paidDate = ref(timeZone.getToday())
+const standaloneInstallmentIdempotency = createIdempotencyKeyState()
 
 const columns = [
   { key: 'seq', label: '序號' },
@@ -103,20 +111,11 @@ const cardOptions = computed(() =>
 )
 
 const stats = computed(() => {
-  const total = installments.value.length
-  const active = installments.value.filter(i => i.status === 'Active').length
-  const currentMonth = getCurrentMonthRange(new Date(), timeZone.timeZoneId.value)
-  let monthlyDue = 0
-  for (const inst of installments.value) {
-    if (inst.status !== 'Active') continue
-    for (const p of inst.payments || []) {
-      if (p.isPaid || !p.dueDate) continue
-      if (p.dueDate >= currentMonth.start && p.dueDate <= currentMonth.end) {
-        monthlyDue += p.amount
-      }
-    }
+  return {
+    total: summary.value.totalCount,
+    active: summary.value.activeCount,
+    monthlyDue: summary.value.dueAmount,
   }
-  return { total, active, monthlyDue }
 })
 
 const hasPaidPayments = computed(() =>
@@ -126,7 +125,7 @@ const hasPaidPayments = computed(() =>
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
   if (!form.value.totalAmount || form.value.totalAmount <= 0) errs.totalAmount = '總金額必須大於零'
-  if (!form.value.periods || form.value.periods < 1) errs.periods = '期數必須大於 0'
+  if (!form.value.periods || form.value.periods <= 1) errs.periods = '期數必須大於 1'
   if (!form.value.cardId) errs.cardId = '請選擇信用卡'
   if (!form.value.purchaseDate) errs.purchaseDate = '請選擇刷卡日期'
   if (!form.value.description?.trim()) errs.description = '請填寫交易描述'
@@ -153,6 +152,7 @@ async function fetchList() {
       status: filterStatus.value || undefined,
     })
     installments.value = result.items
+    summary.value = result.summary
     pagination.total.value = result.total
   } finally {
     loading.value = false
@@ -177,7 +177,9 @@ async function fetchCreditCards() {
   creditCards.value = result.items
 }
 
+// Resets the standalone installment form and starts a fresh logical submission.
 function openCreate() {
+  standaloneInstallmentIdempotency.clear()
   editingItem.value = null
   form.value = {
     transactionId: null,
@@ -205,25 +207,51 @@ function openEdit(item: Installment) {
   modalOpen.value = true
 }
 
+// Saves a standalone installment with one idempotent command or updates an existing schedule atomically.
 async function save() {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
 
   saving.value = true
+  let mutationSucceeded = false
   try {
     if (editingItem.value) {
-      await api.installments.update(editingItem.value.id, form.value)
+      await api.installments.update(editingItem.value.id, {
+        cardId: form.value.cardId,
+        totalAmount: form.value.totalAmount,
+        periods: form.value.periods,
+        purchaseDate: form.value.purchaseDate,
+        description: form.value.description,
+      })
       toast.success('分期已更新')
     } else {
-      await api.installments.create(form.value)
+      const createRequest = {
+        transactionId: form.value.transactionId,
+        cardId: form.value.cardId,
+        totalAmount: form.value.totalAmount,
+        periods: form.value.periods,
+        purchaseDate: form.value.purchaseDate,
+        description: form.value.description,
+      }
+      const idempotencyKey = standaloneInstallmentIdempotency.prepare(createRequest)
+      await api.installments.create(createRequest, idempotencyKey)
+      standaloneInstallmentIdempotency.clear()
       toast.success('分期已建立')
     }
     modalOpen.value = false
-    await fetchList()
+    mutationSucceeded = true
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '儲存失敗')
   } finally {
     saving.value = false
+  }
+
+  if (mutationSucceeded) {
+    try {
+      await fetchList()
+    } catch {
+      toast.error('已儲存，但分期列表重新整理失敗')
+    }
   }
 }
 
@@ -260,6 +288,7 @@ function confirmMarkPayment(paymentId: number, isPaid: boolean) {
   paymentConfirmOpen.value = true
 }
 
+// Applies the confirmed paid or unpaid target state and refreshes derived installment values.
 async function doMarkPayment() {
   if (!scheduleInstallment.value || payingPaymentId.value === null) return
 
@@ -274,13 +303,22 @@ async function doMarkPayment() {
   saving.value = true
 
   try {
-    await api.installments.markPayment(id, paymentId, markingAsPaid.value ? paidDate.value : undefined)
+    const paymentRequest = markingAsPaid.value
+      ? { isPaid: true, paidDate: paidDate.value }
+      : { isPaid: false }
+    const updated = await api.installments.markPayment(id, paymentId, paymentRequest)
     paymentConfirmOpen.value = false
     payingPaymentId.value = null
     toast.success(markingAsPaid.value ? '已標記為已繳款' : '已取消繳款標記')
     await fetchList()
-    const updated = await api.installments.get(id)
-    scheduleInstallment.value = updated
+    if (scheduleInstallment.value) {
+      scheduleInstallment.value = {
+        ...scheduleInstallment.value,
+        remainingPeriods: updated.remainingPeriods,
+        status: updated.status,
+        payments: updated.payments,
+      }
+    }
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '標記失敗')
   } finally {
@@ -536,10 +574,10 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
             <Input
               :model-value="form.periods || ''"
               type="number"
-              :min="1"
+               :min="2"
               :disabled="hasPaidPayments"
               :error="formErrors.periods"
-              @update:model-value="form.periods = Number($event) || 1"
+               @update:model-value="form.periods = Number($event) || 2"
             />
             <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           </div>

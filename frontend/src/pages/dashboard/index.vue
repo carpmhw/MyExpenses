@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api'
-import type { Withdrawal, Transaction, Installment } from '../../types'
+import type { Withdrawal, Transaction, Installment, DashboardSummary } from '../../types'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney } from '../../utils/format'
 import { formatDateOnly, getSystemDateParts } from '../../utils/timezone'
@@ -30,10 +30,6 @@ function prevMonthKey(y: number, m: number): { year: number; month: number } {
 const startDate = computed(() => getMonthStart(year.value, month.value))
 const endDate = computed(() => getMonthEnd(year.value, month.value))
 
-const prevKey = computed(() => prevMonthKey(year.value, month.value))
-const prevStart = computed(() => getMonthStart(prevKey.value.year, prevKey.value.month))
-const prevEnd = computed(() => getMonthEnd(prevKey.value.year, prevKey.value.month))
-
 function goPrev() {
   const k = prevMonthKey(year.value, month.value)
   year.value = k.year; month.value = k.month
@@ -56,29 +52,22 @@ const loading = ref(true)
 const withdrawals = ref<Withdrawal[]>([])
 const expenses = ref<Transaction[]>([])
 const activeInstallments = ref<Installment[]>([])
-const prevWithdrawalsTotal = ref(0)
-const prevExpensesTotal = ref(0)
+const dashboardSummary = ref<DashboardSummary | null>(null)
 
 async function loadData() {
   loading.value = true
+  dashboardSummary.value = null
   try {
-    const [wd, exp, inst, prevWdRes] = await Promise.all([
+    const [summary, wd, exp, inst] = await Promise.all([
+      api.reports.dashboardSummary({ year: year.value, month: month.value }),
       api.withdrawals.list({ page: 1, startDate: startDate.value, endDate: endDate.value, pageSize: 50 }),
       api.transactions.list({ page: 1, startDate: startDate.value, endDate: endDate.value, type: 'Expense', pageSize: 50 }),
       api.installments.list({ page: 1, status: 'Active', pageSize: 50 }),
-      api.withdrawals.list({ page: 1, startDate: prevStart.value, endDate: prevEnd.value, pageSize: 50 }),
     ])
+    dashboardSummary.value = summary
     withdrawals.value = wd.items ?? []
     expenses.value = exp.items ?? []
     activeInstallments.value = inst.items ?? []
-    prevWithdrawalsTotal.value = (prevWdRes.items ?? []).reduce((s, w) => s + w.amount, 0)
-    const prevM = prevKey.value
-    try {
-      const ps = await api.reports.monthlySummary({ year: prevM.year, month: prevM.month })
-      prevExpensesTotal.value = ps.totalExpense
-    } catch {
-      prevExpensesTotal.value = 0
-    }
   } catch {
     toast.error('載入儀表板資料失敗')
   } finally {
@@ -90,15 +79,15 @@ watch([year, month], loadData)
 onMounted(loadData)
 
 const totalWithdrawals = computed(() =>
-  withdrawals.value.reduce((s, w) => s + w.amount, 0)
+  dashboardSummary.value?.totalWithdrawals ?? 0
 )
 const totalExpenses = computed(() =>
-  expenses.value.reduce((s, e) => s + e.amount, 0)
+  dashboardSummary.value?.totalExpenses ?? 0
 )
-const disposableBalance = computed(() => totalWithdrawals.value - totalExpenses.value)
+const disposableBalance = computed(() => dashboardSummary.value?.disposableBalance ?? 0)
 
 const prevDisposable = computed(() =>
-  prevWithdrawalsTotal.value - prevExpensesTotal.value
+  dashboardSummary.value?.previousDisposableBalance ?? 0
 )
 const comparisonPct = computed(() => {
   if (prevDisposable.value === 0) return null
@@ -106,7 +95,7 @@ const comparisonPct = computed(() => {
 })
 
 const installmentMonthlyDue = computed(() =>
-  activeInstallments.value.reduce((s, i) => s + i.perPeriod, 0)
+  dashboardSummary.value?.installmentDueAmount ?? 0
 )
 
 const recentWithdrawals = computed(() =>
@@ -246,7 +235,7 @@ function formatEventDateMMDD(timestamp: string): string {
               <Icon name="TrendingDown" :size="18" class="text-color-income-hero-fg" />
             </div>
             <div>
-              <p class="text-xs text-text-on-hero-muted">本期收入</p>
+               <p class="text-xs text-text-on-hero-muted">本期提款</p>
               <p class="text-base font-bold text-text-on-dark">{{ formatMoney(totalWithdrawals) }}</p>
             </div>
           </div>
@@ -283,13 +272,13 @@ function formatEventDateMMDD(timestamp: string): string {
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <p class="text-base font-bold text-color-income-text">提款</p>
-                  <span class="bg-bg-card text-color-income-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ withdrawals.length }} 筆</span>
+                   <span class="bg-bg-card text-color-income-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ dashboardSummary?.withdrawalCount ?? 0 }} 筆</span>
                 </div>
                 <p class="text-xs text-color-income-text">Withdrawals</p>
               </div>
             </div>
             <div class="text-right">
-              <p class="text-[10px] text-color-income-text">本月提款合計</p>
+               <p class="text-[10px] text-color-income-text">本期提款合計</p>
               <p class="text-2xl font-bold text-color-income-text">{{ formatMoney(totalWithdrawals) }}</p>
             </div>
           </div>
@@ -325,13 +314,13 @@ function formatEventDateMMDD(timestamp: string): string {
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <p class="text-base font-bold text-color-expense-text">支出</p>
-                  <span class="bg-bg-card text-color-expense-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ expenses.length }} 筆</span>
+                   <span class="bg-bg-card text-color-expense-text text-[10px] font-semibold rounded-full px-2 py-0.5">{{ dashboardSummary?.expenseCount ?? 0 }} 筆</span>
                 </div>
                 <p class="text-xs text-color-expense-text">Expenses</p>
               </div>
             </div>
             <div class="text-right">
-              <p class="text-[10px] text-color-expense-text">本月支出合計</p>
+               <p class="text-[10px] text-color-expense-text">本期支出合計</p>
               <p class="text-2xl font-bold text-color-expense-text">{{ formatMoney(totalExpenses) }}</p>
             </div>
           </div>
@@ -372,14 +361,19 @@ function formatEventDateMMDD(timestamp: string): string {
                 <div class="flex items-center gap-2">
                   <p class="text-base font-bold text-color-credit-text">信用卡分期</p>
                   <span class="bg-bg-card text-color-credit-text text-[10px] font-semibold rounded-full px-2 py-0.5">
-                    {{ activeInstallments.length }} 筆
+                    {{ dashboardSummary?.activeInstallmentCount ?? 0 }} 筆
                   </span>
                 </div>
                 <p class="text-xs text-color-credit-text">Credit Card Installments</p>
               </div>
             </div>
             <div class="text-right">
-              <p class="text-[10px] text-color-credit-text">本期應繳金額</p>
+              <button
+                class="text-[10px] text-color-credit-text hover:text-text-primary underline underline-offset-2 cursor-pointer"
+                @click="router.push('/installments')"
+              >
+                檢視全部
+              </button>
               <p class="text-2xl font-bold text-color-credit-text">{{ formatMoney(installmentMonthlyDue) }}</p>
             </div>
           </div>
@@ -414,6 +408,44 @@ function formatEventDateMMDD(timestamp: string): string {
           >
             尚無分期記錄
           </div>
+        </div>
+      </div>
+
+      <!-- Complete-period summary footer -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-bg-card rounded-xl border border-border-subtle px-4 py-3">
+          <div class="flex items-center gap-2">
+            <Icon name="TrendingDown" :size="15" class="text-color-income-text" />
+            <p class="text-xs text-text-secondary">提款合計</p>
+          </div>
+          <p class="mt-1 text-lg font-bold text-color-income-text">{{ formatMoney(totalWithdrawals) }}</p>
+          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary?.withdrawalCount ?? 0 }} 筆</p>
+        </div>
+        <div class="bg-bg-card rounded-xl border border-border-subtle px-4 py-3">
+          <div class="flex items-center gap-2">
+            <Icon name="Receipt" :size="15" class="text-color-expense-text" />
+            <p class="text-xs text-text-secondary">支出合計</p>
+          </div>
+          <p class="mt-1 text-lg font-bold text-color-expense-text">{{ formatMoney(totalExpenses) }}</p>
+          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary?.expenseCount ?? 0 }} 筆</p>
+        </div>
+        <div class="bg-bg-card rounded-xl border border-border-subtle px-4 py-3">
+          <div class="flex items-center gap-2">
+            <Icon name="Wallet" :size="15" class="text-text-secondary" />
+            <p class="text-xs text-text-secondary">剩餘合計</p>
+          </div>
+          <p class="mt-1 text-lg font-bold" :class="disposableBalance >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
+            {{ formatMoney(disposableBalance) }}
+          </p>
+          <p class="text-[11px] text-text-tertiary">提款減支出</p>
+        </div>
+        <div class="bg-bg-card rounded-xl border border-border-subtle px-4 py-3">
+          <div class="flex items-center gap-2">
+            <Icon name="CreditCard" :size="15" class="text-color-credit-text" />
+            <p class="text-xs text-text-secondary">信用卡分期</p>
+          </div>
+          <p class="mt-1 text-lg font-bold text-color-credit-text">{{ formatMoney(installmentMonthlyDue) }}</p>
+          <p class="text-[11px] text-text-tertiary">{{ dashboardSummary?.installmentDuePaymentCount ?? 0 }} 筆未繳應付款</p>
         </div>
       </div>
 
