@@ -421,8 +421,13 @@ export const api = {
 
   auth: {
     status: (context?: ApiRequestContext) => request<{ authenticated: boolean; user: User | null; hasUsers: boolean }>('/auth/status', withRequestContext({}, context)),
-    register: (data: { email: string; displayName: string; password: string }, context?: ApiRequestContext) =>
-      request<AuthResponse>('/auth/register', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    // 以 dedicated header 傳送首次初始化密鑰，且不將密鑰寫入瀏覽器儲存。
+    register: (data: { email: string; displayName: string; password: string }, bootstrapSecret: string, context?: ApiRequestContext) =>
+      request<AuthResponse>('/auth/register', withRequestContext({
+        method: 'POST',
+        body: JSON.stringify(data),
+        headers: { 'X-MyExpenses-Bootstrap-Secret': bootstrapSecret },
+      }, context)),
     login: (data: { email: string; password: string }, context?: ApiRequestContext) =>
       request<AuthResponse>('/auth/login', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
     verify2fa: (data: { tempToken: string; code: string }, context?: ApiRequestContext) =>

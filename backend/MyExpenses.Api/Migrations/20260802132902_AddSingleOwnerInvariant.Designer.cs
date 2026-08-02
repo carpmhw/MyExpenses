@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MyExpenses.Api.Data;
 
@@ -10,10 +11,11 @@ using MyExpenses.Api.Data;
 namespace MyExpenses.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260802132902_AddSingleOwnerInvariant")]
+    partial class AddSingleOwnerInvariant
     {
-        /// <summary>建立目前應用程式使用的 EF Core model snapshot。</summary>
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <summary>建立 migration 對應的 EF Core target model。</summary>
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");

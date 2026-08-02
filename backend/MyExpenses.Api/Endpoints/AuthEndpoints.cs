@@ -4,10 +4,13 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
 using MyExpenses.Api.Models.Requests;
+using MyExpenses.Api.Options;
 using MyExpenses.Api.Services;
 using OtpNet;
 
@@ -15,6 +18,9 @@ namespace MyExpenses.Api.Endpoints;
 
 public static class AuthEndpoints
 {
+    private static readonly SemaphoreSlim RegistrationLock = new(1, 1);
+
+    /// <summary>建立公開與受保護的 authentication endpoints，並套用目前 deployment 的 cookie policy。</summary>
     public static void MapAuthEndpoints(this WebApplication app)
     {
         var jwtSecret = JwtSecretProvider.GetJwtSecret(app.Configuration, app.Environment);
@@ -66,7 +72,13 @@ public static class AuthEndpoints
             });
         });
 
-        publicGroup.MapPost("/register", async (RegisterRequest request, AppDbContext db, HttpContext httpContext, IDataProtectionProvider dataProtection) =>
+        // 首次註冊在 database singleton constraint 與 bootstrap header 下原子建立 owner。
+        publicGroup.MapPost("/register", async (
+            RegisterRequest request,
+            AppDbContext db,
+            HttpContext httpContext,
+            IDataProtectionProvider dataProtection,
+            IOptions<BootstrapOptions> bootstrapOptions) =>
         {
             if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
                 return Results.BadRequest(new { message = "Email and password are required" });
@@ -75,38 +87,59 @@ public static class AuthEndpoints
             if (passwordError is not null)
                 return Results.BadRequest(new { message = passwordError });
 
-            if (await db.Users.AnyAsync())
-                return Results.Json(new { message = "User already exists" }, statusCode: 403);
-
-            if (await db.Users.AnyAsync(u => u.Email == request.Email))
-                return Results.Conflict(new { message = "Email already exists" });
-
-            var user = new User
+            await RegistrationLock.WaitAsync();
+            try
             {
-                Email = request.Email,
-                DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? request.Email : request.DisplayName,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            };
+                if (await db.Users.AnyAsync())
+                    return Results.Json(new { message = "Registration is closed" }, statusCode: 403);
 
-            db.Users.Add(user);
-            await db.SaveChangesAsync();
+                var presentedSecret = httpContext.Request.Headers[BootstrapSecretProvider.HeaderName].ToString();
+                if (!BootstrapSecretProvider.Matches(bootstrapOptions.Value.Secret, presentedSecret))
+                    return Results.Json(new { message = "Bootstrap authorization failed" }, statusCode: 403);
 
-            var (token, jwtExp) = JwtHelper.GenerateToken(user, jwtSecret, jwtIssuer, jwtAudience);
-            SetSessionCookie(httpContext, dataProtection, user.Id, jwtExp);
+                if (await db.Users.AnyAsync(u => u.Email == request.Email))
+                    return Results.Conflict(new { message = "Email already exists" });
 
-            return Results.Ok(new
-            {
-                token,
-                user = new
+                await using var transaction = await db.Database.BeginTransactionAsync();
+                var user = new User
                 {
-                    user.Id,
-                    user.Email,
-                    user.DisplayName,
-                    user.IsTwoFactorEnabled
+                    Email = request.Email,
+                    DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? request.Email : request.DisplayName,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                };
+
+                db.Users.Add(user);
+                try
+                {
+                    await db.SaveChangesAsync();
+                    await transaction.CommitAsync();
                 }
-            });
+                catch (DbUpdateException exception) when (IsSingletonConflict(exception))
+                {
+                    return Results.Json(new { message = "Registration is closed" }, statusCode: 403);
+                }
+
+                var (token, jwtExp) = JwtHelper.GenerateToken(user, jwtSecret, jwtIssuer, jwtAudience);
+                SetSessionCookie(httpContext, dataProtection, user.Id, jwtExp);
+
+                return Results.Ok(new
+                {
+                    token,
+                    user = new
+                    {
+                        user.Id,
+                        user.Email,
+                        user.DisplayName,
+                        user.IsTwoFactorEnabled
+                    }
+                });
+            }
+            finally
+            {
+                RegistrationLock.Release();
+            }
         })
         .RequireRateLimiting(AuthRateLimitPolicy.SensitiveAuthPolicy);
 
@@ -452,6 +485,14 @@ public static class AuthEndpoints
             codes.Add(code);
         }
         return codes;
+    }
+
+    /// <summary>判斷資料庫例外是否來自 singleton owner marker 的唯一性衝突。</summary>
+    private static bool IsSingletonConflict(DbUpdateException exception)
+    {
+        return exception.InnerException is SqliteException sqliteException
+            && sqliteException.SqliteErrorCode == 19
+            && sqliteException.Message.Contains("InstallationOwnerMarker", StringComparison.OrdinalIgnoreCase);
     }
 }
 

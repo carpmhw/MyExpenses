@@ -15,6 +15,7 @@ const tempToken = ref('')
 
 const email = ref('')
 const displayName = ref('')
+const bootstrapSecret = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const verifyCode = ref('')
@@ -39,10 +40,10 @@ function clearError() {
   error.value = ''
 }
 
-// Validates and submits a new user registration through the central API.
+// 驗證並透過中央 API 送出首次 owner 註冊，bootstrap secret 僅存在本次表單記憶體。
 async function handleRegister() {
   clearError()
-  if (!email.value || !password.value || !displayName.value) {
+  if (!email.value || !password.value || !displayName.value || !bootstrapSecret.value) {
     error.value = '請填寫所有欄位'
     return
   }
@@ -59,8 +60,9 @@ async function handleRegister() {
       email: email.value,
       displayName: displayName.value,
       password: password.value,
-    })
+    }, bootstrapSecret.value)
     if (res.token && res.user) {
+      bootstrapSecret.value = ''
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
@@ -176,6 +178,14 @@ function goBackToLogin() {
           <input v-model="displayName" type="text" required
             class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
             placeholder="你的名稱" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-text-secondary mb-1">初始化密鑰</label>
+          <input v-model="bootstrapSecret" type="password" required autocomplete="new-password"
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
+            placeholder="輸入部署時設定的 Bootstrap secret" />
+          <p class="text-xs text-text-secondary mt-1">此密鑰只會送出至伺服器，不會儲存在瀏覽器。</p>
         </div>
 
         <div>

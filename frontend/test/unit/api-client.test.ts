@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   RequestCancelledError,
+  api,
   configureApiSession,
   request,
 } from '../../src/api'
@@ -24,6 +25,21 @@ describe('central API client', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/test', expect.objectContaining({
       signal: controller.signal,
     }))
+  })
+
+  it('sends the bootstrap secret in its dedicated header without persisting it', async () => {
+    const bootstrapSecret = 'bootstrap-secret-generated-by-the-operator-123456'
+    const fetchMock = createFetchMock(() => jsonResponse({ token: 'token', user: { id: 1 } }))
+
+    await api.auth.register({
+      email: 'owner@example.com',
+      displayName: 'Owner',
+      password: 'Valid!Password123',
+    }, bootstrapSecret)
+
+    const requestInit = fetchMock.mock.calls[0]?.[1]
+    expect(new Headers(requestInit?.headers).get('X-MyExpenses-Bootstrap-Secret')).toBe(bootstrapSecret)
+    expect(localStorage.getItem('bootstrapSecret')).toBeNull()
   })
 
   it('parses ProblemDetails into a typed safe error', async () => {

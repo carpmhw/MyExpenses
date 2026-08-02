@@ -100,6 +100,7 @@ public class AppDbContext : DbContext
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
+    /// <summary>建立 financial entities、authentication entities 與 single-owner database constraints。</summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Category>(e =>
@@ -265,7 +266,14 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<User>(e =>
         {
-            e.ToTable("Users");
+            e.ToTable("Users", table => table.HasCheckConstraint(
+                "CK_Users_InstallationOwnerMarker",
+                $"InstallationOwnerMarker = '{User.SingletonOwnerMarkerValue}'"));
+            e.Property(u => u.InstallationOwnerMarker)
+                .HasMaxLength(50)
+                .HasDefaultValue(User.SingletonOwnerMarkerValue)
+                .IsRequired();
+            e.HasIndex(u => u.InstallationOwnerMarker).IsUnique();
             e.Property(u => u.Email).HasMaxLength(200).IsRequired();
             e.HasIndex(u => u.Email).IsUnique();
             e.Property(u => u.PasswordHash).HasMaxLength(200).IsRequired();
