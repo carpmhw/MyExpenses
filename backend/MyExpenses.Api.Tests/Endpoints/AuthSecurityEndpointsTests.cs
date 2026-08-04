@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Endpoints;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Options;
 using MyExpenses.Api.Services;
 using Xunit;
 
@@ -23,6 +24,122 @@ namespace MyExpenses.Api.Tests.Endpoints;
 
 public class AuthSecurityEndpointsTests
 {
+    private const string BootstrapSecret = "bootstrap-secret-generated-by-the-operator-123456";
+
+    /// <summary>驗證第一位 owner 必須使用設定的 dedicated bootstrap header。</summary>
+    [Fact]
+    public async Task Register_CreatesFirstOwnerWithValidBootstrapSecret()
+    {
+        await using var app = await CreateAuthAppAsync(bootstrapSecret: BootstrapSecret);
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add(BootstrapSecretProvider.HeaderName, BootstrapSecret);
+
+        var response = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            email = "first-owner@example.com",
+            displayName = "First Owner",
+            password = StrongPassword,
+        });
+
+        await AssertStatusCodeAsync(HttpStatusCode.OK, response);
+        using var scope = app.App.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(1, await db.Users.CountAsync());
+    }
+
+    /// <summary>驗證缺少或錯誤的 bootstrap header 不會建立 owner 或洩漏 secret。</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("wrong-bootstrap-secret")]
+    public async Task Register_RejectsMissingOrInvalidBootstrapSecret(string? presentedSecret)
+    {
+        await using var app = await CreateAuthAppAsync(bootstrapSecret: BootstrapSecret);
+        var client = app.App.GetTestClient();
+        if (presentedSecret is not null)
+            client.DefaultRequestHeaders.Add(BootstrapSecretProvider.HeaderName, presentedSecret);
+
+        var response = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            email = "rejected-owner@example.com",
+            displayName = "Rejected Owner",
+            password = StrongPassword,
+        });
+
+        await AssertStatusCodeAsync(HttpStatusCode.Forbidden, response);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(BootstrapSecret, body, StringComparison.Ordinal);
+        using var scope = app.App.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(0, await db.Users.CountAsync());
+    }
+
+    /// <summary>驗證第一位 owner 建立後 registration 永久關閉。</summary>
+    [Fact]
+    public async Task Register_RejectsRequestsAfterInitialization()
+    {
+        await using var app = await CreateAuthAppAsync(bootstrapSecret: BootstrapSecret);
+        await SeedUserAsync(app.App);
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add(BootstrapSecretProvider.HeaderName, BootstrapSecret);
+
+        var response = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            email = "second-owner@example.com",
+            displayName = "Second Owner",
+            password = StrongPassword,
+        });
+
+        await AssertStatusCodeAsync(HttpStatusCode.Forbidden, response);
+        using var scope = app.App.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(1, await db.Users.CountAsync());
+    }
+
+    /// <summary>驗證並發首次 owner request 最終只留下唯一 owner。</summary>
+    [Fact]
+    public async Task Register_ConcurrentFirstOwnerRequestsCreateExactlyOneOwner()
+    {
+        await using var app = await CreateAuthAppAsync(bootstrapSecret: BootstrapSecret);
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add(BootstrapSecretProvider.HeaderName, BootstrapSecret);
+
+        var responses = await Task.WhenAll(
+            Enumerable.Range(0, 2).Select(index => client.PostAsJsonAsync("/api/auth/register", new
+            {
+                email = $"concurrent-owner-{index}@example.com",
+                displayName = $"Concurrent Owner {index}",
+                password = StrongPassword,
+            })));
+
+        Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.OK));
+        Assert.Equal(1, responses.Count(response =>
+            response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Conflict));
+        using var scope = app.App.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(1, await db.Users.CountAsync());
+    }
+
+    /// <summary>驗證 registration 使用 sensitive-authentication rate limiter。</summary>
+    [Fact]
+    public async Task Register_RateLimitsRepeatedBootstrapFailures()
+    {
+        await using var app = await CreateAuthAppAsync(useRateLimiter: true, bootstrapSecret: BootstrapSecret);
+        var client = app.App.GetTestClient();
+
+        HttpResponseMessage response = new(HttpStatusCode.OK);
+        for (var attempt = 0; attempt <= AuthRateLimitPolicy.PermitLimit; attempt++)
+        {
+            response = await client.PostAsJsonAsync("/api/auth/register", new
+            {
+                email = "rate-limit-owner@example.com",
+                displayName = "Rate Limit Owner",
+                password = StrongPassword,
+            });
+        }
+
+        await AssertStatusCodeAsync(HttpStatusCode.TooManyRequests, response);
+    }
+
     /// <summary>Verifies registration rejects passwords that do not meet the shared password policy.</summary>
     [Fact]
     public async Task Register_RejectsWeakPassword()
@@ -88,8 +205,8 @@ public class AuthSecurityEndpointsTests
         };
     }
 
-    /// <summary>Creates a minimal auth test application with SQLite, fake authentication, and optional rate limiting.</summary>
-    private static async Task<TestApp> CreateAuthAppAsync(bool useRateLimiter = false)
+    /// <summary>建立含 SQLite、fake authentication 與可選 rate limiter 的最小 auth test application。</summary>
+    private static async Task<TestApp> CreateAuthAppAsync(bool useRateLimiter = false, string? bootstrapSecret = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -100,6 +217,7 @@ public class AuthSecurityEndpointsTests
         });
         builder.WebHost.UseTestServer();
         builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
+        builder.Services.Configure<BootstrapOptions>(options => options.Secret = bootstrapSecret);
         builder.Services.AddDataProtection();
         builder.Services.AddAuthentication(TestAuthHandler.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });

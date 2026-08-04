@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, inject, onMounted, watch } from 'vue'
+import { ref, computed, inject, watch } from 'vue'
 import { api } from '../../api'
-import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast } from '../../types'
+import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, NetWorthTrendPoint } from '../../types'
 import Card from '../../components/ui/Card.vue'
-import Icon from '../../components/ui/Icon.vue'
+import QueryState from '../../components/ui/QueryState.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
-import { addCalendarDays, getCurrentYearRange, getSystemDateParts } from '../../utils/timezone'
+import { addCalendarDays, getCurrentYearRange } from '../../utils/timezone'
 import { getThemeColor } from '../../utils/themeColor'
 import { useTimeZone } from '../../composables/useTimeZone'
+import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -21,9 +22,17 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineEleme
 const toast = inject<{ error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
 
+// Converts an arbitrary query failure into a safe message for report cards.
+function queryErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '載入資料失敗，請重試。'
+}
+
+// Returns the initial report start date in the configured application time zone.
 function getDefaultStartDate(): string {
   return getCurrentYearRange(new Date(), timeZone.timeZoneId.value).start
 }
+
+// Returns the initial report end date in the configured application time zone.
 function getDefaultEndDate(): string {
   return getCurrentYearRange(new Date(), timeZone.timeZoneId.value).end
 }
@@ -34,12 +43,53 @@ const endDate = ref(getDefaultEndDate())
 const chartType = ref<'bar' | 'line'>('bar')
 const selectedCategory = ref<CategoryDistribution | null>(null)
 
-const trendData = ref<MonthlyTrend[]>([])
-const categoryData = ref<CategoryDistribution[]>([])
-const netWorthData = ref<NetWorth | null>(null)
-const forecastData = ref<MonthlyForecast[]>([])
-const loading = ref(false)
+const trendQuery = useAsyncQuery<MonthlyTrend[]>({
+  key: () => ({ report: 'trend', dateStart: startDate.value, dateEnd: endDate.value }),
+  query: ({ signal }) => api.reports.incomeExpenseTrend(
+    { dateStart: startDate.value, dateEnd: endDate.value },
+    { signal },
+  ),
+  isEmpty: data => data.length === 0,
+  immediate: false,
+})
 
+const categoryQuery = useAsyncQuery<CategoryDistribution[]>({
+  key: () => ({ report: 'category', dateStart: startDate.value, dateEnd: endDate.value }),
+  query: ({ signal }) => api.reports.categoryDistribution(
+    { dateStart: startDate.value, dateEnd: endDate.value },
+    { signal },
+  ),
+  isEmpty: data => data.length === 0,
+  immediate: false,
+})
+
+const netWorthQuery = useAsyncQuery<NetWorth>({
+  key: () => ({ report: 'networth' }),
+  query: ({ signal }) => api.reports.netWorth({ signal }),
+  immediate: false,
+})
+
+const netWorthTrendQuery = useAsyncQuery<NetWorthTrendPoint[]>({
+  key: () => ({ report: 'networth-trend', months: 6 }),
+  query: ({ signal }) => api.reports.netWorthTrend({ months: 6 }, { signal }),
+  isEmpty: data => data.length === 0,
+  immediate: false,
+})
+
+const forecastQuery = useAsyncQuery<MonthlyForecast[]>({
+  key: () => ({ report: 'forecast', months: 6 }),
+  query: ({ signal }) => api.reports.installmentForecast({ months: 6 }, { signal }),
+  isEmpty: data => data.length === 0 || data.every(item => item.totalAmount === 0),
+  immediate: false,
+})
+
+const trendData = computed(() => trendQuery.data.value ?? [])
+const categoryData = computed(() => categoryQuery.data.value ?? [])
+const netWorthData = computed(() => netWorthQuery.data.value ?? null)
+const netWorthTrend = computed(() => netWorthTrendQuery.data.value ?? [])
+const forecastData = computed(() => forecastQuery.data.value ?? [])
+
+// Validates the selected date range and keeps it within the supported report window.
 function validateDateRange() {
   const s = startDate.value
   const e = endDate.value
@@ -78,57 +128,24 @@ const chartColors = computed(() => {
   }
 })
 
-async function loadTrend() {
-  try {
-    trendData.value = await api.reports.incomeExpenseTrend({
-      dateStart: startDate.value,
-      dateEnd: endDate.value,
-    })
-  } catch {
-    toast.error('載入收支趨勢失敗')
+// Starts only the queries required by the visible report tab.
+function loadActiveTab() {
+  if (activeTab.value === 'trend') void trendQuery.refresh()
+  if (activeTab.value === 'category') void categoryQuery.refresh()
+  if (activeTab.value === 'networth') {
+    void netWorthQuery.refresh()
+    void netWorthTrendQuery.refresh()
   }
+  if (activeTab.value === 'forecast') void forecastQuery.refresh()
 }
-
-async function loadCategory() {
-  try {
-    categoryData.value = await api.reports.categoryDistribution({
-      dateStart: startDate.value,
-      dateEnd: endDate.value,
-    })
-  } catch {
-    toast.error('載入類別分布失敗')
-  }
-}
-
-async function loadNetWorth() {
-  try {
-    netWorthData.value = await api.reports.netWorth()
-  } catch {
-    toast.error('載入資產負債失敗')
-  }
-}
-
-async function loadForecast() {
-  try {
-    forecastData.value = await api.reports.installmentForecast({ months: 6 })
-  } catch {
-    toast.error('載入分期預測失敗')
-  }
-}
-
-async function loadAll() {
-  loading.value = true
-  await Promise.all([loadTrend(), loadCategory(), loadNetWorth(), loadForecast()])
-  loading.value = false
-}
-
-onMounted(loadAll)
 
 watch([startDate, endDate], () => {
   validateDateRange()
-  loadTrend()
-  loadCategory()
+  if (activeTab.value === 'trend') void trendQuery.refresh()
+  if (activeTab.value === 'category') void categoryQuery.refresh()
 })
+
+watch(activeTab, loadActiveTab, { immediate: true })
 
 const trendChartData = computed(() => ({
   labels: trendData.value.map(d => d.month),
@@ -259,24 +276,12 @@ const forecastChartOptions = computed(() => ({
   },
 }))
 
-const netWorthTrendLabels = computed(() => {
-  const labels: string[] = []
-  const current = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(current.year, current.month - 1 - i, 1)
-    labels.push(`${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`)
-  }
-  return labels
-})
-
 const netWorthTrendData = computed(() => {
-  const current = netWorthData.value?.netWorth ?? 0
-  const step = current / 6
   return {
-    labels: netWorthTrendLabels.value,
+    labels: netWorthTrend.value.map(point => point.month),
     datasets: [{
       label: '淨值',
-      data: netWorthTrendLabels.value.map((_, i) => step * (i + 1)),
+      data: netWorthTrend.value.map(point => point.netWorth),
       borderColor: chartColors.value.income,
       backgroundColor: chartColors.value.incomeChartBg,
       fill: true,
@@ -313,6 +318,7 @@ const netWorthTrendOptions = computed(() => ({
   },
 }))
 
+// Toggles the selected category without affecting the category query state.
 function selectCategory(item: CategoryDistribution) {
   selectedCategory.value = selectedCategory.value?.categoryId === item.categoryId ? null : item
 }
@@ -363,94 +369,109 @@ function selectCategory(item: CategoryDistribution) {
       </button>
     </div>
 
-    <div v-if="loading" class="flex items-center justify-center py-20">
-      <Icon name="Loader2" :size="32" class="animate-spin text-text-secondary" />
-    </div>
-
     <!-- 收支趨勢 -->
-    <div v-else-if="activeTab === 'trend'">
+    <div v-if="activeTab === 'trend'">
       <Card>
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold text-text-primary">每月收支趨勢</h2>
-          <div class="flex gap-1 bg-bg-raised rounded-lg p-0.5">
-            <button
-              class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
-              :class="chartType === 'bar' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
-              @click="chartType = 'bar'"
-            >長條圖</button>
-            <button
-              class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
-              :class="chartType === 'line' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
-              @click="chartType = 'line'"
-            >折線圖</button>
+        <QueryState
+          :status="trendQuery.status.value"
+          :error-message="queryErrorMessage(trendQuery.error.value)"
+          :empty-message="'暫無收支數據'"
+          :last-success-at="trendQuery.lastSuccessAt.value"
+          :retry="trendQuery.retry"
+        >
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-base font-semibold text-text-primary">每月收支趨勢</h2>
+            <div class="flex gap-1 bg-bg-raised rounded-lg p-0.5">
+              <button
+                class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
+                :class="chartType === 'bar' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+                @click="chartType = 'bar'"
+              >長條圖</button>
+              <button
+                class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
+                :class="chartType === 'line' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+                @click="chartType = 'line'"
+              >折線圖</button>
+            </div>
           </div>
-        </div>
-        <div v-if="trendData.length === 0" class="text-center py-12 text-text-tertiary text-sm">暫無收支數據</div>
-        <div v-else class="h-[360px]">
-          <Bar v-if="chartType === 'bar'" :data="trendChartData" :options="trendChartOptions" />
-          <Line v-else :data="trendChartData" :options="trendChartOptions" />
-        </div>
+          <div class="h-[360px]">
+            <Bar v-if="chartType === 'bar'" :data="trendChartData" :options="trendChartOptions" />
+            <Line v-else :data="trendChartData" :options="trendChartOptions" />
+          </div>
+        </QueryState>
       </Card>
     </div>
 
     <!-- 類別分布 -->
     <div v-else-if="activeTab === 'category'">
       <Card>
-        <h2 class="text-base font-semibold text-text-primary mb-4">支出類別分布</h2>
-        <div v-if="categoryData.length === 0" class="text-center py-12 text-text-tertiary text-sm">暫無支出數據</div>
-        <div v-else class="flex gap-8">
-          <div class="h-[360px] w-[400px] flex-shrink-0">
-            <Doughnut :data="categoryChartData" :options="categoryChartOptions" />
+        <QueryState
+          :status="categoryQuery.status.value"
+          :error-message="queryErrorMessage(categoryQuery.error.value)"
+          :empty-message="'暫無支出數據'"
+          :last-success-at="categoryQuery.lastSuccessAt.value"
+          :retry="categoryQuery.retry"
+        >
+          <h2 class="text-base font-semibold text-text-primary mb-4">支出類別分布</h2>
+          <div class="flex gap-8">
+            <div class="h-[360px] w-[400px] flex-shrink-0">
+              <Doughnut :data="categoryChartData" :options="categoryChartOptions" />
+            </div>
+            <div class="flex-1 space-y-1.5 overflow-y-auto max-h-[360px]">
+              <button
+                v-for="item in categoryData"
+                :key="item.categoryId"
+                class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-bg-raised transition-colors text-left cursor-pointer"
+                :class="selectedCategory?.categoryId === item.categoryId ? 'bg-bg-raised' : ''"
+                @click="selectCategory(item)"
+              >
+                <span
+                  class="w-3 h-3 rounded-full flex-shrink-0"
+                  :style="{ backgroundColor: item.color || chartColors.info }"
+                />
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-medium text-text-primary truncate">{{ item.categoryName }}</div>
+                  <div class="text-xs text-text-secondary">{{ item.percentage.toFixed(1) }}%</div>
+                </div>
+                <div class="text-sm font-medium text-text-primary">{{ formatMoney(item.total) }}</div>
+              </button>
+            </div>
           </div>
-          <div class="flex-1 space-y-1.5 overflow-y-auto max-h-[360px]">
-            <button
-              v-for="item in categoryData"
-              :key="item.categoryId"
-              class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-bg-raised transition-colors text-left cursor-pointer"
-              :class="selectedCategory?.categoryId === item.categoryId ? 'bg-bg-raised' : ''"
-              @click="selectCategory(item)"
-            >
-              <span
-                class="w-3 h-3 rounded-full flex-shrink-0"
-                :style="{ backgroundColor: item.color || chartColors.info }"
-              />
-              <div class="flex-1 min-w-0">
-                <div class="text-sm font-medium text-text-primary truncate">{{ item.categoryName }}</div>
-                <div class="text-xs text-text-secondary">{{ item.percentage.toFixed(1) }}%</div>
-              </div>
-              <div class="text-sm font-medium text-text-primary">{{ formatMoney(item.total) }}</div>
-            </button>
+          <div v-if="selectedCategory" class="mt-4 pt-4 border-t border-border-default">
+            <p class="text-sm font-medium text-text-primary mb-2">選取類別：{{ selectedCategory.categoryName }}</p>
+            <p class="text-xs text-text-secondary">點擊其他類別切換，或再次點擊取消選取</p>
           </div>
-        </div>
-        <div v-if="selectedCategory" class="mt-4 pt-4 border-t border-border-default">
-          <p class="text-sm font-medium text-text-primary mb-2">選取類別：{{ selectedCategory.categoryName }}</p>
-          <p class="text-xs text-text-secondary">點擊其他類別切換，或再次點擊取消選取</p>
-        </div>
+        </QueryState>
       </Card>
     </div>
 
     <!-- 資產負債 -->
     <div v-else-if="activeTab === 'networth'">
-      <div class="grid grid-cols-3 gap-4 mb-6">
-        <Card>
-          <p class="text-xs text-text-secondary mb-1">總資產</p>
-          <p class="text-xl font-bold text-color-income-text">{{ formatMoney(netWorthData?.totalAssets ?? 0) }}</p>
-        </Card>
-        <Card>
-          <p class="text-xs text-text-secondary mb-1">總負債</p>
-          <p class="text-xl font-bold text-color-expense-text">{{ formatMoney(netWorthData?.totalLiabilities ?? 0) }}</p>
-        </Card>
-        <Card>
-          <p class="text-xs text-text-secondary mb-1">淨值</p>
-          <p class="text-xl font-bold" :class="(netWorthData?.netWorth ?? 0) >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
-            {{ formatMoney(netWorthData?.netWorth ?? 0) }}
-          </p>
-        </Card>
-      </div>
-      <div class="grid grid-cols-2 gap-6">
-        <Card>
-          <h3 class="text-sm font-semibold text-text-primary mb-3">銀行帳戶</h3>
-          <table v-if="netWorthData?.bankAccounts.length" class="w-full text-sm">
+      <QueryState
+        :status="netWorthQuery.status.value"
+        :error-message="queryErrorMessage(netWorthQuery.error.value)"
+        :retry="netWorthQuery.retry"
+      >
+        <div class="grid grid-cols-3 gap-4 mb-6">
+          <Card>
+            <p class="text-xs text-text-secondary mb-1">總資產</p>
+            <p class="text-xl font-bold text-color-income-text">{{ formatMoney(netWorthData?.totalAssets ?? 0) }}</p>
+          </Card>
+          <Card>
+            <p class="text-xs text-text-secondary mb-1">總負債</p>
+            <p class="text-xl font-bold text-color-expense-text">{{ formatMoney(netWorthData?.totalLiabilities ?? 0) }}</p>
+          </Card>
+          <Card>
+            <p class="text-xs text-text-secondary mb-1">淨值</p>
+            <p class="text-xl font-bold" :class="(netWorthData?.netWorth ?? 0) >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
+              {{ formatMoney(netWorthData?.netWorth ?? 0) }}
+            </p>
+          </Card>
+        </div>
+        <div class="grid grid-cols-2 gap-6">
+          <Card>
+            <h3 class="text-sm font-semibold text-text-primary mb-3">銀行帳戶</h3>
+            <table v-if="netWorthData?.bankAccounts.length" class="w-full text-sm">
             <thead>
               <tr class="border-b border-border-default">
                 <th class="text-left py-2 text-text-secondary font-medium">銀行</th>
@@ -466,11 +487,11 @@ function selectCategory(item: CategoryDistribution) {
               </tr>
             </tbody>
           </table>
-          <p v-else class="text-sm text-text-tertiary py-4 text-center">無銀行帳戶資料</p>
-        </Card>
-        <Card>
-          <h3 class="text-sm font-semibold text-text-primary mb-3">股票持倉（預估賣出淨值）</h3>
-          <table v-if="netWorthData?.stocks.length" class="w-full text-sm">
+            <p v-else class="text-sm text-text-tertiary py-4 text-center">無銀行帳戶資料</p>
+          </Card>
+          <Card>
+            <h3 class="text-sm font-semibold text-text-primary mb-3">股票持倉（預估賣出淨值）</h3>
+            <table v-if="netWorthData?.stocks.length" class="w-full text-sm">
             <thead>
               <tr class="border-b border-border-default">
                 <th class="text-left py-2 text-text-secondary font-medium">名稱</th>
@@ -490,29 +511,48 @@ function selectCategory(item: CategoryDistribution) {
               </tr>
             </tbody>
           </table>
-          <p v-else class="text-sm text-text-tertiary py-4 text-center">無股票資料</p>
-        </Card>
-      </div>
-      <Card class="mt-6">
-        <h3 class="text-sm font-semibold text-text-primary mb-4">近 6 個月淨值趨勢</h3>
-        <div class="h-[300px]">
-          <Line :data="netWorthTrendData" :options="netWorthTrendOptions" />
+            <p v-else class="text-sm text-text-tertiary py-4 text-center">無股票資料</p>
+          </Card>
         </div>
+      </QueryState>
+      <Card class="mt-6">
+        <QueryState
+          :status="netWorthTrendQuery.status.value"
+          :error-message="queryErrorMessage(netWorthTrendQuery.error.value)"
+          :empty-message="'尚無完整淨值歷史'"
+          :last-success-at="netWorthTrendQuery.lastSuccessAt.value"
+          :retry="netWorthTrendQuery.retry"
+        >
+          <h3 class="text-sm font-semibold text-text-primary mb-4">近 6 個月淨值趨勢</h3>
+          <div v-if="netWorthTrend.length === 1" class="h-[300px] flex flex-col items-center justify-center gap-2 text-text-tertiary text-sm">
+            <span>目前只有 1 筆完整快照</span>
+            <span>尚不足以形成趨勢</span>
+          </div>
+          <div v-else class="h-[300px]">
+            <Line :data="netWorthTrendData" :options="netWorthTrendOptions" />
+          </div>
+        </QueryState>
       </Card>
     </div>
 
     <!-- 分期預測 -->
     <div v-else-if="activeTab === 'forecast'">
       <Card>
-        <h2 class="text-base font-semibold text-text-primary mb-4">未來 6 個月分期應繳預測</h2>
-        <div v-if="forecastData.length === 0 || forecastData.every(f => f.totalAmount === 0)" class="text-center py-12 text-text-tertiary text-sm">暫無分期預測數據</div>
-        <template v-else>
-          <div class="h-[360px]">
-            <Bar :data="forecastChartData" :options="forecastChartOptions" />
-          </div>
-          <div v-for="month in forecastData.filter(f => f.totalAmount > 0)" :key="month.month" class="mt-6 pt-4 border-t border-border-default">
-            <h3 class="text-sm font-semibold text-text-primary mb-2">{{ month.month }} - 共 {{ formatMoney(month.totalAmount) }}</h3>
-            <table class="w-full text-sm">
+        <QueryState
+          :status="forecastQuery.status.value"
+          :error-message="queryErrorMessage(forecastQuery.error.value)"
+          :empty-message="'暫無分期預測數據'"
+          :last-success-at="forecastQuery.lastSuccessAt.value"
+          :retry="forecastQuery.retry"
+        >
+          <h2 class="text-base font-semibold text-text-primary mb-4">未來 6 個月分期應繳預測</h2>
+          <template>
+            <div class="h-[360px]">
+              <Bar :data="forecastChartData" :options="forecastChartOptions" />
+            </div>
+            <div v-for="month in forecastData.filter(f => f.totalAmount > 0)" :key="month.month" class="mt-6 pt-4 border-t border-border-default">
+              <h3 class="text-sm font-semibold text-text-primary mb-2">{{ month.month }} - 共 {{ formatMoney(month.totalAmount) }}</h3>
+              <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-border-default">
                   <th class="text-left py-2 text-text-secondary font-medium">信用卡</th>
@@ -531,9 +571,10 @@ function selectCategory(item: CategoryDistribution) {
                   <td class="py-2 text-right text-text-primary">{{ p.dueDate }}</td>
                 </tr>
               </tbody>
-            </table>
-          </div>
-        </template>
+              </table>
+            </div>
+          </template>
+        </QueryState>
       </Card>
     </div>
   </div>

@@ -6,7 +6,10 @@ public class SnapshotBatch
     public string Name { get; set; } = string.Empty;
     public DateTime SnapshotDate { get; set; }
     public string? Notes { get; set; }
+    public decimal TotalAssets { get; set; }
+    public decimal? TotalLiabilities { get; set; }
     public decimal TotalNetWorth { get; set; }
+    public NetWorthBasis NetWorthBasis { get; set; } = NetWorthBasis.AssetsOnly;
     public decimal TotalBankBalance { get; set; }
     public decimal TotalStockValue { get; set; }
     public decimal TotalStockCost { get; set; }

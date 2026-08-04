@@ -59,18 +59,24 @@ public class SnapshotBackgroundService : BackgroundService
             return;
 
         var localNow = _timeZoneService.ConvertUtcToLocal(nowUtc);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var bankAccounts = await db.BankAccounts.ToListAsync(cancellationToken);
         var stocks = await db.Stocks.ToListAsync(cancellationToken);
+        var totalLiabilities = await db.InstallmentPayments
+            .Where(payment => !payment.IsPaid)
+            .SumAsync(payment => (decimal?)payment.Amount, cancellationToken) ?? 0m;
         var snapshot = FinancialSnapshotBuilder.Build(
             BuildAutomaticSnapshotName(localNow),
             "系統自動建立",
             nowUtc,
             bankAccounts,
-            stocks);
+            stocks,
+            totalLiabilities);
 
         db.SnapshotBatches.Add(snapshot);
         config.LastRunAt = nowUtc;
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         _logger.LogInformation("Auto snapshot created: {Id} at {Date}", snapshot.Id, nowUtc);
     }

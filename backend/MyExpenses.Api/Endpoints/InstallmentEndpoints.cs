@@ -9,254 +9,266 @@ namespace MyExpenses.Api.Endpoints;
 
 public static class InstallmentEndpoints
 {
+    /// <summary>Maps installment queries and atomic financial command endpoints.</summary>
     public static void MapInstallmentEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/api/installments");
-
-        group.MapGet("/", async (int? page, int? pageSize, int? cardId, DateOnly? dateStart, DateOnly? dateEnd, string? status, AppDbContext db) =>
+        app.MapPost("/api/installment-purchases", async (
+            InstallmentPurchaseRequest request,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+            InstallmentCommandService commandService,
+            CancellationToken cancellationToken) =>
         {
-            var query = db.Installments
-                .Include(i => i.Transaction)
-                .Include(i => i.Card)
-                .Include(i => i.Payments)
-                .AsQueryable();
-
-            if (cardId.HasValue)
-                query = query.Where(i => i.CardId == cardId.Value);
-
-            var hasDateFilter = dateStart.HasValue || dateEnd.HasValue;
-            InstallmentStatus statusFilter = InstallmentStatus.Active;
-            var hasExplicitStatus = !string.IsNullOrEmpty(status) && Enum.TryParse<InstallmentStatus>(status, true, out statusFilter);
-
-            if (hasDateFilter)
-            {
-                if (hasExplicitStatus)
-                {
-                    if (dateStart.HasValue)
-                        query = query.Where(i => i.PurchaseDate >= dateStart.Value);
-                    if (dateEnd.HasValue)
-                        query = query.Where(i => i.PurchaseDate <= dateEnd.Value);
-                }
-                else
-                {
-                    if (dateStart.HasValue && dateEnd.HasValue)
-                        query = query.Where(i => (i.PurchaseDate >= dateStart.Value && i.PurchaseDate <= dateEnd.Value) || i.Status == InstallmentStatus.Active);
-                    else if (dateStart.HasValue)
-                        query = query.Where(i => i.PurchaseDate >= dateStart.Value || i.Status == InstallmentStatus.Active);
-                    else
-                        query = query.Where(i => i.PurchaseDate <= dateEnd!.Value || i.Status == InstallmentStatus.Active);
-                }
-            }
-
-            if (hasExplicitStatus)
-                query = query.Where(i => i.Status == statusFilter);
-
-            var total = await query.CountAsync();
-            var p = PaginationPolicy.NormalizePage(page);
-            var ps = PaginationPolicy.NormalizePageSize(pageSize);
-
-            var items = await query
-                .OrderByDescending(i => i.PurchaseDate)
-                .ThenByDescending(i => i.CreatedAt)
-                .Skip((p - 1) * ps)
-                .Take(ps)
-                .ToListAsync();
-
-            return Results.Ok(new { items, total, page = p, pageSize = ps });
-        });
-
-        group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
-        {
-            var installment = await db.Installments
-                .Include(i => i.Transaction)
-                .Include(i => i.Card)
-                .Include(i => i.Payments.OrderBy(p => p.Period))
-                .FirstOrDefaultAsync(i => i.Id == id);
-
-            return installment is not null ? Results.Ok(installment) : Results.NotFound();
-        });
-
-        group.MapPost("/", async (Installment installment, AppDbContext db) =>
-        {
-            if (installment.PurchaseDate == default)
-                return Results.BadRequest(new { error = "請選擇刷卡日期" });
-            if (installment.Periods <= 0)
-                return Results.BadRequest(new { error = "期數必須大於 0" });
-
-            installment.CreatedAt = DateTime.UtcNow;
-            installment.RemainingPeriods = installment.Periods;
-            installment.Status = InstallmentStatus.Active;
-            installment.PerPeriod = Math.Floor(installment.TotalAmount / installment.Periods);
-
-            CreditCard? card = null;
-            if (installment.CardId.HasValue)
-                card = await db.CreditCards.FindAsync(installment.CardId.Value);
-
-            db.Installments.Add(installment);
-            await db.SaveChangesAsync();
-
-            var perPeriod = installment.PerPeriod;
-            var remainder = installment.TotalAmount - perPeriod * installment.Periods;
-
-            for (int p = 1; p <= installment.Periods; p++)
-            {
-                var amount = p == installment.Periods ? perPeriod + remainder : perPeriod;
-
-                DateOnly? dueDate = null;
-                if (card is not null)
-                    dueDate = InstallmentScheduleCalculator.CalculateDueDate(installment.PurchaseDate, card.StatementDay, card.DueDay, p);
-
-                db.InstallmentPayments.Add(new InstallmentPayment
-                {
-                    InstallmentId = installment.Id,
-                    Period = p,
-                    Amount = amount,
-                    IsPaid = false,
-                    DueDate = dueDate,
-                });
-            }
-
-            await db.SaveChangesAsync();
-
-            var result = await db.Installments
-                .Include(i => i.Transaction)
-                .Include(i => i.Card)
-                .Include(i => i.Payments)
-                .FirstAsync(i => i.Id == installment.Id);
-
-            return Results.Created($"/api/installments/{installment.Id}", result);
-        });
-
-        group.MapPut("/{id:int}", async (int id, Installment input, AppDbContext db) =>
-        {
-            var installment = await db.Installments
-                .Include(i => i.Payments)
-                .FirstOrDefaultAsync(i => i.Id == id);
-
-            if (installment is null) return Results.NotFound();
-
-            if (input.PurchaseDate == default)
-                return Results.BadRequest(new { error = "請選擇刷卡日期" });
-            if (input.Periods <= 0)
-                return Results.BadRequest(new { error = "期數必須大於 0" });
-
-            var hasPaidPayments = installment.Payments.Any(p => p.IsPaid);
-
-            if (hasPaidPayments)
-            {
-                if (input.TotalAmount != installment.TotalAmount)
-                    return Results.BadRequest(new { error = "已有繳款記錄，不可修改總金額" });
-                if (input.Periods != installment.Periods)
-                    return Results.BadRequest(new { error = "已有繳款記錄，不可修改期數" });
-                if (input.CardId != installment.CardId)
-                    return Results.BadRequest(new { error = "已有繳款記錄，不可修改信用卡" });
-                if (input.PurchaseDate != installment.PurchaseDate)
-                    return Results.BadRequest(new { error = "已有繳款記錄，不可修改刷卡日期" });
-            }
-
-            installment.TotalAmount = input.TotalAmount;
-            installment.Periods = input.Periods;
-            installment.PerPeriod = Math.Floor(input.TotalAmount / input.Periods);
-            installment.PurchaseDate = input.PurchaseDate;
-            installment.Description = input.Description;
-            installment.CardId = input.CardId;
-
-            CreditCard? card = null;
-            if (input.CardId.HasValue)
-                card = await db.CreditCards.FindAsync(input.CardId.Value);
-
-            var paidPayments = installment.Payments.Where(p => p.IsPaid).ToList();
-            var unpaidPayments = installment.Payments.Where(p => !p.IsPaid).ToList();
-            var paidCount = paidPayments.Count;
-
-            db.InstallmentPayments.RemoveRange(unpaidPayments);
-
-            var unpaidCount = input.Periods - paidCount;
-
-            if (unpaidCount > 0)
-            {
-                var unpaidTotal = input.TotalAmount - paidPayments.Sum(p => p.Amount);
-                if (unpaidTotal < 0) unpaidTotal = 0;
-
-                var perPeriod = unpaidTotal > 0 ? Math.Floor(unpaidTotal / unpaidCount) : 0;
-                var remainder = unpaidTotal - perPeriod * unpaidCount;
-
-                for (int p = 1; p <= unpaidCount; p++)
-                {
-                    var amount = p == unpaidCount ? perPeriod + remainder : perPeriod;
-                    var periodIndex = paidCount + p;
-
-                    DateOnly? dueDate = null;
-                    if (card is not null)
-                        dueDate = InstallmentScheduleCalculator.CalculateDueDate(installment.PurchaseDate, card.StatementDay, card.DueDay, periodIndex);
-
-                    db.InstallmentPayments.Add(new InstallmentPayment
-                    {
-                        InstallmentId = id,
-                        Period = periodIndex,
-                        Amount = amount,
-                        IsPaid = false,
-                        DueDate = dueDate,
-                    });
-                }
-            }
-
-            installment.RemainingPeriods = unpaidCount > 0 ? unpaidCount : 0;
-            installment.Status = installment.RemainingPeriods == 0 ? InstallmentStatus.PaidOff : InstallmentStatus.Active;
-
-            await db.SaveChangesAsync();
-
-            var result = await db.Installments
-                .Include(i => i.Transaction)
-                .Include(i => i.Card)
-                .Include(i => i.Payments.OrderBy(p => p.Period))
-                .FirstAsync(i => i.Id == id);
-
-            return Results.Ok(result);
-        });
-
-        group.MapDelete("/{id:int}", async (int id, AppDbContext db) =>
-        {
-            var installment = await db.Installments.FindAsync(id);
-            if (installment is null) return Results.NotFound();
-
-            db.Installments.Remove(installment);
-            await db.SaveChangesAsync();
-            return Results.NoContent();
-        });
-
-        group.MapPatch("/{id:int}/payments/{paymentId:int}", async (int id, int paymentId, [FromBody] MarkInstallmentPaymentRequest? request, AppDbContext db) =>
-        {
-            var payment = await db.InstallmentPayments
-                .FirstOrDefaultAsync(p => p.Id == paymentId && p.InstallmentId == id);
-
-            if (payment is null) return Results.NotFound();
-
             try
             {
-                InstallmentPaymentMarker.TogglePaid(payment, request?.PaidDate);
+                var result = await commandService.CreateInstallmentPurchaseAsync(
+                    request,
+                    idempotencyKey,
+                    cancellationToken);
+                return Results.Created($"/api/installments/{result.Installment.Id}", result);
             }
-            catch (ArgumentException e)
+            catch (FinancialCommandException exception)
             {
-                return Results.BadRequest(new { error = e.Message });
+                return ToProblem(exception);
             }
+        }).RequireApiTokenScope(ApiTokenScopes.TransactionsWrite);
 
-            await db.SaveChangesAsync();
+        var group = app.MapGroup("/api/installments");
 
-            var installment = await db.Installments.FindAsync(id);
-            if (installment is not null)
+        group.MapGet("/", async (
+            int? page,
+            int? pageSize,
+            int? cardId,
+            DateOnly? dateStart,
+            DateOnly? dateEnd,
+            string? status,
+            AppDbContext db,
+            TimeZoneService timeZoneService,
+            CancellationToken cancellationToken) =>
+            Results.Ok(await ListInstallmentsAsync(
+                page,
+                pageSize,
+                cardId,
+                dateStart,
+                dateEnd,
+                status,
+                db,
+                timeZoneService,
+                cancellationToken)))
+            .RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
+
+        group.MapGet("/{id:int}", async (int id, AppDbContext db, CancellationToken cancellationToken) =>
+        {
+            var installment = await db.Installments
+                .Include(item => item.Transaction).ThenInclude(item => item!.Category)
+                .Include(item => item.Transaction).ThenInclude(item => item!.PaymentMethod)
+                .Include(item => item.Card)
+                .Include(item => item.Payments.OrderBy(payment => payment.Period))
+                .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+            return installment is not null ? Results.Ok(installment) : Results.NotFound();
+        }).RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
+
+        group.MapPost("/", async (
+            CreateStandaloneInstallmentRequest request,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+            InstallmentCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            try
             {
-                installment.RemainingPeriods = await db.InstallmentPayments
-                    .CountAsync(p => p.InstallmentId == id && !p.IsPaid);
-
-                installment.Status = installment.RemainingPeriods == 0
-                    ? InstallmentStatus.PaidOff
-                    : InstallmentStatus.Active;
-
-                await db.SaveChangesAsync();
+                var installment = await commandService.CreateStandaloneInstallmentAsync(
+                    request,
+                    idempotencyKey,
+                    cancellationToken);
+                return Results.Created($"/api/installments/{installment.Id}", installment);
             }
+            catch (FinancialCommandException exception)
+            {
+                return ToProblem(exception);
+            }
+        }).RequireApiTokenScope(ApiTokenScopes.TransactionsWrite);
 
-            return Results.Ok(payment);
-        });
+        group.MapPut("/{id:int}", async (
+            int id,
+            UpdateInstallmentScheduleRequest request,
+            InstallmentCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var installment = await commandService.UpdateInstallmentScheduleAsync(id, request, cancellationToken);
+                return Results.Ok(installment);
+            }
+            catch (FinancialCommandException exception)
+            {
+                return ToProblem(exception);
+            }
+        }).RequireApiTokenScope(ApiTokenScopes.TransactionsWrite);
+
+        group.MapDelete("/{id:int}", async (int id, AppDbContext db, CancellationToken cancellationToken) =>
+        {
+            var installment = await db.Installments.FindAsync([id], cancellationToken);
+            if (installment is null)
+                return Results.NotFound();
+
+            db.Installments.Remove(installment);
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.NoContent();
+        }).RequireApiTokenScope(ApiTokenScopes.TransactionsDelete);
+
+        group.MapPatch("/{id:int}/payments/{paymentId:int}", async (
+            int id,
+            int paymentId,
+            SetInstallmentPaymentStateRequest? request,
+            InstallmentCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                if (request is null)
+                    throw new FinancialCommandException(400, "Invalid financial command", "付款狀態不可為空");
+
+                var installment = await commandService.SetInstallmentPaymentStateAsync(
+                    id,
+                    paymentId,
+                    request,
+                    cancellationToken);
+                return Results.Ok(installment);
+            }
+            catch (FinancialCommandException exception)
+            {
+                return ToProblem(exception);
+            }
+        }).RequireApiTokenScope(ApiTokenScopes.TransactionsWrite);
     }
+
+    /// <summary>Returns a paginated installment list with complete filtered counts and due-payment aggregates.</summary>
+    public static async Task<InstallmentListResponse> ListInstallmentsAsync(
+        int? page,
+        int? pageSize,
+        int? cardId,
+        DateOnly? dateStart,
+        DateOnly? dateEnd,
+        string? status,
+        AppDbContext db,
+        TimeZoneService? timeZoneService = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = BuildFilteredQuery(db, cardId, dateStart, dateEnd, status);
+        var totalCount = await query.CountAsync(cancellationToken);
+        var activeCount = await query
+            .CountAsync(installment => installment.Payments.Any(payment => !payment.IsPaid), cancellationToken);
+
+        var localDate = timeZoneService?.GetLocalDate() ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var currentMonthStart = new DateOnly(localDate.Year, localDate.Month, 1);
+        var currentMonthEnd = currentMonthStart.AddMonths(1).AddDays(-1);
+        var matchingInstallmentIds = query.Select(installment => installment.Id);
+        var duePayments = db.InstallmentPayments
+            .Where(payment =>
+                !payment.IsPaid
+                && payment.DueDate.HasValue
+                && payment.DueDate.Value >= currentMonthStart
+                && payment.DueDate.Value <= currentMonthEnd
+                && matchingInstallmentIds.Contains(payment.InstallmentId));
+        var dueAmount = await duePayments
+            .SumAsync(payment => (decimal?)payment.Amount, cancellationToken) ?? 0m;
+        var duePaymentCount = await duePayments.CountAsync(cancellationToken);
+
+        var normalizedPage = PaginationPolicy.NormalizePage(page);
+        var normalizedPageSize = PaginationPolicy.NormalizePageSize(pageSize);
+        var items = await query
+            .Include(installment => installment.Transaction)
+            .Include(installment => installment.Card)
+            .Include(installment => installment.Payments.OrderBy(payment => payment.Period))
+            .OrderByDescending(installment => installment.PurchaseDate)
+            .ThenByDescending(installment => installment.CreatedAt)
+            .ThenByDescending(installment => installment.Id)
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
+            .ToListAsync(cancellationToken);
+
+        return new InstallmentListResponse(
+            items,
+            totalCount,
+            normalizedPage,
+            normalizedPageSize,
+            new InstallmentListSummary(totalCount, activeCount, dueAmount, duePaymentCount));
+    }
+
+    /// <summary>Builds the unpaged installment query shared by item and summary calculations.</summary>
+    private static IQueryable<Installment> BuildFilteredQuery(
+        AppDbContext db,
+        int? cardId,
+        DateOnly? dateStart,
+        DateOnly? dateEnd,
+        string? status)
+    {
+        var query = db.Installments.AsQueryable();
+
+        if (cardId.HasValue)
+            query = query.Where(installment => installment.CardId == cardId.Value);
+
+        var hasDateFilter = dateStart.HasValue || dateEnd.HasValue;
+        var statusFilter = InstallmentStatus.Active;
+        var hasExplicitStatus = !string.IsNullOrEmpty(status)
+            && Enum.TryParse(status, true, out statusFilter);
+
+        if (hasDateFilter)
+        {
+            if (hasExplicitStatus)
+            {
+                if (dateStart.HasValue)
+                    query = query.Where(installment => installment.PurchaseDate >= dateStart.Value);
+                if (dateEnd.HasValue)
+                    query = query.Where(installment => installment.PurchaseDate <= dateEnd.Value);
+            }
+            else if (dateStart.HasValue && dateEnd.HasValue)
+            {
+                query = query.Where(installment =>
+                    (installment.PurchaseDate >= dateStart.Value && installment.PurchaseDate <= dateEnd.Value)
+                    || installment.Payments.Any(payment => !payment.IsPaid));
+            }
+            else if (dateStart.HasValue)
+            {
+                query = query.Where(installment =>
+                    installment.PurchaseDate >= dateStart.Value
+                    || installment.Payments.Any(payment => !payment.IsPaid));
+            }
+            else
+            {
+                query = query.Where(installment =>
+                    installment.PurchaseDate <= dateEnd!.Value
+                    || installment.Payments.Any(payment => !payment.IsPaid));
+            }
+        }
+
+        if (hasExplicitStatus)
+        {
+            query = statusFilter == InstallmentStatus.Active
+                ? query.Where(installment => installment.Payments.Any(payment => !payment.IsPaid))
+                : query.Where(installment => !installment.Payments.Any(payment => !payment.IsPaid));
+        }
+
+        return query;
+    }
+
+    /// <summary>Maps an expected financial command failure to a safe ProblemDetails response.</summary>
+    private static IResult ToProblem(FinancialCommandException exception)
+        => Results.Problem(
+            statusCode: exception.StatusCode,
+            title: exception.Title,
+            detail: exception.Detail);
 }
+
+public sealed record InstallmentListResponse(
+    IReadOnlyList<Installment> Items,
+    int Total,
+    int Page,
+    int PageSize,
+    InstallmentListSummary Summary);
+
+public sealed record InstallmentListSummary(
+    int TotalCount,
+    int ActiveCount,
+    decimal DueAmount,
+    int DuePaymentCount);

@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import Modal from './Modal.vue'
 import Icon from './Icon.vue'
+import { pickerIconNames } from './icon-registry'
 
 const props = withDefaults(defineProps<{
   modelValue?: string
@@ -16,27 +17,7 @@ const open = ref(false)
 const search = ref('')
 const selected = ref(props.modelValue ?? '')
 
-const icons = [
-  'Wallet', 'Banknote', 'CreditCard', 'Building2', 'DollarSign', 'Percent',
-  'TrendingUp', 'TrendingDown', 'BarChart3', 'PieChart', 'Activity', 'Target',
-  'Utensils', 'Coffee', 'Pizza', 'Apple', 'Cake',
-  'Car', 'Train', 'Bus', 'Bike', 'Plane', 'Navigation',
-  'Home', 'ShoppingCart', 'BaggageClaim', 'Gift', 'Package',
-  'Smartphone', 'Laptop', 'Tv', 'Gamepad2', 'Music', 'Headphones', 'Camera', 'Film',
-  'BookOpen', 'GraduationCap', 'Pen', 'FileText',
-  'HeartPulse', 'Pill', 'Stethoscope', 'Activity',
-  'Briefcase', 'Users', 'User', 'Building',
-  'MoreHorizontal', 'Settings', 'HelpCircle', 'Info', 'AlertCircle',
-  'CheckCircle', 'XCircle', 'PlusCircle', 'MinusCircle',
-  'Sun', 'Moon', 'Cloud', 'Umbrella', 'Zap', 'Droplets', 'Flame',
-  'Star', 'Heart', 'Smile', 'Frown',
-  'Search', 'Plus', 'Minus', 'Check', 'X', 'ArrowUp', 'ArrowDown',
-  'RefreshCw', 'Download', 'Upload', 'Share2', 'ExternalLink',
-  'MapPin', 'Calendar', 'Clock', 'Bell', 'Mail',
-  'Trash2', 'Edit3', 'Copy', 'Save', 'Printer',
-  'Lock', 'Unlock', 'Eye', 'EyeOff', 'Shield',
-  'Link2', 'Paperclip', 'Image', 'Video', 'Volume2',
-]
+const icons = pickerIconNames
 
 const filteredIcons = computed(() => {
   const q = search.value.toLowerCase().trim()

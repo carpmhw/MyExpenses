@@ -46,6 +46,27 @@ public class SessionCookieMiddlewareTests
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
     }
 
+    /// <summary>驗證無效 session cookie 不會把例外型別、訊息或 cookie 內容回傳給 client。</summary>
+    [Fact]
+    public async Task InvokeAsync_DoesNotExposeSessionCookieValidationDetails()
+    {
+        var middleware = new SessionCookieMiddleware(
+            _ => Task.CompletedTask,
+            NullLogger<SessionCookieMiddleware>.Instance);
+        var context = CreateHttpContextWithUser();
+        const string forgedCookie = "not-a-valid-cookie-value";
+        context.Request.Headers.Cookie = $"mx_session={forgedCookie}";
+
+        await middleware.InvokeAsync(context, new EphemeralDataProtectionProvider());
+
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body);
+        var responseBody = await reader.ReadToEndAsync();
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal("Session cookie invalid", responseBody);
+        Assert.DoesNotContain(forgedCookie, responseBody, StringComparison.Ordinal);
+    }
+
     /// <summary>Creates an HTTP context with an authenticated user and optional extra claims.</summary>
     private static DefaultHttpContext CreateHttpContextWithUser(params Claim[] extraClaims)
     {

@@ -1,3 +1,5 @@
+import type { SnapshotBatch } from '../types'
+
 export interface SnapshotDateRange {
   dateStart: string
   dateEnd: string
@@ -16,6 +18,11 @@ const MAX_SNAPSHOT_RANGE_YEARS = 5
 export function formatSnapshotAccountSuffix(value: string | null | undefined): string {
   const suffix = (value ?? '').trim()
   return suffix || '未提供'
+}
+
+// Determines whether a snapshot safely contains the historical liability basis needed for net worth.
+export function hasCompleteNetWorthBasis(snapshot: Pick<SnapshotBatch, 'netWorthBasis' | 'totalLiabilities'>): boolean {
+  return snapshot.netWorthBasis === 'AssetsMinusLiabilities' && snapshot.totalLiabilities !== null
 }
 
 // Creates the snapshot page default range from one year before the system-local today through today.

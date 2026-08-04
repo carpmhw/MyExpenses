@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildSnapshotQuery } from '../src/api/index.ts'
-import { coerceSnapshotDateRange, createDefaultSnapshotDateRange, formatSnapshotAccountSuffix } from '../src/utils/snapshot.ts'
+import { coerceSnapshotDateRange, createDefaultSnapshotDateRange, formatSnapshotAccountSuffix, hasCompleteNetWorthBasis } from '../src/utils/snapshot.ts'
 
 // Verifies snapshot list/trend query strings include date range filters when provided.
 test('buildSnapshotQuery includes date range filters', () => {
@@ -123,4 +123,11 @@ test('formatSnapshotAccountSuffix preserves the stored five-digit suffix', () =>
 test('formatSnapshotAccountSuffix handles blank suffixes', () => {
   assert.equal(formatSnapshotAccountSuffix(null), '未提供')
   assert.equal(formatSnapshotAccountSuffix('   '), '未提供')
+})
+
+// Verifies legacy and malformed snapshots cannot expose a complete historical net worth.
+test('hasCompleteNetWorthBasis requires a non-null liability total', () => {
+  assert.equal(hasCompleteNetWorthBasis({ netWorthBasis: 'AssetsOnly', totalLiabilities: null }), false)
+  assert.equal(hasCompleteNetWorthBasis({ netWorthBasis: 'AssetsMinusLiabilities', totalLiabilities: null }), false)
+  assert.equal(hasCompleteNetWorthBasis({ netWorthBasis: 'AssetsMinusLiabilities', totalLiabilities: 0 }), true)
 })

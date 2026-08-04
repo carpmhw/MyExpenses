@@ -31,4 +31,24 @@ public class InstallmentScheduleCalculatorTests
 
         Assert.Equal(new DateOnly(2026, 2, 28), dueDate);
     }
+
+    /// <summary>Verifies installment amounts use the final period to absorb the remainder.</summary>
+    [Fact]
+    public void CalculateAmounts_AssignsRemainderToFinalPeriod()
+    {
+        var amounts = InstallmentScheduleCalculator.CalculateAmounts(100m, 3);
+
+        Assert.Equal(new[] { 33m, 33m, 34m }, amounts);
+    }
+
+    /// <summary>Verifies schedule amount calculation rejects non-positive totals and periods.</summary>
+    [Theory]
+    [InlineData(0, 3)]
+    [InlineData(-1, 3)]
+    [InlineData(100, 0)]
+    [InlineData(100, 1)]
+    public void CalculateAmounts_RejectsInvalidInput(decimal totalAmount, int periods)
+    {
+        Assert.Throws<ArgumentException>(() => InstallmentScheduleCalculator.CalculateAmounts(totalAmount, periods));
+    }
 }

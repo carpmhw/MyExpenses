@@ -12,6 +12,7 @@ namespace MyExpenses.Api.Migrations
     [DbContext(typeof(AppDbContext))]
     partial class AppDbContextModelSnapshot : ModelSnapshot
     {
+        /// <summary>建立目前應用程式使用的 EF Core model snapshot。</summary>
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
@@ -250,6 +251,46 @@ namespace MyExpenses.Api.Migrations
                     b.ToTable("CreditCardBills", (string)null);
                 });
 
+            modelBuilder.Entity("MyExpenses.Api.Models.IdempotencyRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("InstallmentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(36)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TransactionId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.HasIndex("Operation", "RequestHash");
+
+                    b.ToTable("IdempotencyRecords", (string)null);
+                });
+
             modelBuilder.Entity("MyExpenses.Api.Models.Installment", b =>
                 {
                     b.Property<int>("Id")
@@ -273,14 +314,6 @@ namespace MyExpenses.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateOnly>("PurchaseDate")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("RemainingPeriods")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("TotalAmount")
@@ -326,7 +359,10 @@ namespace MyExpenses.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("InstallmentId");
+                    b.HasIndex("InstallmentId", "IsPaid");
+
+                    b.HasIndex("InstallmentId", "Period")
+                        .IsUnique();
 
                     b.ToTable("InstallmentPayments", (string)null);
                 });
@@ -378,6 +414,11 @@ namespace MyExpenses.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("NetWorthBasis")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
@@ -385,7 +426,13 @@ namespace MyExpenses.Api.Migrations
                     b.Property<DateTime>("SnapshotDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal>("TotalAssets")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal>("TotalBankBalance")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("TotalLiabilities")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("TotalNetWorth")
@@ -527,6 +574,13 @@ namespace MyExpenses.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("InstallationOwnerMarker")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("myexpenses-owner");
+
                     b.Property<bool>("IsTwoFactorEnabled")
                         .HasColumnType("INTEGER");
 
@@ -554,7 +608,13 @@ namespace MyExpenses.Api.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("Users", (string)null);
+                    b.HasIndex("InstallationOwnerMarker")
+                        .IsUnique();
+
+                    b.ToTable("Users", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Users_InstallationOwnerMarker", "InstallationOwnerMarker = 'myexpenses-owner'");
+                        });
                 });
 
             modelBuilder.Entity("MyExpenses.Api.Models.Withdrawal", b =>

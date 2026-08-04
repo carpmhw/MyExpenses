@@ -9,12 +9,14 @@ public class SessionCookieMiddleware
     private readonly RequestDelegate _next;
     private readonly ILogger<SessionCookieMiddleware> _logger;
 
+    /// <summary>建立使用指定 request delegate 與 logger 的 session cookie middleware。</summary>
     public SessionCookieMiddleware(RequestDelegate next, ILogger<SessionCookieMiddleware> logger)
     {
         _next = next;
         _logger = logger;
     }
 
+    /// <summary>驗證 browser session cookie，但不把 cookie 明文或解密內容寫入 log。</summary>
     public async Task InvokeAsync(HttpContext context, IDataProtectionProvider dataProtection)
     {
         if (ApiTokenAuthenticationFeature.IsAuthenticated(context))
@@ -52,9 +54,6 @@ public class SessionCookieMiddleware
                 var jwtUserId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
                 var jwtJwtExp = context.User.FindFirstValue("jwtExp");
 
-                _logger.LogDebug("Session cookie decrypted: cookie({UserId}:{Exp}) jwt({JwtUserId}:{JwtExp})",
-                    cookieUserId, cookieJwtExp, jwtUserId, jwtJwtExp);
-
                 if (cookieUserId != jwtUserId || cookieJwtExp != jwtJwtExp)
                 {
                     throw new InvalidOperationException(
@@ -63,9 +62,12 @@ public class SessionCookieMiddleware
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Session cookie validation failed");
+                _logger.LogWarning(
+                    "Session cookie validation failed for user {UserId}; reason type {FailureType}",
+                    context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+                    ex.GetType().Name);
                 context.Response.StatusCode = 401;
-                await context.Response.WriteAsync($"Session cookie invalid: {ex.GetType().Name}: {ex.Message}");
+                await context.Response.WriteAsync("Session cookie invalid");
                 return;
             }
         }

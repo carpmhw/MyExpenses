@@ -83,6 +83,7 @@ public class AppDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<AutoSnapshotConfig> AutoSnapshotConfigs => Set<AutoSnapshotConfig>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
     /// <summary>Normalizes allowlisted tracked strings before synchronously saving changes.</summary>
@@ -99,6 +100,7 @@ public class AppDbContext : DbContext
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
+    /// <summary>建立 financial entities、authentication entities 與 single-owner database constraints。</summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Category>(e =>
@@ -138,7 +140,6 @@ public class AppDbContext : DbContext
             e.Property(i => i.PerPeriod).HasColumnType("decimal(18,2)").IsRequired();
             e.Property(i => i.PurchaseDate).HasColumnType("TEXT").IsRequired();
             e.Property(i => i.Description).HasMaxLength(500);
-            e.Property(i => i.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(i => i.PurchaseDate);
             e.HasOne(i => i.Transaction)
                 .WithMany()
@@ -159,6 +160,8 @@ public class AppDbContext : DbContext
                 .WithMany(i => i.Payments)
                 .HasForeignKey(p => p.InstallmentId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(p => new { p.InstallmentId, p.Period }).IsUnique();
+            e.HasIndex(p => new { p.InstallmentId, p.IsPaid });
         });
 
         modelBuilder.Entity<CreditCard>(e =>
@@ -231,7 +234,10 @@ public class AppDbContext : DbContext
             e.ToTable("SnapshotBatches");
             e.Property(s => s.Name).HasMaxLength(200).IsRequired();
             e.Property(s => s.Notes).HasMaxLength(1000);
+            e.Property(s => s.TotalAssets).HasColumnType("decimal(18,2)").IsRequired();
+            e.Property(s => s.TotalLiabilities).HasColumnType("decimal(18,2)");
             e.Property(s => s.TotalNetWorth).HasColumnType("decimal(18,2)");
+            e.Property(s => s.NetWorthBasis).HasConversion<string>().HasMaxLength(32).IsRequired();
             e.Property(s => s.TotalBankBalance).HasColumnType("decimal(18,2)");
             e.Property(s => s.TotalStockValue).HasColumnType("decimal(18,2)");
             e.Property(s => s.TotalStockCost).HasColumnType("decimal(18,2)");
@@ -260,7 +266,14 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<User>(e =>
         {
-            e.ToTable("Users");
+            e.ToTable("Users", table => table.HasCheckConstraint(
+                "CK_Users_InstallationOwnerMarker",
+                $"InstallationOwnerMarker = '{User.SingletonOwnerMarkerValue}'"));
+            e.Property(u => u.InstallationOwnerMarker)
+                .HasMaxLength(50)
+                .HasDefaultValue(User.SingletonOwnerMarkerValue)
+                .IsRequired();
+            e.HasIndex(u => u.InstallationOwnerMarker).IsUnique();
             e.Property(u => u.Email).HasMaxLength(200).IsRequired();
             e.HasIndex(u => u.Email).IsUnique();
             e.Property(u => u.PasswordHash).HasMaxLength(200).IsRequired();
@@ -288,6 +301,16 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.TokenHash);
             entity.Property(e => e.Prefix).HasMaxLength(20);
             entity.Property(e => e.Scopes).HasColumnType("TEXT").HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<IdempotencyRecord>(entity =>
+        {
+            entity.ToTable("IdempotencyRecords");
+            entity.Property(record => record.Key).HasMaxLength(36).IsRequired();
+            entity.Property(record => record.Operation).HasMaxLength(100).IsRequired();
+            entity.Property(record => record.RequestHash).HasMaxLength(64).IsRequired();
+            entity.HasIndex(record => record.Key).IsUnique();
+            entity.HasIndex(record => new { record.Operation, record.RequestHash });
         });
 
         modelBuilder.Entity<SystemSetting>(entity =>

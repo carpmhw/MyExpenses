@@ -4,7 +4,7 @@ import type { SnapshotBatch } from '../../types'
 import Modal from '../ui/Modal.vue'
 import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
-import { formatSnapshotAccountSuffix } from '../../utils/snapshot'
+import { formatSnapshotAccountSuffix, hasCompleteNetWorthBasis } from '../../utils/snapshot'
 import { useTimeZone } from '../../composables/useTimeZone'
 
 const props = defineProps<{
@@ -16,6 +16,17 @@ const timeZone = useTimeZone()
 
 // Exposes the nullable selected snapshot to the template.
 const snapshot = computed(() => props.snapshot)
+
+// Determines whether the selected snapshot contains a historical liability basis.
+const hasCompleteBasis = computed(() => snapshot.value ? hasCompleteNetWorthBasis(snapshot.value) : false)
+
+// Chooses a truthful aggregate label and value for legacy and complete snapshots.
+const snapshotAggregate = computed(() => {
+  if (!snapshot.value) return { label: '資產總額', value: 0 }
+  return hasCompleteBasis.value
+    ? { label: '完整淨值', value: snapshot.value.totalNetWorth }
+    : { label: '資產總額', value: snapshot.value.totalAssets }
+})
 
 // Calculates aggregate stock gain or loss from the selected historical snapshot.
 const stockGainLoss = computed(() => {
@@ -63,8 +74,12 @@ function gainLossClass(value: number): string {
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div class="min-w-0 rounded-xl border border-border-default bg-bg-card p-4">
-          <p class="text-sm text-text-secondary">總淨值</p>
-          <p class="mt-2 break-words text-3xl font-bold text-text-primary">{{ formatMoney(snapshot.totalNetWorth) }}</p>
+           <p class="text-sm text-text-secondary">{{ snapshotAggregate.label }}</p>
+           <p class="mt-2 break-words text-3xl font-bold text-text-primary">{{ formatMoney(snapshotAggregate.value) }}</p>
+            <p v-if="hasCompleteBasis" class="mt-2 text-xs text-text-secondary">
+             負債 {{ formatMoney(snapshot.totalLiabilities ?? 0) }}
+           </p>
+           <p v-else class="mt-2 text-xs text-text-secondary">此舊快照未保存歷史負債</p>
         </div>
 
         <div class="min-w-0 rounded-xl border border-border-default bg-bg-card p-4">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../../api'
+import { ApiError, api } from '../../api'
 import { useAuth } from '../../composables/useAuth'
 
 const router = useRouter()
@@ -15,6 +15,7 @@ const tempToken = ref('')
 
 const email = ref('')
 const displayName = ref('')
+const bootstrapSecret = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const verifyCode = ref('')
@@ -23,24 +24,26 @@ const showRecovery = ref(false)
 
 onMounted(async () => {
   try {
-    const status = await api.auth.status()
+    const status = await auth.initialize()
     if (status.authenticated && status.user) {
       router.push('/dashboard')
     } else {
-      mode.value = status.hasUsers ? 'login' : 'register'
+      mode.value = auth.hasUsers.value ? 'login' : 'register'
     }
   } catch {
     mode.value = 'login'
   }
 })
 
+// Clears the current authentication form error before a new action.
 function clearError() {
   error.value = ''
 }
 
+// 驗證並透過中央 API 送出首次 owner 註冊，bootstrap secret 僅存在本次表單記憶體。
 async function handleRegister() {
   clearError()
-  if (!email.value || !password.value || !displayName.value) {
+  if (!email.value || !password.value || !displayName.value || !bootstrapSecret.value) {
     error.value = '請填寫所有欄位'
     return
   }
@@ -57,16 +60,18 @@ async function handleRegister() {
       email: email.value,
       displayName: displayName.value,
       password: password.value,
-    })
+    }, bootstrapSecret.value)
     if (res.token && res.user) {
+      bootstrapSecret.value = ''
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '註冊失敗'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '註冊失敗'
   }
 }
 
+// Validates credentials and advances to password or two-factor authentication.
 async function handleLogin() {
   clearError()
   if (!email.value || !password.value) {
@@ -85,11 +90,12 @@ async function handleLogin() {
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '登入失敗'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '登入失敗'
   }
 }
 
+// Submits the temporary two-factor token and verification code.
 async function handleVerify2fa() {
   clearError()
   if (!verifyCode.value) {
@@ -105,11 +111,12 @@ async function handleVerify2fa() {
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '驗證失敗'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '驗證失敗'
   }
 }
 
+// Uses a recovery code to complete a two-factor login.
 async function handleRecoveryLogin() {
   clearError()
   if (!recoveryCode.value) {
@@ -125,11 +132,12 @@ async function handleRecoveryLogin() {
       auth.setAuth(res.token, res.user)
       router.push('/dashboard')
     }
-  } catch (e: any) {
-    error.value = e.message || '備用碼無效'
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.userMessage : '備用碼無效'
   }
 }
 
+// Resets the two-factor view back to the ordinary login form.
 function goBackToLogin() {
   mode.value = 'login'
   verifyCode.value = ''
@@ -170,6 +178,14 @@ function goBackToLogin() {
           <input v-model="displayName" type="text" required
             class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
             placeholder="你的名稱" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-text-secondary mb-1">初始化密鑰</label>
+          <input v-model="bootstrapSecret" type="password" required autocomplete="new-password"
+            class="w-full px-3 py-2 rounded-lg border border-border-strong bg-bg-app text-text-primary text-sm focus:ring-2 focus:ring-focus-ring focus:border-transparent outline-none"
+            placeholder="輸入部署時設定的 Bootstrap secret" />
+          <p class="text-xs text-text-secondary mt-1">此密鑰只會送出至伺服器，不會儲存在瀏覽器。</p>
         </div>
 
         <div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import * as Icons from '@lucide/vue'
+import { iconRegistry, normalizeIconName, resolveIcon } from './icon-registry'
 
 const props = withDefaults(defineProps<{
   name: string
@@ -12,17 +12,13 @@ const props = withDefaults(defineProps<{
   strokeWidth: 2,
 })
 
+// 解析圖示並保留開發環境中對未知名稱的診斷訊息。
 const iconComponent = computed(() => {
-  const iconName = props.name
-    .replace(/-(\w)/g, (_, c) => c.toUpperCase())
-    .replace(/^(\w)/, (_, c) => c.toUpperCase())
-
-  const icon = (Icons as Record<string, unknown>)[iconName]
-  if (!icon) {
+  const iconName = normalizeIconName(props.name)
+  if (!iconRegistry[iconName as keyof typeof iconRegistry]) {
     console.warn(`Icon "${iconName}" not found in lucide`)
-    return null
   }
-  return icon
+  return resolveIcon(props.name)
 })
 </script>
 

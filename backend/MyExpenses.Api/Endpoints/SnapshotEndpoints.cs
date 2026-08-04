@@ -96,9 +96,20 @@ public static class SnapshotEndpoints
                 };
             }).ToList();
 
-            var nwChange = s2.TotalNetWorth - s1.TotalNetWorth;
-            var nwChangePercent = s1.TotalNetWorth != 0
-                ? Math.Round(nwChange / s1.TotalNetWorth * 100, 2) : 0;
+            var hasComparableNetWorth = s1.NetWorthBasis == NetWorthBasis.AssetsMinusLiabilities
+                && s2.NetWorthBasis == NetWorthBasis.AssetsMinusLiabilities
+                && s1.TotalLiabilities.HasValue
+                && s2.TotalLiabilities.HasValue;
+            var comparisonBasis = hasComparableNetWorth
+                ? NetWorthBasis.AssetsMinusLiabilities
+                : NetWorthBasis.AssetsOnly;
+            var snapshot1ComparisonValue = hasComparableNetWorth ? s1.TotalNetWorth : s1.TotalAssets;
+            var snapshot2ComparisonValue = hasComparableNetWorth ? s2.TotalNetWorth : s2.TotalAssets;
+            var netWorthDifference = CalculateSnapshotDifference(snapshot1ComparisonValue, snapshot2ComparisonValue);
+            var assetDifference = CalculateSnapshotDifference(s1.TotalAssets, s2.TotalAssets);
+            var liabilityDifference = s1.TotalLiabilities.HasValue && s2.TotalLiabilities.HasValue
+                ? CalculateSnapshotDifference(s1.TotalLiabilities.Value, s2.TotalLiabilities.Value)
+                : null;
 
             var bbChange = s2.TotalBankBalance - s1.TotalBankBalance;
             var bbChangePercent = s1.TotalBankBalance != 0
@@ -115,7 +126,10 @@ public static class SnapshotEndpoints
                     id = s1.Id,
                     date = s1.SnapshotDate,
                     name = s1.Name,
+                    totalAssets = s1.TotalAssets,
+                    totalLiabilities = s1.TotalLiabilities,
                     totalNetWorth = s1.TotalNetWorth,
+                    netWorthBasis = s1.NetWorthBasis,
                     totalBankBalance = s1.TotalBankBalance,
                     totalStockValue = s1.TotalStockValue,
                     totalStockCost = s1.TotalStockCost,
@@ -125,20 +139,20 @@ public static class SnapshotEndpoints
                     id = s2.Id,
                     date = s2.SnapshotDate,
                     name = s2.Name,
+                    totalAssets = s2.TotalAssets,
+                    totalLiabilities = s2.TotalLiabilities,
                     totalNetWorth = s2.TotalNetWorth,
+                    netWorthBasis = s2.NetWorthBasis,
                     totalBankBalance = s2.TotalBankBalance,
                     totalStockValue = s2.TotalStockValue,
                     totalStockCost = s2.TotalStockCost,
                 },
                 differences = new
                 {
-                    netWorth = new
-                    {
-                        old = s1.TotalNetWorth,
-                        @new = s2.TotalNetWorth,
-                        change = nwChange,
-                        changePercent = nwChangePercent,
-                    },
+                    netWorth = netWorthDifference,
+                    netWorthBasis = comparisonBasis,
+                    assets = assetDifference,
+                    liabilities = liabilityDifference,
                     bankBalance = new
                     {
                         old = s1.TotalBankBalance,
@@ -193,16 +207,37 @@ public static class SnapshotEndpoints
         });
     }
 
+    /// <summary>Calculates one snapshot aggregate difference with a zero-safe percentage.</summary>
+    private static SnapshotDifference CalculateSnapshotDifference(decimal oldValue, decimal newValue)
+    {
+        var change = newValue - oldValue;
+        var changePercent = oldValue != 0
+            ? Math.Round(change / oldValue * 100, 2)
+            : 0m;
+        return new SnapshotDifference(oldValue, newValue, change, changePercent);
+    }
+
     /// <summary>Creates and persists a manual financial snapshot using estimated net sell value for stock holdings.</summary>
     public static async Task<SnapshotBatch> CreateSnapshotAsync(AppDbContext db)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var bankAccounts = await db.BankAccounts.ToListAsync();
         var stocks = await db.Stocks.ToListAsync();
+        var totalLiabilities = await db.InstallmentPayments
+            .Where(payment => !payment.IsPaid)
+            .SumAsync(payment => (decimal?)payment.Amount) ?? 0m;
         var now = DateTime.UtcNow;
-        var snapshot = FinancialSnapshotBuilder.Build($"快照 {now:yyyy-MM-dd HH:mm}", null, now, bankAccounts, stocks);
+        var snapshot = FinancialSnapshotBuilder.Build(
+            $"快照 {now:yyyy-MM-dd HH:mm}",
+            null,
+            now,
+            bankAccounts,
+            stocks,
+            totalLiabilities);
 
         db.SnapshotBatches.Add(snapshot);
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return snapshot;
     }
@@ -246,7 +281,10 @@ public static class SnapshotEndpoints
                 s.Id,
                 s.SnapshotDate,
                 s.Name,
+                s.TotalAssets,
+                s.TotalLiabilities,
                 s.TotalNetWorth,
+                s.NetWorthBasis,
                 s.TotalBankBalance,
                 s.TotalStockValue,
                 s.TotalStockCost))
@@ -320,7 +358,16 @@ public sealed record SnapshotTrendPoint(
     int Id,
     DateTime Date,
     string Name,
+    decimal TotalAssets,
+    decimal? TotalLiabilities,
     decimal TotalNetWorth,
+    NetWorthBasis NetWorthBasis,
     decimal TotalBankBalance,
     decimal TotalStockValue,
     decimal TotalStockCost);
+
+public sealed record SnapshotDifference(
+    decimal Old,
+    decimal New,
+    decimal Change,
+    decimal ChangePercent);

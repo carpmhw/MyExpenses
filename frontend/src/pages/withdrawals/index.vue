@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../api'
-import type { Withdrawal, BankAccount } from '../../types'
+import type { Withdrawal, BankAccount, WithdrawalListSummary } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -24,6 +24,12 @@ const router = useRouter()
 const pagination = usePagination(1, 15)
 
 const withdrawals = ref<Withdrawal[]>([])
+const summary = ref<WithdrawalListSummary>({
+  totalAmount: 0,
+  count: 0,
+  averageAmount: 0,
+  maxAmount: 0,
+})
 const bankAccounts = ref<BankAccount[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -78,12 +84,12 @@ const bankAccountOptions = computed(() =>
 )
 
 const stats = computed(() => {
-  const list = withdrawals.value
-  const total = list.reduce((sum, w) => sum + w.amount, 0)
-  const count = pagination.total.value
-  const max = list.length ? Math.max(...list.map(w => w.amount)) : 0
-  const avg = count ? Math.round(total / count) : 0
-  return { total, count, max, avg }
+  return {
+    total: summary.value.totalAmount,
+    count: summary.value.count,
+    max: summary.value.maxAmount,
+    avg: summary.value.averageAmount,
+  }
 })
 
 const formErrors = computed(() => {
@@ -189,6 +195,7 @@ async function fetchWithdrawals() {
       endDate: endDate.value || undefined,
     })
     withdrawals.value = result.items
+    summary.value = result.summary
     pagination.total.value = result.total
   } finally {
     loading.value = false
