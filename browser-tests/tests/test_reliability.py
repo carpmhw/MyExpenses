@@ -90,6 +90,31 @@ def _installment_purchase_options(route: Route) -> None:
     route.fallback()
 
 
+# 回傳一般交易建立所需的最小分類與支付方式資料。
+def _ordinary_entry_options(route: Route) -> None:
+    path = urlparse(route.request.url).path
+    if path.endswith("/categories"):
+        route_json(route, {
+            "items": [{"id": 1, "name": "餐飲", "type": "Expense", "icon": "", "color": "#4F759D", "sortOrder": 1}],
+            "total": 1,
+            "page": 1,
+            "pageSize": 999,
+        })
+        return
+    if path.endswith("/payment-methods"):
+        route_json(route, {
+            "items": [{"id": 11, "name": "現金", "systemCode": "cash", "icon": "", "color": "#4F759D"}],
+            "total": 1,
+            "page": 1,
+            "pageSize": 999,
+        })
+        return
+    if path.endswith("/credit-cards"):
+        route_json(route, {"items": [], "total": 0, "page": 1, "pageSize": 999})
+        return
+    route.fallback()
+
+
 # 驗證 Dashboard 的獨立區塊在分期 API 失敗時仍保留成功資料。
 def test_dashboard_partial_failure(mocked_page: Page) -> None:
     def installments_failure(route: Route) -> None:
@@ -177,20 +202,68 @@ def test_installment_purchase_retry_reuses_idempotency_key(mocked_page: Page) ->
     mocked_page.get_by_role("button", name=re.compile("新增")).first.click()
 
     form = mocked_page.locator("form").last
-    form.locator('input[type="number"]').nth(0).fill("300")
-    form.get_by_placeholder("e.g. 早餐店鐵板麵").fill("測試分期")
-    form.locator("select").nth(1).select_option("1")
-    form.locator("select").nth(2).select_option("2")
-    form.locator('input[type="number"]').nth(1).fill("3")
-    form.locator("select").nth(3).select_option("3")
-    form.get_by_role("button", name="儲存").click()
+    form.locator("#transaction-amount").fill("300")
+    form.locator("#transaction-description").fill("測試分期")
+    form.locator("#transaction-category").select_option("1")
+    form.locator("#transaction-payment-method").select_option("2")
+    form.locator("#transaction-payment-mode").select_option("installment")
+    form.locator("#transaction-installment-periods").fill("3")
+    form.locator("#transaction-installment-card").select_option("3")
+    form.get_by_role("button", name="建立支出與分期").click()
     assert attempts == 1
 
-    form.get_by_role("button", name="儲存").click()
+    form.get_by_role("button", name="使用相同資料重試").click()
     expect(mocked_page.get_by_text("交易與分期已建立")).to_be_visible()
     assert attempts == 2
     assert keys[0] is not None
     assert keys[0] == keys[1]
+
+
+# 驗證交易表單能以鍵盤完成基本輸入，並提供可程式化的標籤、錯誤與狀態。
+def test_transaction_entry_keyboard_and_accessibility(mocked_page: Page) -> None:
+    mocked_page.route("**/api/categories**", _ordinary_entry_options)
+    mocked_page.route("**/api/payment-methods**", _ordinary_entry_options)
+    mocked_page.route("**/api/credit-cards**", _ordinary_entry_options)
+    mocked_page.goto("/expenses")
+    mocked_page.get_by_role("button", name=re.compile("新增")).first.click()
+
+    form = mocked_page.locator("form").last
+    expect(form.locator("#transaction-date")).to_be_focused()
+    expect(form.locator('label[for="transaction-date"]')).to_have_text("交易日期")
+    form.locator("#transaction-type").focus()
+    expect(form.locator("#transaction-type")).to_be_focused()
+
+    form.get_by_role("button", name="建立支出").press("Enter")
+    expect(form.get_by_role("alert")).to_contain_text("請修正表單中的錯誤")
+    expect(form.locator("#transaction-amount")).to_have_attribute("aria-invalid", "true")
+
+    form.locator("#transaction-date").fill("2026-08-03")
+    form.locator("#transaction-amount").fill("1280")
+    form.locator("#transaction-category").select_option("1")
+    form.locator("#transaction-description").fill("鍵盤測試")
+    form.locator("#transaction-payment-method").select_option("11")
+    form.get_by_role("button", name="建立支出").press("Enter")
+
+    expect(mocked_page.get_by_role("status")).to_contain_text("交易已建立")
+
+
+# 驗證窄螢幕交易表單採單欄、無水平溢位且主操作仍可觸及。
+def test_transaction_entry_mobile_layout(mocked_page: Page) -> None:
+    mocked_page.set_viewport_size({"width": 375, "height": 800})
+    mocked_page.route("**/api/categories**", _ordinary_entry_options)
+    mocked_page.route("**/api/payment-methods**", _ordinary_entry_options)
+    mocked_page.route("**/api/credit-cards**", _ordinary_entry_options)
+    mocked_page.goto("/expenses")
+    mocked_page.get_by_role("button", name=re.compile("新增")).first.click()
+
+    dialog = mocked_page.get_by_role("dialog")
+    expect(dialog).to_be_visible()
+    assert mocked_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    primary = dialog.get_by_role("button", name="建立支出")
+    expect(primary).to_be_visible()
+    box = primary.bounding_box()
+    assert box is not None
+    assert box["height"] >= 44
 
 
 # 驗證 Dashboard period identity 改變時會先清除舊月份資料。

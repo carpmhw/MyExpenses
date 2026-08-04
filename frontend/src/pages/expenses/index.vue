@@ -8,9 +8,8 @@ import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
 import Modal from '../../components/ui/Modal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
-import Input from '../../components/ui/Input.vue'
-import Select from '../../components/ui/Select.vue'
 import Icon from '../../components/ui/Icon.vue'
+import TransactionForm from '../../components/transactions/TransactionForm.vue'
 import { usePagination } from '../../composables/usePagination'
 import { formatMoney } from '../../utils/format'
 import { addCalendarDays, getCurrentMonthRange } from '../../utils/timezone'
@@ -18,6 +17,12 @@ import { useTimeZone } from '../../composables/useTimeZone'
 import { createIdempotencyKeyState } from '../../utils/idempotency'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { useAsyncMutation } from '../../composables/useAsyncMutation'
+import {
+  createInitialTransactionForm,
+  createTransactionFormFromItem,
+  type TransactionFormCommand,
+  type TransactionFormValues,
+} from '../../utils/transactionForm'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
@@ -29,6 +34,13 @@ const pagination = usePagination(1, 15)
 
 const categories = ref<Category[]>([])
 const paymentMethods = ref<PaymentMethod[]>([])
+const creditCards = ref<CreditCard[]>([])
+const categoriesLoading = ref(false)
+const paymentMethodsLoading = ref(false)
+const creditCardsLoading = ref(false)
+const categoriesError = ref<string | null>(null)
+const paymentMethodsError = ref<string | null>(null)
+const creditCardsError = ref<string | null>(null)
 
 const activeTab = ref<'all' | 'Income' | 'Expense'>((route.query.type as 'all' | 'Income' | 'Expense') || 'all')
 const search = ref((route.query.search as string) || '')
@@ -37,7 +49,7 @@ const startDate = ref((route.query.startDate as string) || getDefaultStartDate()
 const endDate = ref((route.query.endDate as string) || getDefaultEndDate())
 const debouncedSearch = ref(search.value)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
-// Validates the transaction date range before it becomes a query identity.
+// 在日期範圍成為查詢身份前先驗證起訖日期。
 function validateDateRange() {
   const s = startDate.value
   const e = endDate.value
@@ -61,15 +73,11 @@ function validateDateRange() {
 
 const modalOpen = ref(false)
 const editingItem = ref<Transaction | null>(null)
-const form = ref({
-  type: 'Expense' as 'Income' | 'Expense',
-  amount: 0,
-  date: timeZone.getToday(),
-  categoryId: 0,
-  description: '',
-  notes: '',
-  paymentMethodId: null as number | null,
-})
+const form = ref<TransactionFormValues>(createInitialTransactionForm(timeZone.getToday(), categories.value))
+const formKey = ref(0)
+const submissionError = ref<string | null>(null)
+const submissionNotice = ref<string | null>(null)
+const uncertainSubmissionKind = ref<'ordinary' | 'purchase' | null>(null)
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
@@ -85,31 +93,12 @@ const columns = [
   { key: 'notes', label: '備註' },
 ]
 
-const paymentMethodItems = computed(() => paymentMethods.value.map(p => ({ value: p.id, label: p.name })))
-
-
-
-const installmentPeriods = ref(3)
-const installmentCardId = ref<number | null>(null)
-const creditCards = ref<CreditCard[]>([])
 const installmentPurchaseIdempotency = createIdempotencyKeyState()
 
-const creditCardOptions = computed(() =>
-  creditCards.value.map(c => ({ value: c.id, label: `${c.bankName} (${c.lastFourDigits})` }))
-)
-
-const selectedPaymentMethod = computed(() =>
-  form.value.paymentMethodId ? paymentMethods.value.find(p => p.id === form.value.paymentMethodId) : undefined
-)
-
-const isCreditCardSelected = computed(() =>
-  selectedPaymentMethod.value?.systemCode === 'credit-card'
-)
-
 type TransactionMutationInput =
-  | { operation: 'create'; data: Omit<Transaction, 'id' | 'createdAt' | 'category' | 'paymentMethod'> }
-  | { operation: 'purchase'; data: Parameters<typeof api.installmentPurchases.create>[0]; idempotencyKey: string }
-  | { operation: 'update'; id: number; data: Partial<Omit<Transaction, 'paymentMethod'>> }
+  | Extract<TransactionFormCommand, { kind: 'create' }>
+  | (Extract<TransactionFormCommand, { kind: 'purchase' }> & { idempotencyKey: string })
+  | Extract<TransactionFormCommand, { kind: 'update' }>
 
 const transactionQuery = useAsyncQuery({
   key: () => [
@@ -138,20 +127,33 @@ const transactions = computed(() => transactionQuery.data.value?.items ?? [])
 const summary = computed(() => transactionQuery.data.value?.summary ?? null)
 const loading = computed(() => transactionQuery.status.value === 'loading' || transactionQuery.status.value === 'refreshing')
 const saving = computed(() => transactionMutation.status.value === 'submitting' || deleteMutation.status.value === 'submitting')
+const transactionListError = computed(() => transactionQuery.status.value === 'stale'
+  ? '資料可能已過期，請重新整理。'
+  : transactionQuery.status.value === 'error'
+    ? queryErrorMessage(transactionQuery.error.value)
+    : null)
 
 const transactionMutation = useAsyncMutation<TransactionMutationInput, unknown>({
   mutate: input => {
-    if (input.operation === 'create') return api.transactions.create(input.data)
-    if (input.operation === 'purchase') return api.installmentPurchases.create(input.data, input.idempotencyKey)
+    if (input.kind === 'create') return api.transactions.create(input.data)
+    if (input.kind === 'purchase') return api.installmentPurchases.create(input.data, input.idempotencyKey)
     return api.transactions.update(input.id, input.data)
   },
-  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 404, 409, 422].includes(error.status ?? 0)) }),
+  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0)) }),
 })
 
 const deleteMutation = useAsyncMutation<number, void>({
   mutate: id => api.transactions.delete(id),
-  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 404, 409, 422].includes(error.status ?? 0)) }),
+  classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0)) }),
 })
+
+const referenceDataLoading = computed(() => categoriesLoading.value || paymentMethodsLoading.value)
+const referenceDataReady = computed(() => !referenceDataLoading.value && !categoriesError.value && !paymentMethodsError.value)
+const referenceDataError = computed(() => categoriesError.value || paymentMethodsError.value ? '分類或支付方式資料載入失敗，請重試。' : null)
+const creditCardDataReady = computed(() => !creditCardsLoading.value && !creditCardsError.value)
+const creditCardDataError = computed(() => creditCardsError.value ? '信用卡資料載入失敗，請重試。' : null)
+const submissionUncertain = computed(() => uncertainSubmissionKind.value !== null)
+const submissionRetryAllowed = computed(() => uncertainSubmissionKind.value === 'purchase')
 
 watch(() => transactionQuery.data.value?.total, total => {
   if (total !== undefined) pagination.total.value = total
@@ -182,58 +184,41 @@ const stats = computed(() => {
   }
 })
 
-// Formats nullable transaction summary values without turning failed queries into zero totals.
+// 格式化可為空的交易摘要，避免失敗查詢被誤顯示為零。
 function formatSummaryValue(value: number | null): string {
   return value === null ? '—' : formatMoney(value)
 }
 
-// Converts query errors into safe inline messages for the transaction table.
+// 將查詢錯誤轉成交易表格可安全顯示的訊息。
 function queryErrorMessage(error: unknown): string {
   return error instanceof ApiError ? error.userMessage : '交易資料載入失敗，請重試。'
 }
 
-const formErrors = computed(() => {
-  const errs: Record<string, string> = {}
-  if (!form.value.amount || form.value.amount <= 0) errs.amount = '金額必須大於零'
-  if (!form.value.categoryId || form.value.categoryId <= 0) errs.categoryId = '請選擇類別'
-  if (!form.value.description?.trim()) errs.description = '請填寫項目名稱'
-  if (isCreditCardSelected.value && !editingItem.value && installmentPeriods.value <= 1) {
-    errs.installmentPeriods = '期數必須大於 1'
-  }
-  if (isCreditCardSelected.value && !editingItem.value && !installmentCardId.value) {
-    errs.installmentCardId = '請選擇信用卡'
-  }
-  return errs
-})
-
-const typeOptions = [
-  { value: 'Expense', label: '支出' },
-  { value: 'Income', label: '收入' },
-]
-
-const categoryOptions = computed(() =>
-  categories.value
-    .filter(c => c.type === form.value.type)
-    .map(c => ({ value: c.id, label: c.name }))
-)
-
-// Returns the default transaction start date in the configured time zone.
+// 取得設定時區中的預設交易起始日期。
 function getDefaultStartDate() {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).start
 }
 
-// Returns the default transaction end date in the configured time zone.
+// 取得設定時區中的預設交易結束日期。
 function getDefaultEndDate() {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).end
 }
 
-// Loads category options used by the transaction form.
+// 載入交易表單使用的分類選項並保留失敗狀態。
 async function fetchCategories() {
-  const result = await api.categories.list({ pageSize: 999 })
-  categories.value = result.items
+  categoriesLoading.value = true
+  categoriesError.value = null
+  try {
+    const result = await api.categories.list({ pageSize: 999 })
+    categories.value = result.items
+  } catch (error) {
+    categoriesError.value = error instanceof ApiError ? error.userMessage : '分類資料載入失敗，請重試。'
+  } finally {
+    categoriesLoading.value = false
+  }
 }
 
-// Mirrors transaction filters in the route without changing query ownership.
+// 將交易篩選條件同步到路由而不改變查詢擁有者。
 function syncQueryString() {
   router.replace({
     query: {
@@ -269,89 +254,69 @@ onScopeDispose(() => {
   if (searchTimer) clearTimeout(searchTimer)
 })
 
-watch(() => form.value.paymentMethodId, (newVal, oldVal) => {
-  if (oldVal !== null && newVal !== oldVal) {
-    const wasCredit = paymentMethods.value.find(p => p.id === oldVal)?.systemCode === 'credit-card'
-    const isCredit = paymentMethods.value.find(p => p.id === newVal)?.systemCode === 'credit-card'
-    if (wasCredit && !isCredit) {
-      installmentPeriods.value = 3
-      installmentCardId.value = null
-    }
-  }
-})
-
-// Resets the transaction form for a new logical create action.
+// 重置交易表單並開始一次新的建立操作。
 function openCreate() {
   editingItem.value = null
-  form.value = {
-    type: activeTab.value !== 'all' ? activeTab.value : 'Expense',
-    amount: 0,
-    date: timeZone.getToday(),
-    categoryId: categories.value[0]?.id || 0,
-    description: '',
-    notes: '',
-    paymentMethodId: null,
-  }
-  installmentPeriods.value = 3
-  installmentCardId.value = null
+  form.value = createInitialTransactionForm(
+    timeZone.getToday(),
+    categories.value,
+    activeTab.value !== 'all' ? activeTab.value : 'Expense',
+  )
+  submissionError.value = null
+  submissionNotice.value = null
+  uncertainSubmissionKind.value = null
+  installmentPurchaseIdempotency.begin()
+  transactionMutation.reset()
+  formKey.value += 1
   modalOpen.value = true
 }
 
-// Loads a server transaction into the edit form without optimistic changes.
+// 將伺服器交易載入編輯表單並清除殘留的建立狀態。
 function openEdit(item: Transaction) {
   editingItem.value = item
-  form.value = {
-    type: item.type,
-    amount: item.amount,
-    date: item.date.slice(0, 10),
-    categoryId: item.categoryId,
-    description: item.description || '',
-    notes: item.notes || '',
-    paymentMethodId: item.paymentMethodId,
-  }
+  form.value = createTransactionFormFromItem(item)
+  submissionError.value = null
+  submissionNotice.value = null
+  uncertainSubmissionKind.value = null
+  installmentPurchaseIdempotency.begin()
+  transactionMutation.reset()
+  formKey.value += 1
   modalOpen.value = true
 }
 
-// Saves an ordinary transaction or one atomic installment purchase command.
-async function save() {
-  const errs = formErrors.value
-  if (Object.keys(errs).length > 0) return
-
+// 執行表單已驗證的交易命令並誠實區分各種結果。
+async function save(command: TransactionFormCommand) {
+  submissionError.value = null
+  submissionNotice.value = null
+  uncertainSubmissionKind.value = null
   let mutationSucceeded = false
   try {
-    if (editingItem.value) {
-      await transactionMutation.submit({ operation: 'update', id: editingItem.value.id, data: form.value })
-      toast.success('交易已更新')
-    } else {
-      if (isCreditCardSelected.value && installmentCardId.value) {
-        const purchaseRequest = {
-          transaction: {
-            type: 'Expense' as const,
-            amount: form.value.amount,
-            date: form.value.date,
-            categoryId: form.value.categoryId,
-            description: form.value.description,
-            notes: form.value.notes,
-            paymentMethodId: form.value.paymentMethodId ?? undefined,
-          },
-          installment: {
-            cardId: installmentCardId.value,
-            periods: installmentPeriods.value,
-          },
-        }
-        const idempotencyKey = installmentPurchaseIdempotency.prepare(purchaseRequest)
-        await transactionMutation.submit({ operation: 'purchase', data: purchaseRequest, idempotencyKey })
-        installmentPurchaseIdempotency.clear()
-        toast.success('交易與分期已建立')
-      } else {
-        await transactionMutation.submit({ operation: 'create', data: form.value })
-        toast.success('交易已建立')
-      }
-    }
+    let input: TransactionMutationInput
+    if (command.kind === 'purchase') {
+      const idempotencyKey = installmentPurchaseIdempotency.prepare(command.data)
+      input = { ...command, idempotencyKey }
+    } else input = command
+
+    await transactionMutation.submit(input)
+    uncertainSubmissionKind.value = null
+    if (command.kind === 'update') toast.success('交易已更新')
+    else if (command.kind === 'purchase') {
+      installmentPurchaseIdempotency.clear()
+      toast.success('交易與分期已建立')
+    } else toast.success('交易已建立')
     modalOpen.value = false
     mutationSucceeded = true
   } catch (e) {
-    toast.error(e instanceof ApiError ? e.userMessage : '儲存失敗')
+    if (transactionMutation.uncertain.value) {
+      uncertainSubmissionKind.value = command.kind === 'purchase' ? 'purchase' : 'ordinary'
+      submissionNotice.value = command.kind === 'purchase'
+        ? '無法確認交易與分期是否已建立；可使用相同資料安全重試。'
+        : '無法確認交易是否已建立；請先重新整理交易列表，避免重複送出。'
+    } else {
+      uncertainSubmissionKind.value = null
+      submissionError.value = e instanceof ApiError ? e.userMessage : '儲存失敗'
+      toast.error(submissionError.value)
+    }
   }
 
   if (mutationSucceeded) {
@@ -362,13 +327,13 @@ async function save() {
   }
 }
 
-// Opens the delete confirmation for one transaction ID.
+// 開啟指定交易編號的刪除確認。
 function confirmDelete(id: number) {
   deletingId.value = id
   confirmOpen.value = true
 }
 
-// Confirms transaction deletion before refreshing the current query identity.
+// 確認刪除交易後重新整理目前查詢身份。
 async function doDelete() {
   if (deletingId.value !== null) {
     const id = deletingId.value
@@ -387,22 +352,57 @@ async function doDelete() {
   }
 }
 
-// Formats transaction amounts consistently with the rest of the financial UI.
+// 以全域財務格式化規則顯示交易金額。
 function formatAmount(amount: number) {
   return formatMoney(amount)
 }
 
-// Loads payment method options used by the transaction form.
+// 載入支付方式選項並保留可供表單重試的失敗狀態。
 async function fetchPaymentMethods() {
-  const result = await api.paymentMethods.list({ pageSize: 999 })
-  paymentMethods.value = result.items
+  paymentMethodsLoading.value = true
+  paymentMethodsError.value = null
+  try {
+    const result = await api.paymentMethods.list({ pageSize: 999 })
+    paymentMethods.value = result.items
+  } catch (error) {
+    paymentMethodsError.value = error instanceof ApiError ? error.userMessage : '支付方式資料載入失敗，請重試。'
+  } finally {
+    paymentMethodsLoading.value = false
+  }
 }
 
-onMounted(async () => {
-  await fetchCategories()
-  await fetchPaymentMethods()
-  const result = await api.creditCards.list({ pageSize: 999 })
-  creditCards.value = result.items
+// 載入信用卡選項並保留分期表單可呈現的錯誤狀態。
+async function fetchCreditCards() {
+  creditCardsLoading.value = true
+  creditCardsError.value = null
+  try {
+    const result = await api.creditCards.list({ pageSize: 999 })
+    creditCards.value = result.items
+  } catch (error) {
+    creditCardsError.value = error instanceof ApiError ? error.userMessage : '信用卡資料載入失敗，請重試。'
+  } finally {
+    creditCardsLoading.value = false
+  }
+}
+
+// 重試交易表單所需的所有參考資料查詢。
+async function retryReferenceData() {
+  await Promise.all([fetchCategories(), fetchPaymentMethods(), fetchCreditCards()])
+}
+
+// 送出期間拒絕外部關閉事件，避免遺失正在處理的交易狀態。
+function handleModalOpenChange(value: boolean) {
+  if (!value && saving.value) return
+  modalOpen.value = value
+}
+
+// 讓使用者在結果不確定時主動重新整理交易列表以檢查伺服器狀態。
+async function refreshTransactionList() {
+  await transactionQuery.refresh()
+}
+
+onMounted(() => {
+  void retryReferenceData()
 })
 </script>
 
@@ -559,7 +559,7 @@ onMounted(async () => {
         :columns="columns"
         :loading="loading"
         :items="transactions"
-        :error="transactionQuery.status.value === 'error' || transactionQuery.status.value === 'stale' ? queryErrorMessage(transactionQuery.error.value) : null"
+        :error="transactionListError"
         :refreshing="transactionQuery.status.value === 'refreshing'"
         :retry="transactionQuery.retry"
       >
@@ -637,91 +637,38 @@ onMounted(async () => {
       </div>
     </Card>
 
-    <Modal :open="modalOpen" :title="editingItem ? '編輯交易' : (form.type === 'Income' ? '新增收入' : '新增支出')" @update:open="modalOpen = $event">
-      <form class="space-y-4" @submit.prevent="save">
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">類型</label>
-          <Select v-model="form.type" :options="typeOptions" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">金額</label>
-          <Input
-            :model-value="form.amount || ''"
-            type="number"
-            step="0.01"
-            :error="formErrors.amount"
-            @update:model-value="form.amount = Number($event) || 0"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">日期</label>
-          <input
-            v-model="form.date"
-            type="date"
-            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
-            required
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">類別</label>
-          <Select
-            :model-value="form.categoryId || ''"
-            :options="categoryOptions"
-            :error="formErrors.categoryId"
-            @update:model-value="form.categoryId = Number($event)"
-          />
-          <p v-if="formErrors.categoryId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.categoryId }}</p>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">項目</label>
-          <Input
-            v-model="form.description"
-            placeholder="e.g. 早餐店鐵板麵"
-            :error="formErrors.description"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">支付方式</label>
-          <Select
-            :model-value="form.paymentMethodId ?? ''"
-            :options="paymentMethodItems"
-            placeholder="選擇支付方式"
-            @update:model-value="form.paymentMethodId = $event ? Number($event) : null"
-          />
-        </div>
-        <template v-if="form.type === 'Expense' && !editingItem && isCreditCardSelected">
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-1">分期期數</label>
-              <Input
-                :model-value="installmentPeriods || ''"
-                type="number"
-                :min="2"
-                @update:model-value="installmentPeriods = Number($event) || 3"
-              />
-              <p v-if="formErrors.installmentPeriods" class="mt-1 text-xs text-color-expense-text">{{ formErrors.installmentPeriods }}</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-1">信用卡</label>
-              <Select
-                :model-value="installmentCardId ?? ''"
-                :options="creditCardOptions"
-                placeholder="選擇信用卡"
-                @update:model-value="installmentCardId = Number($event) || null"
-              />
-              <p v-if="formErrors.installmentCardId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.installmentCardId }}</p>
-            </div>
-          </div>
-        </template>
-        <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">備註</label>
-          <Input v-model="form.notes" placeholder="備註說明" />
-        </div>
-        <div class="flex justify-end gap-3 pt-2">
-          <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>
-          <Button type="submit" :loading="saving">儲存</Button>
-        </div>
-      </form>
+    <Modal
+      :open="modalOpen"
+      :title="editingItem ? '編輯交易' : '新增交易'"
+      description="填寫交易日期、內容與付款方式"
+      size="lg"
+      mobile-full-screen
+      scroll-body
+      :close-disabled="saving"
+      @update:open="handleModalOpenChange"
+    >
+      <TransactionForm
+        v-if="modalOpen"
+        :key="formKey"
+        :initial-value="form"
+        :categories="categories"
+        :payment-methods="paymentMethods"
+        :credit-cards="creditCards"
+        :editing="editingItem"
+        :submitting="saving"
+        :reference-data-ready="referenceDataReady"
+        :reference-data-error="referenceDataError"
+        :credit-card-data-ready="creditCardDataReady"
+        :credit-card-data-error="creditCardDataError"
+        :submission-error="submissionError"
+        :submission-notice="submissionNotice"
+        :submission-uncertain="submissionUncertain"
+        :submission-retry-allowed="submissionRetryAllowed"
+        @submit="save"
+        @cancel="modalOpen = false"
+        @retry-reference-data="retryReferenceData"
+        @refresh-transactions="refreshTransactionList"
+      />
     </Modal>
 
     <ConfirmDialog
