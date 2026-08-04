@@ -71,8 +71,8 @@ Registration 在 owner 建立後會永久關閉。若既有資料庫包含多個
 | Mode | 入口與限制 |
 |------|------------|
 | `Local` | `127.0.0.1`、通常使用 `http://localhost`。 |
-| `Lan` | 明確的 LAN address；HTTP 只適合可信網路，VPN 或 HTTPS 優先。 |
-| `Remote` | 必須使用 HTTPS、Secure cookie，並設定可信 proxy/network。 |
+| `Lan` | 明確的 LAN address；Plain HTTP 只適合可信的 home network，不可暴露到 internet。 |
+| `Remote` | 必須使用 HTTPS、Secure cookie；HTTP 必須 redirect 到 HTTPS 或被拒絕，並設定可信 proxy/network。 |
 
 Remote 範例：
 
@@ -119,7 +119,7 @@ npm start
 
 ## 備份與還原
 
-Production database 預設位於 `/app/data/MyExpenses.db`，verified backups 位於 `/app/data/backups`。兩種 Compose 部署都會持久化 data、backups 與 Data Protection keys。
+Production database 預設位於 `/app/data/MyExpenses.db`，verified backups 位於 `/app/data/backups`。兩種 Compose 部署都使用 named volumes 持久化 data、backups 與 Data Protection keys；host 不一定存在 `/app/data`，application images 也未包含這些 scripts 或 sqlite3。請先將 volumes 掛載到具備 repository scripts 與 `sqlite3` 的受控 operator environment，再把範例路徑換成實際 mount path。
 
 建立 verified backup：
 
