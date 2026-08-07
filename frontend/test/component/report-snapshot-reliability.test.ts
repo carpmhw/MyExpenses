@@ -74,6 +74,80 @@ describe('report and snapshot query ownership', () => {
     expect(forecast).not.toHaveBeenCalled()
   })
 
+  it('lazy-loads stock structure and hides transaction date controls on its tab', async () => {
+    const stockStructure = vi.spyOn(api.reports, 'stockStructure').mockResolvedValue({
+      summary: { holdingCount: 0, totalEstimatedBuyCost: 0, totalGrossMarketValue: 0, totalEstimatedNetSellValue: 0, totalEstimatedGainLoss: 0, estimatedGainLossPercentage: null },
+      insights: [],
+      symbolAllocations: [],
+      instrumentTypeAllocations: [],
+      brokerAllocations: [],
+      holdings: [],
+      availableBrokers: [],
+      availableInstrumentTypes: [],
+      generatedAt: '2026-08-06T00:00:00Z',
+    })
+    const stockValueTrend = vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue([])
+    const wrapper = mountWithAppProviders(ReportsPage, {
+      global: { stubs: { Bar: { template: '<div />' }, Line: { template: '<div />' }, Doughnut: { template: '<div />' } } },
+    })
+    await flushPromises()
+
+    expect(stockStructure).not.toHaveBeenCalled()
+    expect(stockValueTrend).not.toHaveBeenCalled()
+
+    await wrapper.findAll('button').find(button => button.text() === '持股結構')!.trigger('click')
+    await flushPromises()
+
+    expect(stockStructure).toHaveBeenCalledTimes(1)
+    expect(stockValueTrend).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('input[type="date"]')).toHaveLength(0)
+  })
+
+  it('lazy-loads market risk after stock structure and keeps date and broker filters out', async () => {
+    const stockStructure = vi.spyOn(api.reports, 'stockStructure').mockResolvedValue({
+      summary: { holdingCount: 0, totalEstimatedBuyCost: 0, totalGrossMarketValue: 0, totalEstimatedNetSellValue: 0, totalEstimatedGainLoss: 0, estimatedGainLossPercentage: null },
+      insights: [],
+      symbolAllocations: [],
+      instrumentTypeAllocations: [],
+      brokerAllocations: [],
+      holdings: [],
+      availableBrokers: [],
+      availableInstrumentTypes: [],
+      generatedAt: '2026-08-06T00:00:00Z',
+    })
+    const stockValueTrend = vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue([])
+    const marketRisk = vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue({
+      periodMonths: 12,
+      scenarioDescription: '目前持股歷史情境',
+      calculationDate: '2026-08-07',
+      dataCutoffDate: null,
+      portfolioAnnualizedVolatility: { value: null, unavailableReason: 'NoHoldings' },
+      eligibleMarketValueCoverage: 0,
+      coverageThreshold: 0.9,
+      commonObservationCount: 0,
+      totalHoldingCount: 0,
+      includedInstruments: [],
+      excludedInstruments: [],
+      volatilityRanking: [],
+      correlationMatrix: { labels: [], values: [], commonObservationCount: 0, unavailableReason: 'NoHoldings' },
+      syncWarnings: [],
+    })
+    const wrapper = mountWithAppProviders(ReportsPage, {
+      global: { stubs: { Bar: { template: '<div />' }, Line: { template: '<div />' }, Doughnut: { template: '<div />' } } },
+    })
+    await flushPromises()
+
+    expect(marketRisk).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(button => button.text() === '市場風險')!.trigger('click')
+    await flushPromises()
+
+    expect(marketRisk).toHaveBeenCalledWith({ periodMonths: 12 }, expect.anything())
+    expect(stockStructure).not.toHaveBeenCalled()
+    expect(stockValueTrend).not.toHaveBeenCalled()
+    expect(wrapper.findAll('input[type="date"]')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('券商篩選')
+  })
+
   it('clears the previous trend period when the new period fails', async () => {
     const trend = vi.spyOn(api.reports, 'incomeExpenseTrend')
       .mockResolvedValueOnce([{ month: '2026-08', income: 100, expense: 20 }])

@@ -142,6 +142,17 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 builder.Services.AddHttpClient();
+builder.Services.AddSingleton(new HistoricalMarketDataOptions());
+builder.Services.AddHttpClient("historical-market-data", client =>
+{
+    client.BaseAddress = new Uri("https://query1.finance.yahoo.com/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MyExpenses/1.0 (+https://github.com/MyExpenses)");
+});
+builder.Services.AddScoped<IHistoricalAdjustedPriceProvider>(services =>
+    new YahooHistoricalAdjustedPriceProvider(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient("historical-market-data"),
+        services.GetRequiredService<HistoricalMarketDataOptions>()));
 builder.Services.AddOpenApi();
 builder.Services.Configure<TimeZoneOptions>(
     builder.Configuration.GetSection(TimeZoneOptions.SectionName));
@@ -149,8 +160,10 @@ builder.Services.Configure<BootstrapOptions>(
     builder.Configuration.GetSection(BootstrapOptions.SectionName));
 builder.Services.AddSingleton<TimeZoneService>();
 builder.Services.AddScoped<InstallmentCommandService>();
+builder.Services.AddScoped<HistoricalMarketDataSynchronizer>();
 builder.Services.AddHostedService<SnapshotBackgroundService>();
 builder.Services.AddHostedService<StockPriceUpdateService>();
+builder.Services.AddHostedService<HistoricalMarketDataSyncService>();
 
 var app = builder.Build();
 

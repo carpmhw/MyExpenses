@@ -1,8 +1,10 @@
 import type {
   Category, Transaction, Installment, CreditCard, CreditCardBill,
   BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, WithdrawalListResponse, PaymentMethod, PaginatedResponse,
+  StockInstrumentType,
   TransactionListResponse, InstallmentListResponse,
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary, DashboardSummary, NetWorthTrendPoint,
+  StockStructureReport, StockValueTrendPoint, StockMarketRiskReport,
   SnapshotBatch, SnapshotListResponse, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
   AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
   SystemTimeZoneSettings, InstallmentCommandResponse, InstallmentPurchaseRequest, InstallmentPurchaseResponse,
@@ -416,6 +418,28 @@ export const api = {
       if (params?.months) q.set('months', String(params.months))
       const qs = q.toString()
       return request<NetWorthTrendPoint[]>(`/reports/net-worth-trend${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
+    // 取得目前篩選範圍的持股結構報表。
+    stockStructure: (params?: { broker?: string; instrumentType?: StockInstrumentType }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.broker?.trim()) q.set('broker', params.broker.trim())
+      if (params?.instrumentType) q.set('instrumentType', params.instrumentType)
+      const qs = q.toString()
+      return request<StockStructureReport>(`/reports/stock-structure${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
+    // 取得全部持股的實際快照價值趨勢。
+    stockValueTrend: (params?: { months?: number }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.months) q.set('months', String(params.months))
+      const qs = q.toString()
+      return request<StockValueTrendPoint[]>(`/reports/stock-value-trend${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
+    // 讀取只依賴本機行情的市場風險情境報表。
+    stockMarketRisk: (params?: { periodMonths?: 3 | 6 | 12 }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.periodMonths) q.set('periodMonths', String(params.periodMonths))
+      const qs = q.toString()
+      return request<StockMarketRiskReport>(`/reports/stock-market-risk${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
   },
 

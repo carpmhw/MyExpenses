@@ -172,11 +172,13 @@ export interface BankAccountListResponse extends PaginatedResponse<BankAccount> 
 }
 
 export type StockInstrumentType = 'Stock' | 'StockEtf' | 'BondEtf'
+export type StockMarket = 'Unknown' | 'Twse' | 'Tpex'
 
 export interface Stock {
   id: number
   name: string
   symbol: string
+  market: StockMarket
   instrumentType: StockInstrumentType
   shares: number
   buyPrice: number
@@ -197,6 +199,154 @@ export interface StockListItem extends Stock {
 export interface StockListResponse extends PaginatedResponse<StockListItem> {
   totalEstimatedNetSellValue: number
   totalEstimatedGainLoss: number
+}
+
+export interface StockStructureSummary {
+  holdingCount: number
+  totalEstimatedBuyCost: number
+  totalGrossMarketValue: number
+  totalEstimatedNetSellValue: number
+  totalEstimatedGainLoss: number
+  estimatedGainLossPercentage: number | null
+}
+
+export interface StockStructureInsight {
+  code: string
+  severity: 'Warning' | 'Info'
+  message: string
+  affectedName: string | null
+  observedPercentage: number | null
+  thresholdPercentage: number | null
+  affectedCount: number | null
+  amount: number | null
+}
+
+export interface StockStructureAllocation {
+  key: string
+  label: string
+  value: number
+  percentage: number | null
+}
+
+export interface StockStructureHolding {
+  id: number
+  name: string
+  symbol: string
+  instrumentType: StockInstrumentType
+  shares: number
+  buyPrice: number
+  currentPrice: number
+  broker: string | null
+  grossMarketValue: number
+  buyCommission: number
+  sellCommission: number
+  securitiesTransactionTax: number
+  estimatedBuyCost: number
+  estimatedNetSellValue: number
+  estimatedGainLoss: number
+  allocationPercentage: number | null
+}
+
+export interface StockStructureReport {
+  summary: StockStructureSummary
+  insights: StockStructureInsight[]
+  symbolAllocations: StockStructureAllocation[]
+  instrumentTypeAllocations: StockStructureAllocation[]
+  brokerAllocations: StockStructureAllocation[]
+  holdings: StockStructureHolding[]
+  availableBrokers: string[]
+  availableInstrumentTypes: StockInstrumentType[]
+  generatedAt: string
+}
+
+export type StockMarketRiskUnavailableReason =
+  | 'NoHoldings'
+  | 'UnknownMarket'
+  | 'BlankSymbol'
+  | 'NonPositiveGrossValue'
+  | 'InsufficientHistory'
+  | 'NoEligibleInstruments'
+  | 'CoverageBelowThreshold'
+  | 'InsufficientCommonDates'
+  | 'NotEnoughEligibleInstruments'
+  | 'NonFiniteResult'
+  | 'InvalidPeriod'
+
+export type HistoricalPriceSyncStatus = 'Success' | 'ProviderError' | 'InvalidResponse' | 'NoData' | 'AmbiguousMarket'
+
+export interface StockMarketRiskMetric {
+  value: number | null
+  unavailableReason: StockMarketRiskUnavailableReason | null
+}
+
+export interface StockMarketRiskInstrument {
+  name: string
+  symbol: string
+  market: StockMarket
+  grossMarketValue: number
+  originalWeight: number
+  renormalizedWeight: number
+  observations: number
+  annualizedVolatility: number | null
+  exclusionReason: StockMarketRiskUnavailableReason | null
+}
+
+export interface StockMarketRiskVolatilityRanking {
+  name: string
+  symbol: string
+  market: StockMarket
+  grossMarketValue: number
+  weight: number
+  annualizedVolatility: number
+  observations: number
+}
+
+export interface StockMarketRiskCorrelationLabel {
+  name: string
+  symbol: string
+  market: StockMarket
+}
+
+export interface StockMarketRiskCorrelationMatrix {
+  labels: StockMarketRiskCorrelationLabel[]
+  values: (number | null)[][]
+  commonObservationCount: number
+  unavailableReason: StockMarketRiskUnavailableReason | null
+}
+
+export interface StockMarketRiskSyncWarning {
+  symbol: string
+  market: StockMarket
+  status: HistoricalPriceSyncStatus
+  safeMessage: string | null
+  lastAttemptedAtUtc: string | null
+  lastSucceededAtUtc: string | null
+  latestTradingDate: string | null
+}
+
+export interface StockMarketRiskReport {
+  periodMonths: 3 | 6 | 12
+  scenarioDescription: string
+  calculationDate: string
+  dataCutoffDate: string | null
+  portfolioAnnualizedVolatility: StockMarketRiskMetric
+  eligibleMarketValueCoverage: number
+  coverageThreshold: number
+  commonObservationCount: number
+  totalHoldingCount: number
+  includedInstruments: StockMarketRiskInstrument[]
+  excludedInstruments: StockMarketRiskInstrument[]
+  volatilityRanking: StockMarketRiskVolatilityRanking[]
+  correlationMatrix: StockMarketRiskCorrelationMatrix
+  syncWarnings: StockMarketRiskSyncWarning[]
+}
+
+export interface StockValueTrendPoint {
+  month: string
+  snapshotDate: string
+  name: string
+  totalStockValue: number
+  basis: 'AssetsOnly' | 'AssetsMinusLiabilities'
 }
 
 export interface PaymentMethod {

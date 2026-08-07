@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted } from 'vue'
 import { api } from '../../api'
-import type { Stock, StockInstrumentType, StockListItem } from '../../types'
+import type { Stock, StockInstrumentType, StockListItem, StockMarket } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -10,7 +10,12 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Input from '../../components/ui/Input.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { formatMoney, formatShares } from '../../utils/format'
-import { STOCK_INSTRUMENT_TYPE_OPTIONS, formatStockInstrumentType } from '../../utils/stock'
+import {
+  STOCK_INSTRUMENT_TYPE_OPTIONS,
+  STOCK_MARKET_OPTIONS,
+  formatStockInstrumentType,
+  formatStockMarket,
+} from '../../utils/stock'
 import { syncStockPriceOnSave } from '../../utils/stockPriceSync'
 import { usePagination } from '../../composables/usePagination'
 
@@ -24,7 +29,7 @@ const saving = ref(false)
 
 const modalOpen = ref(false)
 const editingItem = ref<StockListItem | null>(null)
-const form = ref({ name: '', symbol: '', instrumentType: 'Stock' as StockInstrumentType, shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null as string | null })
+const form = ref({ name: '', symbol: '', market: 'Unknown' as StockMarket, instrumentType: 'Stock' as StockInstrumentType, shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null as string | null })
 const syncPrice = ref(true)
 const totalEstimatedNetSellValue = ref(0)
 const totalEstimatedGainLoss = ref(0)
@@ -55,6 +60,7 @@ const columns = [
   { key: 'seq', label: '序號' },
   { key: 'name', label: '名稱' },
   { key: 'symbol', label: '代號' },
+  { key: 'market', label: '市場' },
   { key: 'instrumentType', label: '商品類型' },
   { key: 'shares', label: '股數' },
   { key: 'buyPrice', label: '買入均價', align: 'right' as const },
@@ -110,6 +116,7 @@ function buildStockPayload(): Omit<Stock, 'id'> {
   return {
     name: form.value.name.trim(),
     symbol: form.value.symbol.trim(),
+    market: form.value.market,
     instrumentType: form.value.instrumentType,
     shares: form.value.shares,
     buyPrice: form.value.buyPrice,
@@ -121,7 +128,7 @@ function buildStockPayload(): Omit<Stock, 'id'> {
 
 function openCreate() {
   editingItem.value = null
-  form.value = { name: '', symbol: '', instrumentType: 'Stock', shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null }
+  form.value = { name: '', symbol: '', market: 'Unknown', instrumentType: 'Stock', shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null }
   modalOpen.value = true
 }
 
@@ -130,6 +137,7 @@ function openEdit(item: StockListItem) {
   form.value = {
     name: item.name,
     symbol: item.symbol,
+    market: item.market,
     instrumentType: item.instrumentType,
     shares: item.shares,
     buyPrice: item.buyPrice,
@@ -309,8 +317,9 @@ onMounted(fetchStocks)
         <tr v-for="(item, idx) in stocks" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
           <td class="py-3 px-4 text-text-primary font-medium">{{ item.name }}</td>
-          <td class="py-3 px-4 text-text-secondary font-mono">{{ item.symbol }}</td>
-          <td class="py-3 px-4 text-text-secondary text-sm whitespace-nowrap">{{ formatStockInstrumentType(item.instrumentType) }}</td>
+            <td class="py-3 px-4 text-text-secondary font-mono">{{ item.symbol }}</td>
+           <td class="py-3 px-4 text-text-secondary text-sm whitespace-nowrap">{{ formatStockMarket(item.market) }}</td>
+           <td class="py-3 px-4 text-text-secondary text-sm whitespace-nowrap">{{ formatStockInstrumentType(item.instrumentType) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm">{{ formatShares(item.shares) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm text-right">{{ formatMoney(item.buyPrice) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm text-right" :class="freshnessColors[priceFreshness(item.lastPriceUpdate)]">{{ formatMoney(item.currentPrice) }}</td>
@@ -359,6 +368,17 @@ onMounted(fetchStocks)
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">名稱</label>
           <Input v-model="form.name" :error="formErrors.name" placeholder="e.g. 台積電" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text-primary mb-1">交易市場</label>
+          <select
+            v-model="form.market"
+            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
+          >
+            <option v-for="option in STOCK_MARKET_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">商品類型</label>
