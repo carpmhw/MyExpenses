@@ -127,6 +127,194 @@ def test_dashboard_partial_failure(mocked_page: Page) -> None:
     expect(mocked_page.get_by_role("alert")).to_contain_text("Installments unavailable")
 
 
+# 驗證持股結構報表的延遲載入、組合篩選、空結果、快照缺少與行動版明細可存取。
+def test_stock_structure_report_filters_and_mobile_layout(mocked_page: Page) -> None:
+    structure_requests: list[str] = []
+    structure_response = {
+        "summary": {
+            "holdingCount": 1,
+            "totalEstimatedBuyCost": 9025,
+            "totalGrossMarketValue": 10000,
+            "totalEstimatedNetSellValue": 9960,
+            "totalEstimatedGainLoss": 935,
+            "estimatedGainLossPercentage": 10.36,
+        },
+        "insights": [{
+            "code": "NoReminder",
+            "severity": "Info",
+            "message": "目前沒有觸發已設定的持股結構提醒。",
+            "affectedName": None,
+            "observedPercentage": None,
+            "thresholdPercentage": None,
+            "affectedCount": None,
+            "amount": None,
+        }],
+        "symbolAllocations": [{"key": "AAA", "label": "AAA", "value": 9960, "percentage": 100}],
+        "instrumentTypeAllocations": [{"key": "Stock", "label": "股票", "value": 9960, "percentage": 100}],
+        "brokerAllocations": [{"key": "甲券商", "label": "甲券商", "value": 9960, "percentage": 100}],
+        "holdings": [{
+            "id": 1,
+            "name": "標的一",
+            "symbol": "AAA",
+            "instrumentType": "Stock",
+            "shares": 100,
+            "buyPrice": 90,
+            "currentPrice": 100,
+            "broker": "甲券商",
+            "grossMarketValue": 10000,
+            "buyCommission": 25,
+            "sellCommission": 25,
+            "securitiesTransactionTax": 15,
+            "estimatedBuyCost": 9025,
+            "estimatedNetSellValue": 9960,
+            "estimatedGainLoss": 935,
+            "allocationPercentage": 100,
+        }],
+        "availableBrokers": ["甲券商", "乙券商"],
+        "availableInstrumentTypes": ["Stock", "StockEtf"],
+        "generatedAt": "2026-08-06T00:00:00Z",
+    }
+    empty_structure = {
+        **structure_response,
+        "summary": {**structure_response["summary"], "holdingCount": 0},
+        "symbolAllocations": [],
+        "instrumentTypeAllocations": [],
+        "brokerAllocations": [],
+        "holdings": [],
+    }
+
+    def stock_structure(route: Route) -> None:
+        structure_requests.append(route.request.url)
+        query = parse_qs(urlparse(route.request.url).query)
+        if query.get("broker") == ["乙券商"]:
+            route_json(route, empty_structure)
+            return
+        route_json(route, structure_response)
+
+    mocked_page.route("**/api/reports/stock-structure**", stock_structure)
+    mocked_page.route("**/api/reports/stock-value-trend**", lambda route: route_json(route, []))
+    mocked_page.set_viewport_size({"width": 375, "height": 800})
+    mocked_page.goto("/reports")
+
+    expect(mocked_page.get_by_role("button", name="持股結構")).to_be_visible()
+    mocked_page.get_by_role("button", name="持股結構").click()
+    expect(mocked_page.get_by_text("標的一 (AAA)")).to_be_visible()
+    expect(mocked_page.locator('input[type="date"]')).to_have_count(0)
+    expect(mocked_page.get_by_text("尚無全部持股價值歷史")).to_be_visible()
+
+    mocked_page.locator('[data-testid="broker-filter"]').select_option("甲券商")
+    mocked_page.locator('[data-testid="instrument-type-filter"]').select_option("Stock")
+    expect(mocked_page.get_by_text("標的一 (AAA)")).to_be_visible()
+    assert any("broker=%E7%94%B2%E5%88%B8%E5%95%86" in url and "instrumentType=Stock" in url for url in structure_requests)
+
+    mocked_page.locator('[data-testid="broker-filter"]').select_option("乙券商")
+    expect(mocked_page.get_by_text("沒有符合篩選的持股")).to_be_visible()
+    mocked_page.get_by_test_id("clear-stock-structure-filters").click()
+    expect(mocked_page.get_by_text("標的一 (AAA)")).to_be_visible()
+    assert mocked_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+
+
+# 驗證股票市場修正、風險期間切換、覆蓋不足與行動版相關矩陣可存取。
+def test_stock_market_risk_market_edit_period_and_mobile_matrix(mocked_page: Page) -> None:
+    stock_payload = {
+        "items": [{
+            "id": 1,
+            "name": "台積電",
+            "symbol": "2330",
+            "market": "Unknown",
+            "instrumentType": "Stock",
+            "shares": 100,
+            "buyPrice": 500,
+            "currentPrice": 600,
+            "broker": "測試券商",
+            "lastPriceUpdate": None,
+            "grossMarketValue": 60000,
+            "buyCommission": 0,
+            "sellCommission": 0,
+            "securitiesTransactionTax": 0,
+            "estimatedNetSellValue": 60000,
+            "estimatedGainLoss": 10000,
+        }],
+        "total": 1,
+        "page": 1,
+        "pageSize": 15,
+        "totalEstimatedNetSellValue": 60000,
+        "totalEstimatedGainLoss": 10000,
+    }
+    saved_market: str | None = None
+
+    def stocks(route: Route) -> None:
+        nonlocal saved_market
+        if route.request.method == "PUT":
+            body = json.loads(route.request.post_data or "{}")
+            saved_market = body.get("market")
+            route_json(route, {**stock_payload["items"][0], **body})
+            return
+        route_json(route, stock_payload)
+
+    mocked_page.route("**/api/stocks**", stocks)
+    mocked_page.goto("/stocks")
+    expect(mocked_page.get_by_text("待辨識")).to_be_visible()
+    mocked_page.locator("tbody tr").first.locator("button").first.click()
+    dialog = mocked_page.get_by_role("dialog")
+    dialog.locator("select").first.select_option("Tpex")
+    dialog.get_by_role("button", name="儲存").click()
+    expect(mocked_page.get_by_text("股票已更新")).to_be_visible()
+    assert saved_market == "Tpex"
+
+    complete_report = {
+        "periodMonths": 12,
+        "scenarioDescription": "目前持股歷史情境：以目前毛市值權重套用歷史還原日報酬",
+        "calculationDate": "2026-08-07",
+        "dataCutoffDate": "2026-08-06",
+        "portfolioAnnualizedVolatility": {"value": 0.2, "unavailableReason": None},
+        "eligibleMarketValueCoverage": 0.95,
+        "coverageThreshold": 0.9,
+        "commonObservationCount": 200,
+        "totalHoldingCount": 2,
+        "includedInstruments": [],
+        "excludedInstruments": [],
+        "volatilityRanking": [{
+            "name": "台積電", "symbol": "2330", "market": "Twse", "grossMarketValue": 60000,
+            "weight": 0.6, "annualizedVolatility": 0.2, "observations": 200,
+        }],
+        "correlationMatrix": {
+            "labels": [
+                {"name": "台積電", "symbol": "2330", "market": "Twse"},
+                {"name": "台灣50", "symbol": "0050", "market": "Twse"},
+            ],
+            "values": [[1, 0.42], [0.42, 1]],
+            "commonObservationCount": 200,
+            "unavailableReason": None,
+        },
+        "syncWarnings": [],
+    }
+    coverage_report = {
+        **complete_report,
+        "periodMonths": 3,
+        "eligibleMarketValueCoverage": 0.75,
+        "portfolioAnnualizedVolatility": {"value": None, "unavailableReason": "CoverageBelowThreshold"},
+        "correlationMatrix": {**complete_report["correlationMatrix"], "unavailableReason": "InsufficientCommonDates"},
+    }
+
+    def market_risk(route: Route) -> None:
+        query = parse_qs(urlparse(route.request.url).query)
+        route_json(route, coverage_report if query.get("periodMonths") == ["3"] else complete_report)
+
+    mocked_page.route("**/api/reports/stock-market-risk**", market_risk)
+    mocked_page.set_viewport_size({"width": 375, "height": 800})
+    mocked_page.goto("/reports")
+    mocked_page.get_by_role("button", name="市場風險").click()
+    expect(mocked_page.get_by_text("95.0%")).to_be_visible()
+    expect(mocked_page.get_by_text("相關性矩陣")).to_be_visible()
+    expect(mocked_page.get_by_role("columnheader", name="0050")).to_be_visible()
+    assert mocked_page.locator("table").count() >= 1
+    assert mocked_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+
+    mocked_page.get_by_test_id("period-3").click()
+    expect(mocked_page.get_by_text("覆蓋不足。系統不會以零波動代表缺少資料。", exact=True)).to_be_visible()
+
+
 # 驗證中斷的初始請求可以透過 inline retry 恢復成真正的空成功狀態。
 def test_interrupted_installment_request_recovers(mocked_page: Page) -> None:
     attempts = 0

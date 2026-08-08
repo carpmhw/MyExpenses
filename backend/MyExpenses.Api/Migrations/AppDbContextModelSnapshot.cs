@@ -12,7 +12,6 @@ namespace MyExpenses.Api.Migrations
     [DbContext(typeof(AppDbContext))]
     partial class AppDbContextModelSnapshot : ModelSnapshot
     {
-        /// <summary>建立目前應用程式使用的 EF Core model snapshot。</summary>
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
@@ -251,6 +250,89 @@ namespace MyExpenses.Api.Migrations
                     b.ToTable("CreditCardBills", (string)null);
                 });
 
+            modelBuilder.Entity("MyExpenses.Api.Models.HistoricalAdjustedPrice", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("AdjustedClose")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<DateTime>("FetchedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Market")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Symbol")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("TradingDate")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Market", "Symbol", "TradingDate")
+                        .IsUnique();
+
+                    b.ToTable("HistoricalAdjustedPrices", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_HistoricalAdjustedPrices_AdjustedClose_Positive", "AdjustedClose > 0");
+                        });
+                });
+
+            modelBuilder.Entity("MyExpenses.Api.Models.HistoricalPriceSyncState", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastAttemptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSucceededAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("LatestTradingDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Market")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SafeMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Symbol")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Market", "Symbol")
+                        .IsUnique();
+
+                    b.ToTable("HistoricalPriceSyncStates", (string)null);
+                });
+
             modelBuilder.Entity("MyExpenses.Api.Models.IdempotencyRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -403,6 +485,76 @@ namespace MyExpenses.Api.Migrations
                     b.ToTable("PaymentMethods", (string)null);
                 });
 
+            modelBuilder.Entity("MyExpenses.Api.Models.ScheduledJobExecution", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AffectedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("JobKey")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SafeMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ScheduleTimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ScheduledForUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("ScheduledLocalDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SucceededCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetCount")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartedAtUtc");
+
+                    b.HasIndex("JobKey", "ScheduledForUtc")
+                        .IsUnique();
+
+                    b.HasIndex("JobKey", "StartedAtUtc");
+
+                    b.HasIndex("Status", "StartedAtUtc");
+
+                    b.ToTable("ScheduledJobExecutions", (string)null);
+                });
+
             modelBuilder.Entity("MyExpenses.Api.Models.SnapshotBatch", b =>
                 {
                     b.Property<int>("Id")
@@ -474,6 +626,13 @@ namespace MyExpenses.Api.Migrations
 
                     b.Property<DateTime?>("LastPriceUpdate")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("Market")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Unknown");
 
                     b.Property<string>("Name")
                         .IsRequired()

@@ -82,6 +82,12 @@ const router = createRouter({
       meta: { title: '財務快照' },
     },
     {
+      path: '/schedules',
+      name: 'schedules',
+      component: () => import('../pages/schedules/index.vue'),
+      meta: { title: '業務排程' },
+    },
+    {
       path: '/snapshots/compare',
       name: 'snapshot-compare',
       component: () => import('../pages/snapshots/compare.vue'),

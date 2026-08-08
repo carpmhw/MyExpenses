@@ -10,6 +10,8 @@ import { addCalendarDays, getCurrentYearRange } from '../../utils/timezone'
 import { getThemeColor } from '../../utils/themeColor'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
+import StockStructureReport from '../../components/reports/StockStructureReport.vue'
+import StockMarketRiskReport from '../../components/reports/StockMarketRiskReport.vue'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -37,7 +39,7 @@ function getDefaultEndDate(): string {
   return getCurrentYearRange(new Date(), timeZone.timeZoneId.value).end
 }
 
-const activeTab = ref<'trend' | 'category' | 'networth' | 'forecast'>('trend')
+const activeTab = ref<'trend' | 'category' | 'stockStructure' | 'marketRisk' | 'networth' | 'forecast'>('trend')
 const startDate = ref(getDefaultStartDate())
 const endDate = ref(getDefaultEndDate())
 const chartType = ref<'bar' | 'line'>('bar')
@@ -332,7 +334,7 @@ function selectCategory(item: CategoryDistribution) {
         <p class="text-sm text-text-secondary mt-0.5">財務數據視覺化 · Reports</p>
       </div>
       <div class="flex items-center gap-3">
-        <div class="flex items-center gap-2">
+        <div v-if="activeTab === 'trend' || activeTab === 'category'" class="flex items-center gap-2">
           <input
             v-model="startDate"
             type="date"
@@ -353,9 +355,11 @@ function selectCategory(item: CategoryDistribution) {
     <div class="flex gap-1 border-b border-border-default">
       <button
         v-for="tab in ([
-          { key: 'trend', label: '收支趨勢' },
-          { key: 'category', label: '類別分布' },
-          { key: 'networth', label: '資產負債' },
+           { key: 'trend', label: '收支趨勢' },
+           { key: 'category', label: '類別分布' },
+           { key: 'stockStructure', label: '持股結構' },
+           { key: 'marketRisk', label: '市場風險' },
+           { key: 'networth', label: '資產負債' },
           { key: 'forecast', label: '分期預測' },
         ] as const)"
         :key="tab.key"
@@ -443,6 +447,16 @@ function selectCategory(item: CategoryDistribution) {
           </div>
         </QueryState>
       </Card>
+    </div>
+
+    <!-- 持股結構 -->
+    <div v-else-if="activeTab === 'stockStructure'">
+      <StockStructureReport />
+    </div>
+
+    <!-- 市場風險 -->
+    <div v-else-if="activeTab === 'marketRisk'">
+      <StockMarketRiskReport />
     </div>
 
     <!-- 資產負債 -->

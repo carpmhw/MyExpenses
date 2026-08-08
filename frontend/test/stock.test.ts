@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildStocksQuery } from '../src/api/index.ts'
-import { STOCK_INSTRUMENT_TYPE_OPTIONS, formatStockInstrumentType } from '../src/utils/stock.ts'
+import {
+  STOCK_INSTRUMENT_TYPE_OPTIONS,
+  STOCK_MARKET_OPTIONS,
+  formatStockInstrumentType,
+  formatStockMarket,
+} from '../src/utils/stock.ts'
 import { syncStockPriceOnSave } from '../src/utils/stockPriceSync.ts'
 
 // Verifies stock instrument type labels match the Taiwan tax categories shown in the UI.
@@ -19,6 +24,19 @@ test('formatStockInstrumentType returns labels with stock fallback', () => {
   assert.equal(formatStockInstrumentType('StockEtf'), '股票型 ETF')
   assert.equal(formatStockInstrumentType('BondEtf'), '債券 ETF')
   assert.equal(formatStockInstrumentType(undefined), '股票')
+})
+
+// 驗證交易市場選項及未知值的顯示文字符合股票管理介面。
+test('STOCK_MARKET_OPTIONS exposes unknown, listed, and over-the-counter labels', () => {
+  assert.deepEqual(STOCK_MARKET_OPTIONS, [
+    { value: 'Unknown', label: '待辨識' },
+    { value: 'Twse', label: '上市' },
+    { value: 'Tpex', label: '上櫃' },
+  ])
+  assert.equal(formatStockMarket('Unknown'), '待辨識')
+  assert.equal(formatStockMarket('Twse'), '上市')
+  assert.equal(formatStockMarket('Tpex'), '上櫃')
+  assert.equal(formatStockMarket(undefined), '待辨識')
 })
 
 // Verifies stock list queries include trimmed symbol and broker filters.

@@ -28,4 +28,13 @@ describe('router authentication guard', () => {
 
     expect(router.currentRoute.value.path).toBe('/login')
   })
+
+  it('registers the schedule route as a protected lazy page', async () => {
+    const { default: router } = await import('../../src/router')
+    const route = router.getRoutes().find(item => item.path === '/schedules')
+
+    expect(route?.name).toBe('schedules')
+    expect(route?.meta.public).not.toBe(true)
+    expect(route?.components?.default).toBeTypeOf('function')
+  })
 })

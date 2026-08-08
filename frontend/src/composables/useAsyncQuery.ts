@@ -18,8 +18,10 @@ export interface AsyncQueryState<T> {
   error: Ref<unknown | null>
   activeKey: Ref<string | null>
   lastSuccessAt: Ref<number | null>
+  isInFlight: Ref<boolean>
   refresh: () => Promise<void>
   retry: () => Promise<void>
+  cancel: () => void
   dispose: () => void
 }
 
@@ -30,6 +32,7 @@ export function useAsyncQuery<T>(options: AsyncQueryOptions<T>): AsyncQueryState
   const error = ref<unknown | null>(null)
   const activeKey = ref<string | null>(null)
   const lastSuccessAt = ref<number | null>(null)
+  const isInFlight = ref(false)
   const now = options.now ?? Date.now
   let generation = 0
   let activeController: AbortController | null = null
@@ -44,6 +47,7 @@ export function useAsyncQuery<T>(options: AsyncQueryOptions<T>): AsyncQueryState
     activeController?.abort()
     const controller = new AbortController()
     activeController = controller
+    isInFlight.value = true
     activeKey.value = queryKey
     error.value = null
     if (sameKey) {
@@ -68,6 +72,7 @@ export function useAsyncQuery<T>(options: AsyncQueryOptions<T>): AsyncQueryState
     } finally {
       if (currentGeneration === generation && activeController === controller) {
         activeController = null
+        isInFlight.value = false
       }
     }
   }
@@ -82,13 +87,19 @@ export function useAsyncQuery<T>(options: AsyncQueryOptions<T>): AsyncQueryState
     await execute(activeKey.value ?? normalizeQueryKey(options.key()))
   }
 
-  // Aborts the owned request and detaches future state transitions permanently.
-  function dispose(): void {
-    if (disposed) return
-    disposed = true
+  // 取消目前 request 但保留 query stream，供頁面重新可見時再次 refresh。
+  function cancel(): void {
     generation++
     activeController?.abort()
     activeController = null
+    isInFlight.value = false
+  }
+
+  // Aborts the owned request and detaches future state transitions permanently.
+  function dispose(): void {
+    if (disposed) return
+    cancel()
+    disposed = true
     stopWatching()
   }
 
@@ -103,5 +114,5 @@ export function useAsyncQuery<T>(options: AsyncQueryOptions<T>): AsyncQueryState
   }
   onScopeDispose(dispose)
 
-  return { status, data, error, activeKey, lastSuccessAt, refresh, retry, dispose }
+  return { status, data, error, activeKey, lastSuccessAt, isInFlight, refresh, retry, cancel, dispose }
 }

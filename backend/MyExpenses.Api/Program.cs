@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Net;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Data.Sqlite;
@@ -142,15 +143,66 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 builder.Services.AddHttpClient();
+builder.Services.AddSingleton(new HistoricalMarketDataOptions());
+builder.Services.AddHttpClient("historical-market-data", client =>
+{
+    client.BaseAddress = new Uri("https://query1.finance.yahoo.com/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MyExpenses/1.0 (+https://github.com/MyExpenses)");
+});
+builder.Services.AddScoped<IHistoricalAdjustedPriceProvider>(services =>
+    new YahooHistoricalAdjustedPriceProvider(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient("historical-market-data"),
+        services.GetRequiredService<HistoricalMarketDataOptions>()));
+builder.Services.AddHttpClient("twse-current-price", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MyExpenses/1.0");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = false,
+    AutomaticDecompression = DecompressionMethods.None,
+});
+builder.Services.AddHttpClient("tpex-current-price", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MyExpenses/1.0");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = false,
+    AutomaticDecompression = DecompressionMethods.None,
+});
+builder.Services.AddScoped<TwseCurrentPriceProvider>(services =>
+    new TwseCurrentPriceProvider(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient("twse-current-price")));
+builder.Services.AddScoped<TpexCurrentPriceProvider>(services =>
+    new TpexCurrentPriceProvider(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient("tpex-current-price")));
+builder.Services.AddScoped<CurrentStockPriceWorkflow>(services =>
+    new CurrentStockPriceWorkflow(
+        services.GetRequiredService<AppDbContext>(),
+         services.GetRequiredService<TwseCurrentPriceProvider>(),
+         services.GetRequiredService<TpexCurrentPriceProvider>(),
+         services.GetRequiredService<TimeProvider>(),
+         services.GetRequiredService<ILogger<CurrentStockPriceWorkflow>>()));
 builder.Services.AddOpenApi();
 builder.Services.Configure<TimeZoneOptions>(
     builder.Configuration.GetSection(TimeZoneOptions.SectionName));
 builder.Services.Configure<BootstrapOptions>(
     builder.Configuration.GetSection(BootstrapOptions.SectionName));
 builder.Services.AddSingleton<TimeZoneService>();
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 builder.Services.AddScoped<InstallmentCommandService>();
+builder.Services.AddScoped<ScheduledJobExecutionRepository>();
+builder.Services.AddScoped<ScheduledJobExecutionRecoveryService>();
+builder.Services.AddScoped<ScheduledJobRunner>();
+builder.Services.AddScoped<AutomaticSnapshotWorkflow>();
+builder.Services.AddScoped<HistoricalMarketDataSynchronizer>();
 builder.Services.AddHostedService<SnapshotBackgroundService>();
 builder.Services.AddHostedService<StockPriceUpdateService>();
+builder.Services.AddHostedService<HistoricalMarketDataSyncService>();
 
 var app = builder.Build();
 
@@ -173,6 +225,9 @@ using (var scope = app.Services.CreateScope())
         if (app.Environment.IsDevelopment())
             await DbInitializer.SeedSampleDataAsync(seedDb, timeZoneService);
     });
+    await scope.ServiceProvider
+        .GetRequiredService<ScheduledJobExecutionRecoveryService>()
+        .RecoverAsync();
 }
 
 if (app.Environment.IsDevelopment())
@@ -209,5 +264,6 @@ app.MapAuthEndpoints();
 app.MapSnapshotEndpoints();
 app.MapExchangeRateEndpoints();
 app.MapSettingsEndpoints();
+app.MapScheduleEndpoints();
 
 app.Run();

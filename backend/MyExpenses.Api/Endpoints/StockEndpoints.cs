@@ -78,6 +78,9 @@ public static class StockEndpoints
 
         group.MapPost("/", async (Stock stock, AppDbContext db) =>
         {
+            if (!IsSupportedMarket(stock.Market))
+                return Results.BadRequest("交易市場無效");
+
             db.Stocks.Add(stock);
             await db.SaveChangesAsync();
             return Results.Created($"/api/stocks/{stock.Id}", stock);
@@ -85,11 +88,15 @@ public static class StockEndpoints
 
         group.MapPut("/{id:int}", async (int id, Stock input, AppDbContext db) =>
         {
+            if (!IsSupportedMarket(input.Market))
+                return Results.BadRequest("交易市場無效");
+
             var stock = await db.Stocks.FindAsync(id);
             if (stock is null) return Results.NotFound();
 
             stock.Name = input.Name;
             stock.Symbol = input.Symbol;
+            stock.Market = input.Market;
             stock.InstrumentType = input.InstrumentType;
             stock.Shares = input.Shares;
             stock.BuyPrice = input.BuyPrice;
@@ -157,6 +164,7 @@ public static class StockEndpoints
             stock.Id,
             stock.Name,
             stock.Symbol,
+            stock.Market,
             stock.InstrumentType,
             stock.Shares,
             stock.BuyPrice,
@@ -170,6 +178,10 @@ public static class StockEndpoints
             valuation.EstimatedNetSellValue,
             valuation.EstimatedGainLoss);
     }
+
+    /// <summary>限制股票 API 只接受已定義的交易市場 enum。</summary>
+    private static bool IsSupportedMarket(StockMarket market)
+        => market is StockMarket.Unknown or StockMarket.Twse or StockMarket.Tpex;
 
 }
 
@@ -185,6 +197,7 @@ public sealed record StockListItem(
     int Id,
     string Name,
     string Symbol,
+    StockMarket Market,
     StockInstrumentType InstrumentType,
     decimal Shares,
     decimal BuyPrice,

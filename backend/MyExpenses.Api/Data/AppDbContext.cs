@@ -65,6 +65,12 @@ public class AppDbContext : DbContext
             {
                 nameof(SystemSetting.TimeZoneId),
             },
+            [typeof(ScheduledJobExecution)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(ScheduledJobExecution.ScheduleTimeZoneId),
+                nameof(ScheduledJobExecution.ResultCode),
+                nameof(ScheduledJobExecution.SafeMessage),
+            },
         };
 
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
@@ -77,6 +83,8 @@ public class AppDbContext : DbContext
     public DbSet<CreditCardBill> CreditCardBills => Set<CreditCardBill>();
     public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
     public DbSet<Stock> Stocks => Set<Stock>();
+    public DbSet<HistoricalAdjustedPrice> HistoricalAdjustedPrices => Set<HistoricalAdjustedPrice>();
+    public DbSet<HistoricalPriceSyncState> HistoricalPriceSyncStates => Set<HistoricalPriceSyncState>();
     public DbSet<Withdrawal> Withdrawals => Set<Withdrawal>();
     public DbSet<PaymentMethod> PaymentMethods => Set<PaymentMethod>();
     public DbSet<SnapshotBatch> SnapshotBatches => Set<SnapshotBatch>();
@@ -85,6 +93,7 @@ public class AppDbContext : DbContext
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+    public DbSet<ScheduledJobExecution> ScheduledJobExecutions => Set<ScheduledJobExecution>();
 
     /// <summary>Normalizes allowlisted tracked strings before synchronously saving changes.</summary>
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -200,11 +209,43 @@ public class AppDbContext : DbContext
             e.ToTable("Stocks");
             e.Property(s => s.Name).HasMaxLength(100).IsRequired();
             e.Property(s => s.Symbol).HasMaxLength(20).IsRequired();
+            e.Property(s => s.Market)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .HasDefaultValue(StockMarket.Unknown)
+                .IsRequired();
             e.Property(s => s.InstrumentType).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(s => s.Shares).HasColumnType("decimal(18,4)");
             e.Property(s => s.BuyPrice).HasColumnType("decimal(18,2)");
             e.Property(s => s.CurrentPrice).HasColumnType("decimal(18,2)");
             e.Property(s => s.Broker).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<HistoricalAdjustedPrice>(e =>
+        {
+            e.ToTable("HistoricalAdjustedPrices", table => table.HasCheckConstraint(
+                "CK_HistoricalAdjustedPrices_AdjustedClose_Positive",
+                "AdjustedClose > 0"));
+            e.Property(price => price.Market).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(price => price.Symbol).HasMaxLength(20).IsRequired();
+            e.Property(price => price.TradingDate).HasColumnType("TEXT").IsRequired();
+            e.Property(price => price.AdjustedClose).HasColumnType("decimal(18,6)").IsRequired();
+            e.Property(price => price.Provider).HasMaxLength(50).IsRequired();
+            e.Property(price => price.FetchedAtUtc).HasColumnType("TEXT").IsRequired();
+            e.HasIndex(price => new { price.Market, price.Symbol, price.TradingDate })
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<HistoricalPriceSyncState>(e =>
+        {
+            e.ToTable("HistoricalPriceSyncStates");
+            e.Property(state => state.Market).HasConversion<string>().HasMaxLength(20).IsRequired();
+            e.Property(state => state.Symbol).HasMaxLength(20).IsRequired();
+            e.Property(state => state.LatestTradingDate).HasColumnType("TEXT");
+            e.Property(state => state.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
+            e.Property(state => state.SafeMessage).HasMaxLength(500);
+            e.HasIndex(state => new { state.Market, state.Symbol })
+                .IsUnique();
         });
 
         modelBuilder.Entity<Withdrawal>(e =>
@@ -317,6 +358,30 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("SystemSettings");
             entity.Property(e => e.TimeZoneId).HasMaxLength(100).IsRequired();
+        });
+
+        modelBuilder.Entity<ScheduledJobExecution>(entity =>
+        {
+            entity.ToTable("ScheduledJobExecutions");
+            entity.Property(e => e.JobKey)
+                .HasConversion<string>()
+                .HasMaxLength(40)
+                .IsRequired();
+            entity.Property(e => e.ScheduledForUtc).HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.ScheduleTimeZoneId).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.ScheduledLocalDate).HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(30)
+                .IsRequired();
+            entity.Property(e => e.StartedAtUtc).HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.CompletedAtUtc).HasColumnType("TEXT");
+            entity.Property(e => e.ResultCode).HasMaxLength(80);
+            entity.Property(e => e.SafeMessage).HasMaxLength(500);
+            entity.HasIndex(e => new { e.JobKey, e.ScheduledForUtc }).IsUnique();
+            entity.HasIndex(e => e.StartedAtUtc);
+            entity.HasIndex(e => new { e.JobKey, e.StartedAtUtc });
+            entity.HasIndex(e => new { e.Status, e.StartedAtUtc });
         });
 
         ApplyUtcDateTimeConversions(modelBuilder);

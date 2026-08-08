@@ -6,42 +6,47 @@ namespace MyExpenses.Api.Services;
 
 public static class DbInitializer
 {
+    /// <summary>補種缺失的 reference data 與停用自動快照預設設定。</summary>
     public static async Task SeedReferenceDataAsync(AppDbContext db)
     {
-        if (await db.Categories.AnyAsync()) return;
-
-        var categories = new List<Category>
+        if (!await db.Categories.AnyAsync())
         {
-            new() { Name = "薪資收入", Type = CategoryType.Income, Icon = "Wallet", Color = "#10B981", SortOrder = 1, SystemCode = "salary" },
-            new() { Name = "兼職收入", Type = CategoryType.Income, Icon = "Briefcase", Color = "#059669", SortOrder = 2, SystemCode = "part-time" },
-            new() { Name = "投資收益", Type = CategoryType.Income, Icon = "TrendingUp", Color = "#2563EB", SortOrder = 3, SystemCode = "investment" },
-            new() { Name = "獎金", Type = CategoryType.Income, Icon = "Gift", Color = "#D97706", SortOrder = 4, SystemCode = "bonus" },
-            new() { Name = "其他收入", Type = CategoryType.Income, Icon = "PlusCircle", Color = "#6D28D9", SortOrder = 5, SystemCode = "other-income" },
-            new() { Name = "飲食", Type = CategoryType.Expense, Icon = "Utensils", Color = "#DC2626", SortOrder = 10, SystemCode = "food" },
-            new() { Name = "交通", Type = CategoryType.Expense, Icon = "Car", Color = "#2563EB", SortOrder = 11, SystemCode = "transport" },
-            new() { Name = "生活", Type = CategoryType.Expense, Icon = "Home", Color = "#7C3AED", SortOrder = 12, SystemCode = "living" },
-            new() { Name = "娛樂", Type = CategoryType.Expense, Icon = "Film", Color = "#D97706", SortOrder = 13, SystemCode = "entertainment" },
-            new() { Name = "通訊", Type = CategoryType.Expense, Icon = "Smartphone", Color = "#0891B2", SortOrder = 14, SystemCode = "telecom" },
-            new() { Name = "教育", Type = CategoryType.Expense, Icon = "BookOpen", Color = "#4F46E5", SortOrder = 15, SystemCode = "education" },
-            new() { Name = "醫療", Type = CategoryType.Expense, Icon = "HeartPulse", Color = "#E11D48", SortOrder = 16, SystemCode = "medical" },
-            new() { Name = "其他", Type = CategoryType.Expense, Icon = "MoreHorizontal", Color = "#64748B", SortOrder = 20, SystemCode = "other-expense" },
-        };
+            var categories = new List<Category>
+            {
+                new() { Name = "薪資收入", Type = CategoryType.Income, Icon = "Wallet", Color = "#10B981", SortOrder = 1, SystemCode = "salary" },
+                new() { Name = "兼職收入", Type = CategoryType.Income, Icon = "Briefcase", Color = "#059669", SortOrder = 2, SystemCode = "part-time" },
+                new() { Name = "投資收益", Type = CategoryType.Income, Icon = "TrendingUp", Color = "#2563EB", SortOrder = 3, SystemCode = "investment" },
+                new() { Name = "獎金", Type = CategoryType.Income, Icon = "Gift", Color = "#D97706", SortOrder = 4, SystemCode = "bonus" },
+                new() { Name = "其他收入", Type = CategoryType.Income, Icon = "PlusCircle", Color = "#6D28D9", SortOrder = 5, SystemCode = "other-income" },
+                new() { Name = "飲食", Type = CategoryType.Expense, Icon = "Utensils", Color = "#DC2626", SortOrder = 10, SystemCode = "food" },
+                new() { Name = "交通", Type = CategoryType.Expense, Icon = "Car", Color = "#2563EB", SortOrder = 11, SystemCode = "transport" },
+                new() { Name = "生活", Type = CategoryType.Expense, Icon = "Home", Color = "#7C3AED", SortOrder = 12, SystemCode = "living" },
+                new() { Name = "娛樂", Type = CategoryType.Expense, Icon = "Film", Color = "#D97706", SortOrder = 13, SystemCode = "entertainment" },
+                new() { Name = "通訊", Type = CategoryType.Expense, Icon = "Smartphone", Color = "#0891B2", SortOrder = 14, SystemCode = "telecom" },
+                new() { Name = "教育", Type = CategoryType.Expense, Icon = "BookOpen", Color = "#4F46E5", SortOrder = 15, SystemCode = "education" },
+                new() { Name = "醫療", Type = CategoryType.Expense, Icon = "HeartPulse", Color = "#E11D48", SortOrder = 16, SystemCode = "medical" },
+                new() { Name = "其他", Type = CategoryType.Expense, Icon = "MoreHorizontal", Color = "#64748B", SortOrder = 20, SystemCode = "other-expense" },
+            };
 
-        db.Categories.AddRange(categories);
-        await db.SaveChangesAsync();
+            db.Categories.AddRange(categories);
+            await db.SaveChangesAsync();
+        }
 
-        var paymentMethods = new List<PaymentMethod>
+        if (!await db.PaymentMethods.AnyAsync())
         {
-            new() { Name = "現金", Icon = "Banknote", Color = "#10B981", SortOrder = 1, SystemCode = "cash" },
-            new() { Name = "信用卡", Icon = "CreditCard", Color = "#3B82F6", SortOrder = 2, SystemCode = "credit-card" },
-            new() { Name = "Line Pay", Icon = "Smartphone", Color = "#06B6D4", SortOrder = 3, SystemCode = "line-pay" },
-            new() { Name = "銀行轉帳", Icon = "Building2", Color = "#8B5CF6", SortOrder = 4, SystemCode = "bank-transfer" },
-            new() { Name = "悠遊卡", Icon = "Wallet", Color = "#F59E0B", SortOrder = 5, SystemCode = "easy-card" },
-            new() { Name = "其他", Icon = "MoreHorizontal", Color = "#6B7280", SortOrder = 6, SystemCode = "other" },
-        };
+            var paymentMethods = new List<PaymentMethod>
+            {
+                new() { Name = "現金", Icon = "Banknote", Color = "#10B981", SortOrder = 1, SystemCode = "cash" },
+                new() { Name = "信用卡", Icon = "CreditCard", Color = "#3B82F6", SortOrder = 2, SystemCode = "credit-card" },
+                new() { Name = "Line Pay", Icon = "Smartphone", Color = "#06B6D4", SortOrder = 3, SystemCode = "line-pay" },
+                new() { Name = "銀行轉帳", Icon = "Building2", Color = "#8B5CF6", SortOrder = 4, SystemCode = "bank-transfer" },
+                new() { Name = "悠遊卡", Icon = "Wallet", Color = "#F59E0B", SortOrder = 5, SystemCode = "easy-card" },
+                new() { Name = "其他", Icon = "MoreHorizontal", Color = "#6B7280", SortOrder = 6, SystemCode = "other" },
+            };
 
-        db.PaymentMethods.AddRange(paymentMethods);
-        await db.SaveChangesAsync();
+            db.PaymentMethods.AddRange(paymentMethods);
+            await db.SaveChangesAsync();
+        }
 
         if (!await db.AutoSnapshotConfigs.AnyAsync())
         {

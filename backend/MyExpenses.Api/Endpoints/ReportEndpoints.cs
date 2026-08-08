@@ -71,6 +71,33 @@ public static class ReportEndpoints
             return Results.Ok(data);
         });
 
+        group.MapGet("/stock-structure", async (string? broker, StockInstrumentType? instrumentType, AppDbContext db) =>
+            Results.Ok(await GetStockStructureAsync(db, broker, instrumentType)))
+            .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
+
+        group.MapGet("/stock-market-risk", async (int? periodMonths, AppDbContext db, TimeZoneService timeZoneService) =>
+        {
+            var selectedPeriod = periodMonths ?? 12;
+            if (selectedPeriod is not (3 or 6 or 12))
+                return Results.BadRequest("觀察期只支援 3、6 或 12 個月");
+
+            return Results.Ok(await GetStockMarketRiskAsync(selectedPeriod, db, timeZoneService));
+        })
+        .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
+
+        group.MapGet("/stock-value-trend", async (int? months, AppDbContext db, TimeZoneService timeZoneService) =>
+        {
+            try
+            {
+                return Results.Ok(await GetStockValueTrendAsync(months, db, timeZoneService));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        })
+        .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
+
         group.MapGet("/net-worth", async (AppDbContext db) =>
             Results.Ok(await GetNetWorthAsync(db)));
 
@@ -327,6 +354,116 @@ public static class ReportEndpoints
             stockRows);
     }
 
+    /// <summary>載入持股並建立目前篩選範圍的持股結構報表。</summary>
+    public static async Task<StockStructureReportResponse> GetStockStructureAsync(
+        AppDbContext db,
+        string? broker = null,
+        StockInstrumentType? instrumentType = null)
+    {
+        var stocks = await db.Stocks
+            .OrderBy(stock => stock.Id)
+            .ToListAsync();
+        var availableBrokers = stocks
+            .Select(stock => stock.Broker?.Trim())
+            .Where(brokerName => !string.IsNullOrWhiteSpace(brokerName))
+            .Select(brokerName => brokerName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(brokerName => brokerName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var availableInstrumentTypes = stocks
+            .Select(stock => stock.InstrumentType)
+            .Distinct()
+            .OrderBy(instrument => instrument)
+            .ToList();
+        var report = StockStructureReportCalculator.Calculate(stocks, broker, instrumentType);
+
+        return new StockStructureReportResponse(
+            report.Summary,
+            report.Insights,
+            report.SymbolAllocations,
+            report.InstrumentTypeAllocations,
+            report.BrokerAllocations,
+            report.Holdings,
+            availableBrokers,
+            availableInstrumentTypes,
+            DateTime.UtcNow);
+    }
+
+    /// <summary>只讀本機持股、歷史價格與同步狀態建立市場風險報表。</summary>
+    public static async Task<StockMarketRiskReport> GetStockMarketRiskAsync(
+        int? periodMonths,
+        AppDbContext db,
+        TimeZoneService timeZoneService,
+        DateOnly? asOfDate = null)
+    {
+        var selectedPeriod = periodMonths ?? 12;
+        if (selectedPeriod is not (3 or 6 or 12))
+            throw new ArgumentException("觀察期只支援 3、6 或 12 個月", nameof(periodMonths));
+
+        var stocks = await db.Stocks.AsNoTracking().ToListAsync();
+        var prices = await db.HistoricalAdjustedPrices.AsNoTracking().ToListAsync();
+        var syncStates = await db.HistoricalPriceSyncStates.AsNoTracking().ToListAsync();
+        var calculationDate = asOfDate ?? timeZoneService.GetLocalDate();
+        return StockMarketRiskCalculator.Calculate(
+            stocks,
+            prices,
+            selectedPeriod,
+            calculationDate,
+            syncStates);
+    }
+
+    /// <summary>依系統時區彙整指定月份數的全部持股實際快照價值。</summary>
+    public static async Task<IReadOnlyList<StockValueTrendPoint>> GetStockValueTrendAsync(
+        int? months,
+        AppDbContext db,
+        TimeZoneService timeZoneService,
+        DateOnly? asOfDate = null)
+    {
+        var monthCount = months ?? 6;
+        if (monthCount is < 1 or > 60)
+            throw new ArgumentException("月份數必須介於 1 到 60 之間");
+
+        var localEndDate = asOfDate ?? timeZoneService.GetLocalDate();
+        var currentMonthStart = new DateOnly(localEndDate.Year, localEndDate.Month, 1);
+        var firstMonthStart = currentMonthStart.AddMonths(-(monthCount - 1));
+        var utcStart = timeZoneService.ConvertLocalToUtc(
+            firstMonthStart.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified));
+        var utcEndExclusive = timeZoneService.ConvertLocalToUtc(
+            currentMonthStart.AddMonths(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified));
+        var snapshots = await db.SnapshotBatches
+            .AsNoTracking()
+            .Where(snapshot => snapshot.SnapshotDate >= utcStart && snapshot.SnapshotDate < utcEndExclusive)
+            .Select(snapshot => new
+            {
+                snapshot.Name,
+                snapshot.SnapshotDate,
+                snapshot.TotalStockValue,
+                snapshot.NetWorthBasis,
+            })
+            .ToListAsync();
+
+        return snapshots
+            .GroupBy(snapshot =>
+            {
+                var localDate = timeZoneService.ConvertUtcToLocal(snapshot.SnapshotDate);
+                return (localDate.Year, localDate.Month);
+            })
+            .Select(group => new
+            {
+                group.Key.Year,
+                group.Key.Month,
+                Snapshot = group.OrderByDescending(snapshot => snapshot.SnapshotDate).First(),
+            })
+            .OrderBy(item => item.Snapshot.SnapshotDate)
+            .Select(item => new StockValueTrendPoint(
+                $"{item.Year:D4}/{item.Month:D2}",
+                item.Snapshot.SnapshotDate,
+                item.Snapshot.Name,
+                item.Snapshot.TotalStockValue,
+                item.Snapshot.NetWorthBasis))
+            .ToList();
+    }
+
     /// <summary>Maps a stock holding to a net-worth report row with estimated value fields.</summary>
     private static NetWorthStockRow ToNetWorthStockRow(Stock stock)
     {
@@ -362,6 +499,24 @@ public sealed record NetWorthStockRow(
     decimal CurrentPrice,
     decimal GrossMarketValue,
     decimal EstimatedNetSellValue);
+
+public sealed record StockStructureReportResponse(
+    StockStructureSummary Summary,
+    IReadOnlyList<StockStructureInsight> Insights,
+    IReadOnlyList<StockStructureAllocation> SymbolAllocations,
+    IReadOnlyList<StockStructureAllocation> InstrumentTypeAllocations,
+    IReadOnlyList<StockStructureAllocation> BrokerAllocations,
+    IReadOnlyList<StockStructureHolding> Holdings,
+    IReadOnlyList<string> AvailableBrokers,
+    IReadOnlyList<StockInstrumentType> AvailableInstrumentTypes,
+    DateTime GeneratedAt);
+
+public sealed record StockValueTrendPoint(
+    string Month,
+    DateTime SnapshotDate,
+    string Name,
+    decimal TotalStockValue,
+    NetWorthBasis Basis);
 
 public sealed record DashboardSummaryResponse(
     decimal TotalWithdrawals,

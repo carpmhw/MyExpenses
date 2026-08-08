@@ -112,4 +112,38 @@ describe('central API client', () => {
     expect(onSessionExpired).toHaveBeenCalledTimes(1)
     expect(onSessionExpired).toHaveBeenCalledWith('token-A')
   })
+
+  it('builds the stock structure query with trimmed optional filters', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse({}))
+    const controller = new AbortController()
+
+    await api.reports.stockStructure({ broker: ' 甲券商 ', instrumentType: 'Stock' }, { signal: controller.signal })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/reports/stock-structure?broker=%E7%94%B2%E5%88%B8%E5%95%86&instrumentType=Stock',
+      expect.objectContaining({ signal: controller.signal }),
+    )
+  })
+
+  it('omits blank stock structure filters and serializes trend months', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse([]))
+
+    await api.reports.stockStructure({ broker: '   ' })
+    await api.reports.stockValueTrend({ months: 6 })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/reports/stock-structure')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/reports/stock-value-trend?months=6')
+  })
+
+  it('serializes market risk period and forwards the abort signal through the central request layer', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse({ periodMonths: 3 }))
+    const controller = new AbortController()
+
+    await api.reports.stockMarketRisk({ periodMonths: 3 }, { signal: controller.signal })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/reports/stock-market-risk?periodMonths=3',
+      expect.objectContaining({ signal: controller.signal }),
+    )
+  })
 })

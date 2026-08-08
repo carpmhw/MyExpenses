@@ -122,4 +122,33 @@ describe('useAsyncQuery', () => {
     expect(query.status.value).toBe('success')
     expect(query.data.value).toBe('ok')
   })
+
+  it('cancels a hidden-page request while allowing a later refresh', async () => {
+    const first = deferred<string>()
+    const second = deferred<string>()
+    let callCount = 0
+    let firstSignal: AbortSignal | undefined
+    const query = useAsyncQuery({
+      key: () => ['visibility'],
+      query: ({ signal }) => {
+        callCount++
+        if (callCount === 1) {
+          firstSignal = signal
+          return first.promise
+        }
+        return second.promise
+      },
+    })
+    await flushPromises()
+
+    query.cancel()
+    expect(firstSignal?.aborted).toBe(true)
+    expect(query.isInFlight.value).toBe(false)
+
+    const refresh = query.refresh()
+    expect(query.isInFlight.value).toBe(true)
+    second.resolve('visible')
+    await refresh
+    expect(query.data.value).toBe('visible')
+  })
 })

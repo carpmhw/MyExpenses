@@ -1,12 +1,15 @@
 import type {
   Category, Transaction, Installment, CreditCard, CreditCardBill,
   BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, WithdrawalListResponse, PaymentMethod, PaginatedResponse,
+  StockInstrumentType,
   TransactionListResponse, InstallmentListResponse,
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary, DashboardSummary, NetWorthTrendPoint,
+  StockStructureReport, StockValueTrendPoint, StockMarketRiskReport,
   SnapshotBatch, SnapshotListResponse, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
   AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
   SystemTimeZoneSettings, InstallmentCommandResponse, InstallmentPurchaseRequest, InstallmentPurchaseResponse,
   StandaloneInstallmentRequest, UpdateInstallmentScheduleRequest,
+  ScheduleExecutionHistoryResponse, ScheduleExecutionQuery, ScheduleOverviewItem,
 } from '../types'
 import {
   ApiError,
@@ -195,6 +198,18 @@ export function buildStocksQuery(params?: { page?: number; pageSize?: number; sy
   const broker = params?.broker?.trim()
   if (symbol) q.set('symbol', symbol)
   if (broker) q.set('broker', broker)
+  return q.toString()
+}
+
+// 建立排程 execution 查詢字串並省略空白 optional filter。
+export function buildScheduleExecutionsQuery(params?: ScheduleExecutionQuery): string {
+  const q = new URLSearchParams()
+  if (params?.jobKey?.trim()) q.set('jobKey', params.jobKey.trim())
+  if (params?.status?.trim()) q.set('status', params.status.trim())
+  if (params?.dateStart?.trim()) q.set('dateStart', params.dateStart.trim())
+  if (params?.dateEnd?.trim()) q.set('dateEnd', params.dateEnd.trim())
+  if (params?.page) q.set('page', String(params.page))
+  if (params?.pageSize) q.set('pageSize', String(params.pageSize))
   return q.toString()
 }
 
@@ -417,6 +432,28 @@ export const api = {
       const qs = q.toString()
       return request<NetWorthTrendPoint[]>(`/reports/net-worth-trend${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
+    // 取得目前篩選範圍的持股結構報表。
+    stockStructure: (params?: { broker?: string; instrumentType?: StockInstrumentType }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.broker?.trim()) q.set('broker', params.broker.trim())
+      if (params?.instrumentType) q.set('instrumentType', params.instrumentType)
+      const qs = q.toString()
+      return request<StockStructureReport>(`/reports/stock-structure${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
+    // 取得全部持股的實際快照價值趨勢。
+    stockValueTrend: (params?: { months?: number }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.months) q.set('months', String(params.months))
+      const qs = q.toString()
+      return request<StockValueTrendPoint[]>(`/reports/stock-value-trend${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
+    // 讀取只依賴本機行情的市場風險情境報表。
+    stockMarketRisk: (params?: { periodMonths?: 3 | 6 | 12 }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.periodMonths) q.set('periodMonths', String(params.periodMonths))
+      const qs = q.toString()
+      return request<StockMarketRiskReport>(`/reports/stock-market-risk${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
   },
 
   auth: {
@@ -477,6 +514,19 @@ export const api = {
     getSchedule: (context?: ApiRequestContext) => request<AutoSnapshotConfig>('/snapshots/auto-schedule', withRequestContext({}, context)),
     updateSchedule: (data: Partial<AutoSnapshotConfig>, context?: ApiRequestContext) =>
       request<AutoSnapshotConfig>('/snapshots/auto-schedule', withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+  },
+  schedules: {
+    // 讀取後端計算的三個業務排程總覽。
+    overview: (context?: ApiRequestContext) =>
+      request<ScheduleOverviewItem[]>('/schedules', withRequestContext({}, context)),
+    // 讀取依排程、狀態與系統本地日期篩選的 execution 歷史。
+    executions: (params?: ScheduleExecutionQuery, context?: ApiRequestContext) => {
+      const query = buildScheduleExecutionsQuery(params)
+      return request<ScheduleExecutionHistoryResponse>(
+        `/schedules/executions${query ? `?${query}` : ''}`,
+        withRequestContext({}, context),
+      )
+    },
   },
   exchangeRates: {
     get: (context?: ApiRequestContext) => request<ExchangeRateResponse>('/exchange-rates', withRequestContext({}, context)),
