@@ -16,6 +16,7 @@ import {
   Moon,
   Sun,
   Calculator,
+  Activity,
 } from '@lucide/vue'
 import { useAuth } from '../composables/useAuth'
 
@@ -40,6 +41,7 @@ const navItems = [
     { label: '信用卡分期', icon: CreditCard, route: '/installments' },
     { label: '報表分析', icon: BarChart3, route: '/reports' },
     { label: '財務快照', icon: Camera, route: '/snapshots' },
+    { label: '業務排程', icon: Activity, route: '/schedules' },
   ] },
   { section: '基本資料', items: [
     { label: '分類管理', icon: Tags, route: '/categories' },

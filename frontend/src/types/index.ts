@@ -477,6 +477,49 @@ export interface AutoSnapshotConfig {
   lastRunAt: string | null
 }
 
+export type ScheduledJobKey = 'AutomaticSnapshot' | 'StockPriceUpdate' | 'HistoricalMarketDataSync'
+export type ScheduledJobExecutionStatus = 'Running' | 'Succeeded' | 'PartiallySucceeded' | 'Failed' | 'Canceled' | 'Interrupted'
+
+export interface ScheduledJobExecutionSummary {
+  id: number
+  jobKey: ScheduledJobKey
+  scheduledForUtc: string
+  scheduleTimeZoneId: string
+  scheduledLocalDate: string
+  status: ScheduledJobExecutionStatus
+  startedAtUtc: string
+  completedAtUtc: string | null
+  attemptCount: number
+  targetCount: number | null
+  succeededCount: number
+  failedCount: number
+  affectedCount: number
+  resultCode: string | null
+  safeMessage: string | null
+}
+
+export interface ScheduleOverviewItem {
+  jobKey: ScheduledJobKey
+  displayName: string
+  configurationSource: string
+  isEnabled: boolean
+  frequencyDescription: string
+  scheduleTimeZoneId: string
+  nextRunAtUtc: string | null
+  latestExecution: ScheduledJobExecutionSummary | null
+}
+
+export interface ScheduleExecutionQuery {
+  jobKey?: ScheduledJobKey | string
+  status?: ScheduledJobExecutionStatus | string
+  dateStart?: string
+  dateEnd?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface ScheduleExecutionHistoryResponse extends PaginatedResponse<ScheduledJobExecutionSummary> {}
+
 export interface TrendPoint {
   id: number
   date: string

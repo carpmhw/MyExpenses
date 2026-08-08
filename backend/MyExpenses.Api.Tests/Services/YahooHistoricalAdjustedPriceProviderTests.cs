@@ -104,6 +104,28 @@ public sealed class YahooHistoricalAdjustedPriceProviderTests
         Assert.DoesNotContain("fixture", exception.SafeMessage, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>驗證 provider JSON shape 不完整時統一轉為 bounded invalid response。</summary>
+    [Theory]
+    [InlineData("{\"chart\":null}")]
+    [InlineData("{\"chart\":{\"error\":null,\"result\":[null]}}")]
+    public async Task GetPricesAsync_RejectsMalformedJsonShapes(string payload)
+    {
+        var handler = new FixtureHttpHandler(_ => payload);
+        using var client = CreateClient(handler);
+        var provider = new YahooHistoricalAdjustedPriceProvider(client, new HistoricalMarketDataOptions
+        {
+            MaxRetries = 0,
+        });
+
+        var exception = await Assert.ThrowsAsync<HistoricalPriceProviderException>(() => provider.GetPricesAsync(
+            StockMarket.Twse,
+            "2330",
+            new DateOnly(2026, 8, 1),
+            new DateOnly(2026, 8, 7)));
+
+        Assert.Equal("invalid_response", exception.Code);
+    }
+
     /// <summary>驗證 HTTP 錯誤、timeout 與過大 response 都不會形成成功結果。</summary>
     [Theory]
     [InlineData("http")]
@@ -141,6 +163,28 @@ public sealed class YahooHistoricalAdjustedPriceProviderTests
 
         Assert.NotEmpty(exception.Code);
         Assert.DoesNotContain("BadGateway", exception.SafeMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>驗證非 transient 的 HTTP 4xx 會分類為永久拒絕且不進行 request retry。</summary>
+    [Fact]
+    public async Task GetPricesAsync_ClassifiesHttpClientErrorAsPermanentRejection()
+    {
+        var handler = new FixtureHttpHandler(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
+        using var client = CreateClient(handler);
+        var provider = new YahooHistoricalAdjustedPriceProvider(client, new HistoricalMarketDataOptions
+        {
+            MaxRetries = 2,
+        });
+
+        var exception = await Assert.ThrowsAsync<HistoricalPriceProviderException>(() => provider.GetPricesAsync(
+            StockMarket.Twse,
+            "2330",
+            new DateOnly(2026, 8, 1),
+            new DateOnly(2026, 8, 7)));
+
+        Assert.Equal("http_rejected", exception.Code);
+        Assert.Single(handler.RequestUris);
     }
 
     /// <summary>只有明確設定環境變數時才呼叫 Yahoo no-key live endpoint 作為 smoke check。</summary>

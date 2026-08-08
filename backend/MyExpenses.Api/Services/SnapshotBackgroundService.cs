@@ -11,6 +11,8 @@ public class SnapshotBackgroundService : BackgroundService
     private readonly ILogger<SnapshotBackgroundService> _logger;
     private readonly TimeZoneService _timeZoneService;
     private readonly TimeProvider _timeProvider;
+    private int _initialCheckCompleted;
+    private DateTime? _initialSkippedSlotUtc;
 
     /// <summary>Initializes the automatic snapshot service with shared time-zone and clock providers.</summary>
     public SnapshotBackgroundService(
@@ -41,7 +43,7 @@ public class SnapshotBackgroundService : BackgroundService
                 _logger.LogError(ex, "Error checking snapshot schedule");
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            await Task.Delay(TimeSpan.FromMinutes(1), _timeProvider, stoppingToken);
         }
     }
 
@@ -51,34 +53,44 @@ public class SnapshotBackgroundService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var config = await db.AutoSnapshotConfigs.FirstOrDefaultAsync(cancellationToken);
+        var isInitialCheck = Interlocked.Exchange(ref _initialCheckCompleted, 1) == 0;
         if (config is null || !config.IsEnabled)
             return;
 
         var nowUtc = DateTime.SpecifyKind(_timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Utc);
-        if (!IsScheduleDue(config, nowUtc, config.LastRunAt, _timeZoneService.GetTimeZoneInfo()))
+        var isDue = IsScheduleDue(config, nowUtc, config.LastRunAt, _timeZoneService.GetTimeZoneInfo());
+        if (!isDue)
             return;
 
-        var localNow = _timeZoneService.ConvertUtcToLocal(nowUtc);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var bankAccounts = await db.BankAccounts.ToListAsync(cancellationToken);
-        var stocks = await db.Stocks.ToListAsync(cancellationToken);
-        var totalLiabilities = await db.InstallmentPayments
-            .Where(payment => !payment.IsPaid)
-            .SumAsync(payment => (decimal?)payment.Amount, cancellationToken) ?? 0m;
-        var snapshot = FinancialSnapshotBuilder.Build(
-            BuildAutomaticSnapshotName(localNow),
-            "系統自動建立",
+        var scheduledForUtc = BusinessScheduleCalculator.CalculateDueAutomaticSlotUtc(
+            config,
             nowUtc,
-            bankAccounts,
-            stocks,
-            totalLiabilities);
+            _timeZoneService.GetTimeZoneInfo());
+        if (!scheduledForUtc.HasValue)
+            return;
 
-        db.SnapshotBatches.Add(snapshot);
-        config.LastRunAt = nowUtc;
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        if (ShouldSkipInitialCheck(isInitialCheck, isDue))
+        {
+            _initialSkippedSlotUtc = scheduledForUtc.Value;
+            return;
+        }
 
-        _logger.LogInformation("Auto snapshot created: {Id} at {Date}", snapshot.Id, nowUtc);
+        if (_initialSkippedSlotUtc == scheduledForUtc.Value)
+            return;
+
+        _initialSkippedSlotUtc = null;
+
+        var localScheduledDate = DateOnly.FromDateTime(
+            _timeZoneService.ConvertUtcToLocal(scheduledForUtc.Value));
+        var runner = scope.ServiceProvider.GetRequiredService<ScheduledJobRunner>();
+        var workflow = scope.ServiceProvider.GetRequiredService<AutomaticSnapshotWorkflow>();
+        await runner.RunAsync(
+            ScheduledJobKey.AutomaticSnapshot,
+            scheduledForUtc.Value,
+            _timeZoneService.TimeZoneId,
+            localScheduledDate,
+            (_, token) => workflow.RunAsync(scheduledForUtc.Value, localScheduledDate, token),
+            cancellationToken);
     }
 
     /// <summary>Determines whether a schedule is due using local date, weekday, month day, and wall-clock time.</summary>
@@ -112,14 +124,19 @@ public class SnapshotBackgroundService : BackgroundService
         if (TimeOnly.FromDateTime(localNow) < scheduledTime)
             return false;
 
-        return config.Frequency switch
-        {
-            "Daily" => true,
-            "Weekly" => config.DayOfWeek.HasValue && (int)localNow.DayOfWeek == config.DayOfWeek.Value,
-            "Monthly" => config.DayOfMonth.HasValue && localNow.Day == config.DayOfMonth.Value,
-            _ => false,
-        };
+        if (!BusinessScheduleCalculator.MatchesDate(config, localNow.Date))
+            return false;
+
+        var scheduledLocal = DateTime.SpecifyKind(
+            localNow.Date.Add(scheduledTime.ToTimeSpan()),
+            DateTimeKind.Unspecified);
+        var scheduledUtc = BusinessScheduleCalculator.ResolveLocalDateTimeUtc(scheduledLocal, timeZone);
+        return normalizedUtcNow >= scheduledUtc;
     }
+
+    /// <summary>判斷首次 hosted service 檢查是否應跳過已錯過的排程時槽。</summary>
+    public static bool ShouldSkipInitialCheck(bool isInitialCheck, bool isDue)
+        => isInitialCheck && isDue;
 
     /// <summary>Builds the generated name for an automatic snapshot from local schedule time.</summary>
     public static string BuildAutomaticSnapshotName(DateTime localNow)

@@ -159,7 +159,9 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
                         continue;
                     }
 
-                    throw new HistoricalPriceProviderException("http_error", "歷史行情服務暫時無法使用");
+                    throw new HistoricalPriceProviderException(
+                        GetHttpFailureCode(response.StatusCode),
+                        GetHttpFailureMessage(response.StatusCode));
                 }
 
                 if (response.Content.Headers.ContentLength > _options.MaxResponseBytes)
@@ -203,6 +205,22 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
             or HttpStatusCode.ServiceUnavailable
             or HttpStatusCode.GatewayTimeout
             || (int)statusCode >= 500;
+
+    /// <summary>將 HTTP status 映射為 transient、redirect 或永久拒絕代碼。</summary>
+    private static string GetHttpFailureCode(HttpStatusCode statusCode)
+        => IsTransient(statusCode)
+            ? "http_error"
+            : (int)statusCode is >= 300 and < 400
+                ? "unexpected_redirect"
+                : "http_rejected";
+
+    /// <summary>建立不含 status 原文與 response body 的安全 HTTP 訊息。</summary>
+    private static string GetHttpFailureMessage(HttpStatusCode statusCode)
+        => (int)statusCode is >= 300 and < 400
+            ? "歷史行情服務回應不受支援的重新導向"
+            : IsTransient(statusCode)
+                ? "歷史行情服務暫時無法使用"
+                : "歷史行情服務拒絕請求";
 
     /// <summary>以短暫且固定上限的退避延遲避免連續轟擊公開 provider。</summary>
     private static Task DelayBeforeRetryAsync(int attempt, CancellationToken cancellationToken)
@@ -320,6 +338,14 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
         catch (KeyNotFoundException)
         {
             throw new HistoricalPriceProviderException("invalid_response", "歷史行情回應欄位不完整");
+        }
+        catch (InvalidOperationException)
+        {
+            throw new HistoricalPriceProviderException("invalid_response", "歷史行情回應格式無效");
+        }
+        catch (IndexOutOfRangeException)
+        {
+            throw new HistoricalPriceProviderException("invalid_response", "歷史行情回應格式無效");
         }
     }
 

@@ -245,7 +245,7 @@ onMounted(fetchStocks)
     <div class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-2xl font-bold text-text-primary">股票管理</h1>
-        <p class="text-xs text-text-secondary mt-1">所有持股記錄 · Stocks · 每個交易日 23:00（台灣時間）自動更新股價</p>
+        <p class="text-xs text-text-secondary mt-1">所有持股記錄 · Stocks · 價格由業務排程服務自動更新</p>
       </div>
       <div class="flex items-center gap-2">
         <Button :loading="snapshotLoading" @click="takeSnapshot" title="紀錄所有銀行帳戶與股票的當前狀態">📷 拍照</Button>

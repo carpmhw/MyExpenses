@@ -196,6 +196,10 @@ public static class SnapshotEndpoints
             var config = await db.AutoSnapshotConfigs.FirstOrDefaultAsync();
             if (config is null) return Results.NotFound();
 
+            var validation = AutoSnapshotScheduleValidator.Validate(input);
+            if (!validation.IsValid)
+                return Results.ValidationProblem(validation.Errors);
+
             config.IsEnabled = input.IsEnabled;
             config.Frequency = input.Frequency;
             config.DayOfWeek = input.DayOfWeek;

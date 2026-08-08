@@ -1,13 +1,10 @@
-using MyExpenses.Api.Services;
+using MyExpenses.Api.Models;
 
 namespace MyExpenses.Api.Services;
 
 /// <summary>在台灣市場平日 23:30 執行歷史行情同步的背景服務。</summary>
 public sealed class HistoricalMarketDataSyncService : BackgroundService
 {
-    private static readonly TimeZoneInfo TaiwanTimeZone =
-        TimeZoneInfo.FindSystemTimeZoneById("Asia/Taipei");
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<HistoricalMarketDataSyncService> _logger;
     private readonly TimeProvider _timeProvider;
@@ -18,12 +15,12 @@ public sealed class HistoricalMarketDataSyncService : BackgroundService
         ILogger<HistoricalMarketDataSyncService> logger,
         TimeProvider? timeProvider = null)
     {
-        _scopeFactory = scopeFactory;
-        _logger = logger;
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    /// <summary>背景服務迴圈，依下次平日夜間時間執行同步。</summary>
+    /// <summary>背景服務迴圈，依下次平日夜間時間執行同步 execution。</summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Historical market data sync service started");
@@ -31,23 +28,13 @@ public sealed class HistoricalMarketDataSyncService : BackgroundService
         {
             try
             {
-                var nowUtc = DateTime.SpecifyKind(_timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Utc);
-                var delay = CalculateDelayToNextUpdate(nowUtc);
-                await Task.Delay(delay, stoppingToken);
+                var nowUtc = UtcNow();
+                var scheduledForUtc = CalculateNextUpdateUtc(nowUtc);
+                await Task.Delay(scheduledForUtc - nowUtc, _timeProvider, stoppingToken);
                 if (stoppingToken.IsCancellationRequested)
                     break;
 
-                using var scope = _scopeFactory.CreateScope();
-                var synchronizer = scope.ServiceProvider.GetRequiredService<HistoricalMarketDataSynchronizer>();
-                var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(
-                    DateTime.SpecifyKind(_timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Utc),
-                    TaiwanTimeZone));
-                var result = await synchronizer.SyncAsync(localDate, stoppingToken);
-                _logger.LogInformation(
-                    "Historical market data sync completed: {Processed} processed, {Succeeded} succeeded, {Failed} failed",
-                    result.ProcessedInstrumentCount,
-                    result.SuccessfulInstrumentCount,
-                    result.FailedInstrumentCount);
+                await RunScheduledExecutionAsync(scheduledForUtc, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -55,8 +42,8 @@ public sealed class HistoricalMarketDataSyncService : BackgroundService
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Historical market data sync failed");
-                await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+                _logger.LogError(exception, "Historical market data sync schedule loop failed");
+                await Task.Delay(TimeSpan.FromMinutes(1), _timeProvider, stoppingToken);
             }
         }
     }
@@ -70,16 +57,66 @@ public sealed class HistoricalMarketDataSyncService : BackgroundService
 
     /// <summary>計算下次平日台灣時間 23:30 的 UTC 時間。</summary>
     public static DateTime CalculateNextUpdateUtc(DateTime utcNow)
-    {
-        var normalized = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
-        var localNow = TimeZoneInfo.ConvertTimeFromUtc(normalized, TaiwanTimeZone);
-        var nextDate = localNow.Date;
-        if (localNow.TimeOfDay >= new TimeSpan(23, 30, 0))
-            nextDate = nextDate.AddDays(1);
-        while (nextDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-            nextDate = nextDate.AddDays(1);
+        => BusinessScheduleCalculator.CalculateHistoricalSyncNextRunUtc(utcNow);
 
-        var localNext = DateTime.SpecifyKind(nextDate.AddHours(23.5), DateTimeKind.Unspecified);
-        return TimeZoneInfo.ConvertTimeToUtc(localNext, TaiwanTimeZone);
+    /// <summary>建立指定 slot 的 scope 並委派 typed historical batch 給 runner。</summary>
+    private async Task RunScheduledExecutionAsync(
+        DateTime scheduledForUtc,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var runner = scope.ServiceProvider.GetRequiredService<ScheduledJobRunner>();
+        var synchronizer = scope.ServiceProvider.GetRequiredService<HistoricalMarketDataSynchronizer>();
+        var localDate = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(scheduledForUtc, DateTimeKind.Utc),
+                BusinessScheduleCalculator.TaiwanTimeZone));
+        await runner.RunAsync(
+            ScheduledJobKey.HistoricalMarketDataSync,
+            scheduledForUtc,
+            BusinessScheduleCalculator.TaiwanTimeZone.Id,
+            localDate,
+            async (context, token) => MapResult(
+                await synchronizer.SyncAsync(localDate, token, context.FrozenTargetKeys)),
+            cancellationToken);
     }
+
+    /// <summary>將歷史同步 typed batch result 映射為共用 runner envelope。</summary>
+    private static ScheduledJobWorkflowResult MapResult(HistoricalMarketDataSyncResult result)
+    {
+        var targetCount = result.TargetCount ?? result.ProcessedInstrumentCount;
+        var succeeded = result.SuccessfulInstrumentCount;
+        var failed = result.FailedInstrumentCount;
+        var outcome = targetCount == 0
+            ? ScheduledJobWorkflowOutcome.NoWork
+            : succeeded == targetCount
+                ? ScheduledJobWorkflowOutcome.Succeeded
+                : succeeded > 0
+                    ? ScheduledJobWorkflowOutcome.PartiallySucceeded
+                    : ScheduledJobWorkflowOutcome.Failed;
+        return new ScheduledJobWorkflowResult
+        {
+            Outcome = outcome,
+            Retryability = result.RetryableFailure
+                ? ScheduledJobRetryClassification.Retryable
+                : outcome == ScheduledJobWorkflowOutcome.Succeeded || outcome == ScheduledJobWorkflowOutcome.NoWork
+                    ? ScheduledJobRetryClassification.None
+                    : ScheduledJobRetryClassification.Permanent,
+            TargetsEnumerated = result.TargetCount.HasValue || result.ProcessedInstrumentCount > 0,
+            TargetCount = result.TargetCount,
+            SucceededCount = succeeded,
+            FailedCount = failed,
+            AffectedCount = result.AffectedCount,
+            TargetKeys = result.TargetKeys ?? [],
+            SucceededTargetKeys = result.SuccessfulTargetKeys ?? [],
+            FailedTargetCodes = result.FailedTargetCodes ?? new Dictionary<string, string>(StringComparer.Ordinal),
+            AffectedRowKeys = result.AffectedRowKeys ?? [],
+            ResultCode = result.ResultCode,
+            SafeMessage = "歷史行情批次已完成 aggregate 處理",
+        };
+    }
+
+    /// <summary>取得明確 UTC 現在時間。</summary>
+    private DateTime UtcNow()
+        => DateTime.SpecifyKind(_timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Utc);
 }

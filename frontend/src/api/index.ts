@@ -9,6 +9,7 @@ import type {
   AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
   SystemTimeZoneSettings, InstallmentCommandResponse, InstallmentPurchaseRequest, InstallmentPurchaseResponse,
   StandaloneInstallmentRequest, UpdateInstallmentScheduleRequest,
+  ScheduleExecutionHistoryResponse, ScheduleExecutionQuery, ScheduleOverviewItem,
 } from '../types'
 import {
   ApiError,
@@ -197,6 +198,18 @@ export function buildStocksQuery(params?: { page?: number; pageSize?: number; sy
   const broker = params?.broker?.trim()
   if (symbol) q.set('symbol', symbol)
   if (broker) q.set('broker', broker)
+  return q.toString()
+}
+
+// 建立排程 execution 查詢字串並省略空白 optional filter。
+export function buildScheduleExecutionsQuery(params?: ScheduleExecutionQuery): string {
+  const q = new URLSearchParams()
+  if (params?.jobKey?.trim()) q.set('jobKey', params.jobKey.trim())
+  if (params?.status?.trim()) q.set('status', params.status.trim())
+  if (params?.dateStart?.trim()) q.set('dateStart', params.dateStart.trim())
+  if (params?.dateEnd?.trim()) q.set('dateEnd', params.dateEnd.trim())
+  if (params?.page) q.set('page', String(params.page))
+  if (params?.pageSize) q.set('pageSize', String(params.pageSize))
   return q.toString()
 }
 
@@ -501,6 +514,19 @@ export const api = {
     getSchedule: (context?: ApiRequestContext) => request<AutoSnapshotConfig>('/snapshots/auto-schedule', withRequestContext({}, context)),
     updateSchedule: (data: Partial<AutoSnapshotConfig>, context?: ApiRequestContext) =>
       request<AutoSnapshotConfig>('/snapshots/auto-schedule', withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+  },
+  schedules: {
+    // 讀取後端計算的三個業務排程總覽。
+    overview: (context?: ApiRequestContext) =>
+      request<ScheduleOverviewItem[]>('/schedules', withRequestContext({}, context)),
+    // 讀取依排程、狀態與系統本地日期篩選的 execution 歷史。
+    executions: (params?: ScheduleExecutionQuery, context?: ApiRequestContext) => {
+      const query = buildScheduleExecutionsQuery(params)
+      return request<ScheduleExecutionHistoryResponse>(
+        `/schedules/executions${query ? `?${query}` : ''}`,
+        withRequestContext({}, context),
+      )
+    },
   },
   exchangeRates: {
     get: (context?: ApiRequestContext) => request<ExchangeRateResponse>('/exchange-rates', withRequestContext({}, context)),

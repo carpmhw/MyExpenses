@@ -32,7 +32,7 @@ public sealed class HistoricalMarketDataSynchronizerTests
         });
         var synchronizer = new HistoricalMarketDataSynchronizer(db, provider);
 
-        await synchronizer.SyncAsync(new DateOnly(2026, 8, 7));
+        var result = await synchronizer.SyncAsync(new DateOnly(2026, 8, 7));
 
         var stocks = await db.Stocks.OrderBy(stock => stock.Id).ToListAsync();
         Assert.Equal(StockMarket.Twse, stocks[0].Market);
@@ -41,6 +41,11 @@ public sealed class HistoricalMarketDataSynchronizerTests
         Assert.Equal(StockMarket.Unknown, stocks[3].Market);
         Assert.Equal(2, await db.HistoricalAdjustedPrices.CountAsync());
         Assert.Equal(3, provider.Requests.Count);
+        Assert.Equal(2, result.ProcessedInstrumentCount);
+        Assert.Equal(2, result.SuccessfulInstrumentCount);
+        Assert.Equal(0, result.FailedInstrumentCount);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.Equal(2, result.TargetCount);
         Assert.All(provider.Requests, request =>
         {
             Assert.Equal(new DateOnly(2025, 7, 7), request.StartDate);
@@ -244,6 +249,94 @@ public sealed class HistoricalMarketDataSynchronizerTests
         Assert.Equal(90m, (await db.HistoricalAdjustedPrices.SingleAsync(price => price.Symbol == "1111")).AdjustedClose);
         Assert.Equal(HistoricalPriceSyncStatus.Success,
             (await db.HistoricalPriceSyncStates.SingleAsync(state => state.Symbol == "2222")).Status);
+    }
+
+    /// <summary>驗證重試時歷史行情同步器只處理 execution 已凍結的唯一標的。</summary>
+    [Fact]
+    public async Task SyncAsync_UsesFrozenTargetKeys()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        db.Stocks.AddRange(
+            CreateStock("第一標的", "2330", StockMarket.Twse, null),
+            CreateStock("第二標的", "1101", StockMarket.Twse, null));
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider((_, symbol, _, _) => Success(symbol, symbol + ".TW", 100m));
+
+        var result = await new HistoricalMarketDataSynchronizer(db, provider)
+            .SyncAsync(
+                new DateOnly(2026, 8, 7),
+                frozenTargetKeys: ["Twse:2330"]);
+
+        Assert.Equal(1, result.ProcessedInstrumentCount);
+        Assert.Single(provider.Requests);
+        Assert.Equal("2330", provider.Requests[0].Symbol);
+        Assert.Equal(["Twse:2330"], result.TargetKeys);
+    }
+
+    /// <summary>驗證未知市場候選的永久 HTTP 4xx 不會被誤分類為可重試 failure。</summary>
+    [Fact]
+    public async Task SyncAsync_DoesNotRetryUnknownMarketAfterPermanentProviderRejection()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        db.Stocks.Add(CreateStock("永久拒絕", "7777", StockMarket.Unknown, null));
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider((market, symbol, _, _) =>
+        {
+            if (market == StockMarket.Twse)
+                return Success(symbol, "7777.TW", 10m);
+            throw new HistoricalPriceProviderException("http_rejected", "服務拒絕請求");
+        });
+
+        var result = await new HistoricalMarketDataSynchronizer(db, provider)
+            .SyncAsync(new DateOnly(2026, 8, 7));
+
+        Assert.False(result.RetryableFailure);
+        Assert.Equal("ProviderRejected", result.FailedTargetCodes!["Unknown:7777"]);
+        Assert.Equal(StockMarket.Unknown, await db.Stocks.Select(stock => stock.Market).SingleAsync());
+    }
+
+    /// <summary>驗證凍結的 Unknown 市場目標不會漂移為後續已知市場持股。</summary>
+    [Fact]
+    public async Task SyncAsync_DoesNotIncludeKnownMarketForFrozenUnknownTarget()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        db.Stocks.Add(CreateStock("市場已變更", "2330", StockMarket.Twse, null));
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider((_, symbol, _, _) => Success(symbol, symbol + ".TW", 100m));
+
+        var result = await new HistoricalMarketDataSynchronizer(db, provider)
+            .SyncAsync(
+                new DateOnly(2026, 8, 7),
+                frozenTargetKeys: ["Unknown:2330"]);
+
+        Assert.Equal(0, result.ProcessedInstrumentCount);
+        Assert.Empty(provider.Requests);
+    }
+
+    /// <summary>驗證同代號已有明確市場時不會再次對 Unknown 持股發出 provider 請求。</summary>
+    [Fact]
+    public async Task SyncAsync_UsesKnownMarketOnceForMixedUnknownHoldings()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        db.Stocks.AddRange(
+            CreateStock("明確市場", "2330", StockMarket.Twse, null),
+            CreateStock("待辨識市場", "2330", StockMarket.Unknown, null));
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider((market, symbol, _, _) => market == StockMarket.Twse
+            ? Success(symbol, "2330.TW", 100m)
+            : throw new HistoricalPriceProviderException("no_data", "沒有可用行情"));
+
+        var result = await new HistoricalMarketDataSynchronizer(db, provider)
+            .SyncAsync(new DateOnly(2026, 8, 7));
+
+        Assert.Equal(1, result.ProcessedInstrumentCount);
+        Assert.Equal(1, result.SuccessfulInstrumentCount);
+        Assert.Single(provider.Requests);
+        Assert.All(await db.Stocks.ToListAsync(), stock => Assert.Equal(StockMarket.Twse, stock.Market));
     }
 
     /// <summary>建立具有固定欄位的測試持股。</summary>

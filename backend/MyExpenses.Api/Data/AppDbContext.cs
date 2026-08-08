@@ -65,6 +65,12 @@ public class AppDbContext : DbContext
             {
                 nameof(SystemSetting.TimeZoneId),
             },
+            [typeof(ScheduledJobExecution)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(ScheduledJobExecution.ScheduleTimeZoneId),
+                nameof(ScheduledJobExecution.ResultCode),
+                nameof(ScheduledJobExecution.SafeMessage),
+            },
         };
 
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
@@ -87,6 +93,7 @@ public class AppDbContext : DbContext
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+    public DbSet<ScheduledJobExecution> ScheduledJobExecutions => Set<ScheduledJobExecution>();
 
     /// <summary>Normalizes allowlisted tracked strings before synchronously saving changes.</summary>
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -351,6 +358,30 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("SystemSettings");
             entity.Property(e => e.TimeZoneId).HasMaxLength(100).IsRequired();
+        });
+
+        modelBuilder.Entity<ScheduledJobExecution>(entity =>
+        {
+            entity.ToTable("ScheduledJobExecutions");
+            entity.Property(e => e.JobKey)
+                .HasConversion<string>()
+                .HasMaxLength(40)
+                .IsRequired();
+            entity.Property(e => e.ScheduledForUtc).HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.ScheduleTimeZoneId).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.ScheduledLocalDate).HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(30)
+                .IsRequired();
+            entity.Property(e => e.StartedAtUtc).HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.CompletedAtUtc).HasColumnType("TEXT");
+            entity.Property(e => e.ResultCode).HasMaxLength(80);
+            entity.Property(e => e.SafeMessage).HasMaxLength(500);
+            entity.HasIndex(e => new { e.JobKey, e.ScheduledForUtc }).IsUnique();
+            entity.HasIndex(e => e.StartedAtUtc);
+            entity.HasIndex(e => new { e.JobKey, e.StartedAtUtc });
+            entity.HasIndex(e => new { e.Status, e.StartedAtUtc });
         });
 
         ApplyUtcDateTimeConversions(modelBuilder);
