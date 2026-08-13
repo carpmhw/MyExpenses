@@ -12,7 +12,7 @@ public sealed class CurrentPriceProviderTests
     [Fact]
     public async Task TwseProvider_ParsesInvariantPriceRecords()
     {
-        var handler = new StubHandler(_ => JsonResponse("[{\"Code\":\"2330\",\"ClosingPrice\":\"1,234.50\"}]"));
+        var handler = new StubHandler(_ => JsonResponse("[{\"Code\":\"2330\",\"Name\":\"台積電\",\"ClosingPrice\":\"1,234.50\"}]"));
         using var client = new HttpClient(handler);
         var provider = new TwseCurrentPriceProvider(client);
 
@@ -21,6 +21,7 @@ public sealed class CurrentPriceProviderTests
         Assert.Null(result.Failure);
         var record = Assert.Single(result.Records);
         Assert.Equal("2330", record.Symbol);
+        Assert.Equal("台積電", record.Name);
         Assert.Equal(1234.50m, record.Price);
     }
 
@@ -28,7 +29,7 @@ public sealed class CurrentPriceProviderTests
     [Fact]
     public async Task TpexProvider_ParsesTypedRecords()
     {
-        var handler = new StubHandler(_ => JsonResponse("[{\"SecuritiesCompanyCode\":\"6488\",\"ClosingPrice\":\"88.25\"}]"));
+        var handler = new StubHandler(_ => JsonResponse("[{\"SecuritiesCompanyCode\":\"6488\",\"CompanyName\":\"環球晶\",\"ClosingPrice\":\"88.25\"}]"));
         using var client = new HttpClient(handler);
         var provider = new TpexCurrentPriceProvider(client);
 
@@ -36,7 +37,25 @@ public sealed class CurrentPriceProviderTests
 
         Assert.Null(result.Failure);
         Assert.Equal("6488", Assert.Single(result.Records).Symbol);
+        Assert.Equal("環球晶", Assert.Single(result.Records).Name);
         Assert.Equal(88.25m, Assert.Single(result.Records).Price);
+    }
+
+    /// <summary>驗證官方清單保留代號與名稱，即使當日價格為空也不視為 parser failure。</summary>
+    [Fact]
+    public async Task TwseProvider_PreservesCatalogMembershipWhenPriceIsMissing()
+    {
+        var handler = new StubHandler(_ => JsonResponse("[{\"Code\":\"2330\",\"Name\":\"台積電\",\"ClosingPrice\":\"\"}]"));
+        using var client = new HttpClient(handler);
+        var provider = new TwseCurrentPriceProvider(client);
+
+        var result = await provider.FetchAsync();
+
+        Assert.Null(result.Failure);
+        var record = Assert.Single(result.Records);
+        Assert.Equal("2330", record.Symbol);
+        Assert.Equal("台積電", record.Name);
+        Assert.Null(record.Price);
     }
 
     /// <summary>驗證 parser 允許剛好 1 MiB application bytes。</summary>
@@ -142,6 +161,23 @@ public sealed class CurrentPriceProviderTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => provider.FetchAsync(cancellation.Token));
     }
 
+    /// <summary>驗證 response stream 讀取例外會轉成 bounded network failure。</summary>
+    [Fact]
+    public async Task Provider_MapsStreamFailureToBoundedNetworkError()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ThrowingStream()),
+        });
+        using var client = new HttpClient(handler);
+        var provider = new TwseCurrentPriceProvider(client);
+
+        var result = await provider.FetchAsync();
+
+        Assert.Equal("NetworkError", result.Failure?.Code);
+        Assert.True(result.Failure?.Retryable);
+    }
+
     /// <summary>建立固定 JSON HTTP response。</summary>
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK)
@@ -171,5 +207,15 @@ public sealed class CurrentPriceProviderTests
             CallCount++;
             return Task.FromResult(_handler(request));
         }
+    }
+
+    /// <summary>提供讀取時拋出 IOException 的測試 stream。</summary>
+    private sealed class ThrowingStream : MemoryStream
+    {
+        /// <summary>模擬 response body 讀取失敗。</summary>
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+            => throw new IOException("fixture stream failure");
     }
 }

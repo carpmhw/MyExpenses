@@ -1,5 +1,4 @@
-using System.Collections.Concurrent;
-using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -9,65 +8,24 @@ namespace MyExpenses.Api.Endpoints;
 
 public static class StockEndpoints
 {
-    private static readonly ConcurrentDictionary<string, (string Name, decimal? CurrentPrice)> _stockCache = new();
-    private static DateTime _lastFetch = DateTime.MinValue;
-    private static readonly SemaphoreSlim _fetchLock = new(1, 1);
-
     public static void MapStockEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/stocks");
 
-        group.MapGet("/lookup", async (string symbol, IHttpClientFactory httpFactory) =>
+        group.MapGet("/lookup", async (
+            string symbol,
+            [FromServices] IOfficialMarketCatalogService catalogService,
+            CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrWhiteSpace(symbol)) return Results.Ok(new { name = (string?)null });
-
-            var key = symbol.Trim().ToUpperInvariant();
-
-            if (_stockCache.TryGetValue(key, out var cached))
-                return Results.Ok(new { name = cached.Name, currentPrice = cached.CurrentPrice });
-
-            // Refresh cache from TWSE if stale (once per hour)
-            if (DateTime.UtcNow - _lastFetch > TimeSpan.FromHours(1))
-            {
-                await _fetchLock.WaitAsync();
-                try
-                {
-                    if (DateTime.UtcNow - _lastFetch > TimeSpan.FromHours(1))
-                    {
-                        var http = httpFactory.CreateClient();
-                        var response = await http.GetStringAsync("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL");
-                        using var doc = JsonDocument.Parse(response);
-                        foreach (var item in doc.RootElement.EnumerateArray())
-                        {
-                            var code = item.GetProperty("Code").GetString();
-                            var name = item.GetProperty("Name").GetString();
-                            decimal? closingPrice = null;
-                            if (item.TryGetProperty("ClosingPrice", out var cp) && cp.ValueKind == JsonValueKind.String)
-                            {
-                                var cpStr = cp.GetString();
-                                if (decimal.TryParse(cpStr, out var parsed))
-                                    closingPrice = parsed;
-                            }
-                            if (code != null && name != null)
-                                _stockCache[code.Trim().ToUpperInvariant()] = (name, closingPrice);
-                        }
-                        _lastFetch = DateTime.UtcNow;
-                    }
-                }
-                catch
-                {
-                    // TWSE API unavailable, proceed with existing cache
-                }
-                finally
-                {
-                    _fetchLock.Release();
-                }
-
-                if (_stockCache.TryGetValue(key, out var refreshed))
-                    return Results.Ok(new { name = refreshed.Name, currentPrice = refreshed.CurrentPrice });
-            }
-
-            return Results.Ok(new { name = (string?)null });
+            var resolution = await catalogService.LookupAsync(symbol, cancellationToken);
+            var price = resolution.Record?.Price is > 0m
+                ? resolution.Record.Price
+                : null;
+            return Results.Ok(new StockLookupResponse(
+                resolution.Market == StockMarket.Unknown ? null : resolution.Record?.Name,
+                price,
+                resolution.Market,
+                resolution.Code));
         });
 
         group.MapGet("/", async (int page, int pageSize, string? symbol, string? broker, AppDbContext db) =>
@@ -192,6 +150,13 @@ public sealed record StockListResponse(
     int PageSize,
     decimal TotalEstimatedNetSellValue,
     decimal TotalEstimatedGainLoss);
+
+/// <summary>提供股票 lookup 的安全市場、名稱、價格與結果碼。</summary>
+public sealed record StockLookupResponse(
+    string? Name,
+    decimal? CurrentPrice,
+    StockMarket Market,
+    string ResultCode);
 
 public sealed record StockListItem(
     int Id,

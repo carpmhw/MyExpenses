@@ -8,6 +8,7 @@ import {
   formatStockMarket,
 } from '../src/utils/stock.ts'
 import { syncStockPriceOnSave } from '../src/utils/stockPriceSync.ts'
+import { applyStockMarketLookup, resetStockMarketLookupFields } from '../src/utils/stockMarketLookup.ts'
 
 // Verifies stock instrument type labels match the Taiwan tax categories shown in the UI.
 test('STOCK_INSTRUMENT_TYPE_OPTIONS lists supported instrument types', () => {
@@ -59,7 +60,7 @@ test('buildStocksQuery omits blank stock filters', () => {
   assert.equal(query.has('broker'), false)
 })
 
-// Verifies disabling immediate lookup preserves the existing price state without calling the lookup.
+// 驗證停用即時查價時保留既有價格狀態，且不呼叫 lookup。
 test('syncStockPriceOnSave skips lookup when disabled', async () => {
   let lookupCalls = 0
   const result = await syncStockPriceOnSave(
@@ -68,9 +69,10 @@ test('syncStockPriceOnSave skips lookup when disabled', async () => {
     { currentPrice: 1000, lastPriceUpdate: '2026-07-14T00:00:00.000Z' },
     async () => {
       lookupCalls++
-      return { currentPrice: 1100 }
+      return { currentPrice: 1100, market: 'Twse' }
     },
     () => '2026-07-15T00:00:00.000Z',
+    'Twse',
   )
 
   assert.equal(lookupCalls, 0)
@@ -81,7 +83,7 @@ test('syncStockPriceOnSave skips lookup when disabled', async () => {
   })
 })
 
-// Verifies a successful lookup returns the new price and the lookup completion timestamp.
+// 驗證相同明確市場的 lookup 會回傳新價格與完成時間。
 test('syncStockPriceOnSave applies a successful lookup', async () => {
   let lookedUpSymbol = ''
   const result = await syncStockPriceOnSave(
@@ -90,9 +92,10 @@ test('syncStockPriceOnSave applies a successful lookup', async () => {
     { currentPrice: 1000, lastPriceUpdate: '2026-07-14T00:00:00.000Z' },
     async (symbol) => {
       lookedUpSymbol = symbol
-      return { currentPrice: 1100 }
+      return { currentPrice: 1100, market: 'Twse' }
     },
     () => '2026-07-15T00:00:00.000Z',
+    'Twse',
   )
 
   assert.equal(lookedUpSymbol, '2330')
@@ -103,14 +106,15 @@ test('syncStockPriceOnSave applies a successful lookup', async () => {
   })
 })
 
-// Verifies missing lookup prices preserve the old state and report a failed synchronization.
+// 驗證 lookup 未提供價格時保留舊狀態並回報同步失敗。
 test('syncStockPriceOnSave preserves state when lookup has no price', async () => {
   const result = await syncStockPriceOnSave(
     true,
     '2330',
     { currentPrice: 1000, lastPriceUpdate: '2026-07-14T00:00:00.000Z' },
-    async () => ({ currentPrice: null }),
+    async () => ({ currentPrice: null, market: 'Twse' }),
     () => '2026-07-15T00:00:00.000Z',
+    'Twse',
   )
 
   assert.deepEqual(result, {
@@ -120,7 +124,7 @@ test('syncStockPriceOnSave preserves state when lookup has no price', async () =
   })
 })
 
-// Verifies lookup exceptions preserve the old state and report a failed synchronization.
+// 驗證 lookup 發生例外時保留舊狀態並回報同步失敗。
 test('syncStockPriceOnSave preserves state when lookup throws', async () => {
   const result = await syncStockPriceOnSave(
     true,
@@ -130,6 +134,7 @@ test('syncStockPriceOnSave preserves state when lookup throws', async () => {
       throw new Error('TWSE unavailable')
     },
     () => '2026-07-15T00:00:00.000Z',
+    'Twse',
   )
 
   assert.deepEqual(result, {
@@ -139,7 +144,7 @@ test('syncStockPriceOnSave preserves state when lookup throws', async () => {
   })
 })
 
-// Verifies blank symbols do not trigger a lookup and preserve the old state.
+// 驗證空白代號不觸發 lookup 並保留舊狀態。
 test('syncStockPriceOnSave fails without lookup for a blank symbol', async () => {
   let lookupCalls = 0
   const result = await syncStockPriceOnSave(
@@ -148,9 +153,10 @@ test('syncStockPriceOnSave fails without lookup for a blank symbol', async () =>
     { currentPrice: 1000, lastPriceUpdate: '2026-07-14T00:00:00.000Z' },
     async () => {
       lookupCalls++
-      return { currentPrice: 1100 }
+      return { currentPrice: 1100, market: 'Twse' }
     },
     () => '2026-07-15T00:00:00.000Z',
+    'Twse',
   )
 
   assert.equal(lookupCalls, 0)
@@ -159,4 +165,132 @@ test('syncStockPriceOnSave fails without lookup for a blank symbol', async () =>
     currentPrice: 1000,
     lastPriceUpdate: '2026-07-14T00:00:00.000Z',
   })
+})
+
+// 驗證代號改變時只重設 lookup 衍生欄位，並保留使用者手動修改的欄位。
+test('resetStockMarketLookupFields resets clean fields and preserves dirty fields', () => {
+  assert.deepEqual(
+    resetStockMarketLookupFields(
+      { name: '台積電', symbol: '6488', market: 'Twse', currentPrice: 1000 },
+      {},
+    ),
+    { name: '', symbol: '6488', market: 'Unknown', currentPrice: 0 },
+  )
+  assert.deepEqual(
+    resetStockMarketLookupFields(
+      { name: '自訂名稱', symbol: '6488', market: 'Tpex', currentPrice: 999 },
+      { name: true, currentPrice: true, market: true },
+    ),
+    { name: '自訂名稱', symbol: '6488', market: 'Tpex', currentPrice: 999 },
+  )
+})
+
+// 驗證儲存同步拒絕不同市場的價格，並保留原價格與更新時間。
+test('syncStockPriceOnSave preserves state when lookup market mismatches', async () => {
+  const result = await syncStockPriceOnSave(
+    true,
+    '2330',
+    { currentPrice: 1000, lastPriceUpdate: '2026-07-14T00:00:00.000Z' },
+    async () => ({ currentPrice: 1100, market: 'Twse' }),
+    () => '2026-07-15T00:00:00.000Z',
+    'Tpex',
+  )
+
+  assert.deepEqual(result, {
+    status: 'failed',
+    currentPrice: 1000,
+    lastPriceUpdate: '2026-07-14T00:00:00.000Z',
+  })
+})
+
+// 驗證使用者或 lookup 市場不明時，不會套用無法確認市場歸屬的價格。
+test('syncStockPriceOnSave preserves state when either market is unknown', async () => {
+  const existingState = { currentPrice: 1000, lastPriceUpdate: '2026-07-14T00:00:00.000Z' }
+  const unknownExpectedMarket = await syncStockPriceOnSave(
+    true,
+    '2330',
+    existingState,
+    async () => ({ currentPrice: 1100, market: 'Twse' }),
+    () => '2026-07-15T00:00:00.000Z',
+    'Unknown',
+  )
+  const unknownLookupMarket = await syncStockPriceOnSave(
+    true,
+    '2330',
+    existingState,
+    async () => ({ currentPrice: 1100, market: 'Unknown' }),
+    () => '2026-07-15T00:00:00.000Z',
+    'Twse',
+  )
+
+  assert.deepEqual(unknownExpectedMarket, { status: 'failed', ...existingState })
+  assert.deepEqual(unknownLookupMarket, { status: 'failed', ...existingState })
+})
+
+// 驗證唯一市場 lookup 會帶入名稱、價格與市場。
+test('applyStockMarketLookup applies unique market result', () => {
+  const result = applyStockMarketLookup(
+    { name: '', symbol: '2330', market: 'Unknown', currentPrice: 0 },
+    { name: '台積電', currentPrice: 1000, market: 'Twse', resultCode: 'Completed' },
+    '2330',
+    '2330',
+    false,
+  )
+
+  assert.deepEqual(result, { name: '台積電', symbol: '2330', market: 'Twse', currentPrice: 1000 })
+})
+
+// 驗證未知 lookup 或使用者已修改市場時不會覆寫表單市場。
+test('applyStockMarketLookup preserves unknown or dirty market', () => {
+  const state = { name: '自訂名稱', symbol: '2330', market: 'Tpex' as const, currentPrice: 100 }
+  const unknown = applyStockMarketLookup(
+    state,
+    { name: null, currentPrice: null, market: 'Unknown', resultCode: 'MarketNotFound' },
+    '2330',
+    '2330',
+    false,
+  )
+  const dirty = applyStockMarketLookup(
+    state,
+    { name: '台積電', currentPrice: 1000, market: 'Twse', resultCode: 'Completed' },
+    '2330',
+    '2330',
+    true,
+  )
+
+  assert.deepEqual(unknown, state)
+  assert.equal(dirty.market, 'Tpex')
+})
+
+// 驗證使用者手動修改名稱或現價後，晚到 lookup 不會覆寫表單意圖。
+test('applyStockMarketLookup preserves manually edited name and current price', () => {
+  const result = applyStockMarketLookup(
+    { name: '自訂名稱', symbol: '2330', market: 'Unknown', currentPrice: 999 },
+    { name: '台積電', currentPrice: 1000, market: 'Twse', resultCode: 'Completed' },
+    '2330',
+    '2330',
+    false,
+    { name: true, currentPrice: true },
+  )
+
+  assert.deepEqual(result, {
+    name: '自訂名稱',
+    symbol: '2330',
+    market: 'Twse',
+    currentPrice: 999,
+  })
+})
+
+// 驗證較舊 lookup response 不會覆寫新代號。
+test('applyStockMarketLookup ignores response for a different symbol', () => {
+  const state = { name: '', symbol: '6488', market: 'Unknown' as const, currentPrice: 0 }
+  const result = applyStockMarketLookup(
+    state,
+    { name: '台積電', currentPrice: 1000, market: 'Twse', resultCode: 'Completed' },
+    '2330',
+    '6488',
+    false,
+  )
+
+  assert.deepEqual(result, state)
 })

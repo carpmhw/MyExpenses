@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using MyExpenses.Api.Models;
 
 namespace MyExpenses.Api.Services;
@@ -36,7 +37,7 @@ public sealed class HistoricalMarketDataSyncService : BackgroundService
 
                 await RunScheduledExecutionAsync(scheduledForUtc, stoppingToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
@@ -76,9 +77,28 @@ public sealed class HistoricalMarketDataSyncService : BackgroundService
             scheduledForUtc,
             BusinessScheduleCalculator.TaiwanTimeZone.Id,
             localDate,
-            async (context, token) => MapResult(
-                await synchronizer.SyncAsync(localDate, token, context.FrozenTargetKeys)),
+            (context, token) => RunWorkflowAsync(synchronizer, context, localDate, token),
             cancellationToken);
+    }
+
+    /// <summary>執行單次歷史同步，並在 persistence 中止時先保留 partial aggregate 再重拋原始例外。</summary>
+    private static async Task<ScheduledJobWorkflowResult> RunWorkflowAsync(
+        HistoricalMarketDataSynchronizer synchronizer,
+        ScheduledJobWorkflowContext context,
+        DateOnly localDate,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await synchronizer.SyncAsync(localDate, cancellationToken, context.FrozenTargetKeys);
+            return MapResult(result);
+        }
+        catch (HistoricalMarketDataPartialFailureException exception)
+        {
+            context.Aggregation.Apply(MapResult(exception.PartialResult));
+            ExceptionDispatchInfo.Capture(exception.InnerException ?? exception).Throw();
+            throw;
+        }
     }
 
     /// <summary>將歷史同步 typed batch result 映射為共用 runner envelope。</summary>

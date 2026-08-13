@@ -187,6 +187,58 @@ public sealed class YahooHistoricalAdjustedPriceProviderTests
         Assert.Single(handler.RequestUris);
     }
 
+    /// <summary>驗證歷史 provider 對 redirect 回應保留 bounded redirect failure。</summary>
+    [Fact]
+    public async Task GetPricesAsync_ClassifiesRedirectAsPermanentFailure()
+    {
+        var handler = new FixtureHttpHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Redirect);
+            response.Headers.Location = new Uri("https://example.test/redirect");
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var provider = new YahooHistoricalAdjustedPriceProvider(client, new HistoricalMarketDataOptions
+        {
+            MaxRetries = 0,
+        });
+
+        var exception = await Assert.ThrowsAsync<HistoricalPriceProviderException>(() => provider.GetPricesAsync(
+            StockMarket.Twse,
+            "2330",
+            new DateOnly(2026, 8, 1),
+            new DateOnly(2026, 8, 7)));
+
+        Assert.Equal("unexpected_redirect", exception.Code);
+        Assert.Single(handler.RequestUris);
+    }
+
+    /// <summary>驗證 response stream IOException 會依上限重試並轉成 bounded network failure。</summary>
+    [Fact]
+    public async Task GetPricesAsync_RetriesStreamIOExceptionAndReturnsNetworkError()
+    {
+        var handler = new FixtureHttpHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ThrowingStream()),
+        }));
+        using var client = CreateClient(handler);
+        var provider = new YahooHistoricalAdjustedPriceProvider(client, new HistoricalMarketDataOptions
+        {
+            MaxRetries = 1,
+        });
+
+        var exception = await Assert.ThrowsAsync<HistoricalPriceProviderException>(() => provider.GetPricesAsync(
+            StockMarket.Twse,
+            "2330",
+            new DateOnly(2026, 8, 1),
+            new DateOnly(2026, 8, 7)));
+
+        Assert.Equal("network_error", exception.Code);
+        Assert.Equal("歷史行情服務連線失敗", exception.SafeMessage);
+        Assert.Equal(2, handler.RequestUris.Count);
+        Assert.DoesNotContain("fixture", exception.SafeMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>只有明確設定環境變數時才呼叫 Yahoo no-key live endpoint 作為 smoke check。</summary>
     [Fact]
     public async Task LiveSmokeCheck_IsOptInAndReportsProviderLimits()
@@ -247,5 +299,15 @@ public sealed class YahooHistoricalAdjustedPriceProviderTests
         /// <summary>保存測試期間收到的 request URL。</summary>
         public List<string> RequestUris { get; } = [];
 
+    }
+
+    /// <summary>提供讀取 response body 時拋出 IOException 的測試 stream。</summary>
+    private sealed class ThrowingStream : MemoryStream
+    {
+        /// <summary>模擬 response body stream 的網路讀取失敗。</summary>
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+            => throw new IOException("fixture stream failure");
     }
 }

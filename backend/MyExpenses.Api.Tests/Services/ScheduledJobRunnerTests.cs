@@ -80,6 +80,121 @@ public sealed class ScheduledJobRunnerTests
         Assert.Equal("ProviderUnavailable", execution.ResultCode);
     }
 
+    /// <summary>驗證單一 frozen target 以最後一次失敗 disposition 決定終態代碼。</summary>
+    [Fact]
+    public async Task RunAsync_UsesLatestFailureCodeForSingleFrozenTarget()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        var runner = CreateRunner(db, retryDelay: TimeSpan.Zero);
+        var attempts = 0;
+
+        var execution = await runner.RunAsync(
+            ScheduledJobKey.HistoricalMarketDataSync,
+            new DateTime(2026, 8, 8, 15, 30, 0, DateTimeKind.Utc),
+            "Asia/Taipei",
+            new DateOnly(2026, 8, 8),
+            (_, _) =>
+            {
+                attempts++;
+                var code = attempts == 1 ? "ProviderUnavailable" : "TargetChanged";
+                return Task.FromResult(new ScheduledJobWorkflowResult
+                {
+                    Outcome = ScheduledJobWorkflowOutcome.Failed,
+                    Retryability = attempts == 1
+                        ? ScheduledJobRetryClassification.Retryable
+                        : ScheduledJobRetryClassification.Permanent,
+                    TargetsEnumerated = true,
+                    TargetKeys = ["instrument-1"],
+                    FailedTargetCodes = new Dictionary<string, string> { ["instrument-1"] = code },
+                    ResultCode = code,
+                });
+            });
+
+        Assert.Equal(ScheduledJobExecutionStatus.Failed, execution.Status);
+        Assert.Equal(2, execution.AttemptCount);
+        Assert.Equal("TargetChanged", execution.ResultCode);
+    }
+
+    /// <summary>驗證多個 frozen target 的最後失敗代碼不同時回傳 MultipleFailures。</summary>
+    [Fact]
+    public async Task RunAsync_ReturnsMultipleFailuresForDifferentFinalTargetCodes()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        var runner = CreateRunner(db, retryDelay: TimeSpan.Zero);
+        var attempts = 0;
+
+        var execution = await runner.RunAsync(
+            ScheduledJobKey.HistoricalMarketDataSync,
+            new DateTime(2026, 8, 8, 15, 30, 0, DateTimeKind.Utc),
+            "Asia/Taipei",
+            new DateOnly(2026, 8, 8),
+            (_, _) =>
+            {
+                attempts++;
+                return Task.FromResult(new ScheduledJobWorkflowResult
+                {
+                    Outcome = ScheduledJobWorkflowOutcome.Failed,
+                    Retryability = attempts == 1
+                        ? ScheduledJobRetryClassification.Retryable
+                        : ScheduledJobRetryClassification.Permanent,
+                    TargetsEnumerated = true,
+                    TargetKeys = ["instrument-1", "instrument-2"],
+                    FailedTargetCodes = attempts == 1
+                        ? new Dictionary<string, string>
+                        {
+                            ["instrument-1"] = "ProviderUnavailable",
+                            ["instrument-2"] = "ProviderUnavailable",
+                        }
+                        : new Dictionary<string, string>
+                        {
+                            ["instrument-1"] = "TargetChanged",
+                            ["instrument-2"] = "ProviderRejected",
+                        },
+                    ResultCode = attempts == 1 ? "ProviderUnavailable" : "MultipleFailures",
+                });
+            });
+
+        Assert.Equal(ScheduledJobExecutionStatus.Failed, execution.Status);
+        Assert.Equal(2, execution.AttemptCount);
+        Assert.Equal("MultipleFailures", execution.ResultCode);
+    }
+
+    /// <summary>驗證從未成功列舉目標時仍依跨 attempt 歷史失敗代碼決定終態。</summary>
+    [Fact]
+    public async Task RunAsync_PreservesHistoricalFailureCodesBeforeTargetEnumeration()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        var runner = CreateRunner(db, retryDelay: TimeSpan.Zero);
+        var attempts = 0;
+
+        var execution = await runner.RunAsync(
+            ScheduledJobKey.HistoricalMarketDataSync,
+            new DateTime(2026, 8, 8, 15, 30, 0, DateTimeKind.Utc),
+            "Asia/Taipei",
+            new DateOnly(2026, 8, 8),
+            (_, _) =>
+            {
+                attempts++;
+                return Task.FromResult(new ScheduledJobWorkflowResult
+                {
+                    Outcome = ScheduledJobWorkflowOutcome.Failed,
+                    Retryability = attempts == 1
+                        ? ScheduledJobRetryClassification.Retryable
+                        : ScheduledJobRetryClassification.Permanent,
+                    TargetsEnumerated = false,
+                    ResultCode = attempts == 1 ? "ProviderUnavailable" : "ProviderRejected",
+                });
+            });
+
+        Assert.Equal(ScheduledJobExecutionStatus.Failed, execution.Status);
+        Assert.Equal(2, execution.AttemptCount);
+        Assert.Null(execution.TargetCount);
+        Assert.Equal("MultipleFailures", execution.ResultCode);
+    }
+
     /// <summary>驗證前次部分成功後重試不會重複計算目標或受影響資料列。</summary>
     [Fact]
     public async Task RunAsync_AggregatesUniqueTargetsAcrossAttempts()
@@ -157,7 +272,7 @@ public sealed class ScheduledJobRunnerTests
         Assert.Equal("InvalidProviderResponse", execution.ResultCode);
     }
 
-    /// <summary>驗證 workflow 拋出取消例外時不會重試且 execution 進入 Canceled。</summary>
+    /// <summary>驗證 host token 取消時 workflow 拋出取消例外不會重試且 execution 進入 Canceled。</summary>
     [Fact]
     public async Task RunAsync_MarksCanceledWithoutRetry()
     {
@@ -165,21 +280,95 @@ public sealed class ScheduledJobRunnerTests
         await using var db = CreateDb(connection);
         var runner = CreateRunner(db, retryDelay: TimeSpan.Zero);
         var attempts = 0;
+        using var cancellation = new CancellationTokenSource();
 
         var execution = await runner.RunAsync(
             ScheduledJobKey.AutomaticSnapshot,
             new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc),
             "Asia/Taipei",
             new DateOnly(2026, 8, 8),
-            (_, _) =>
+            (_, token) =>
             {
                 attempts++;
-                throw new OperationCanceledException();
-            });
+                cancellation.Cancel();
+                throw new OperationCanceledException(token);
+            },
+            cancellation.Token);
 
         Assert.Equal(1, attempts);
         Assert.Equal(ScheduledJobExecutionStatus.Canceled, execution.Status);
         Assert.Equal("Canceled", execution.ResultCode);
+    }
+
+    /// <summary>驗證未取消 host token 的取消例外視為 timeout 並於同一 execution 重試。</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_RetriesNonHostCancellationAsTransientFailure(bool taskCanceled)
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        var runner = CreateRunner(db, retryDelay: TimeSpan.Zero);
+        var attempts = 0;
+
+        var execution = await runner.RunAsync(
+            ScheduledJobKey.StockPriceUpdate,
+            new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc),
+            "Asia/Taipei",
+            new DateOnly(2026, 8, 8),
+            (_, _) =>
+            {
+                attempts++;
+                throw taskCanceled
+                    ? new TaskCanceledException("內部 timeout")
+                    : new OperationCanceledException("內部 timeout");
+            });
+
+        Assert.Equal(3, attempts);
+        Assert.Equal(3, execution.AttemptCount);
+        Assert.Equal(ScheduledJobExecutionStatus.Failed, execution.Status);
+        Assert.NotEqual("Canceled", execution.ResultCode);
+        Assert.Equal("TransientFailure", execution.ResultCode);
+    }
+
+    /// <summary>驗證 retry delay 的非 host 取消例外不會將 execution 錯標為 Canceled。</summary>
+    [Fact]
+    public async Task RunAsync_ClassifiesNonHostRetryDelayCancellationAsTransientFailure()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        var runner = new ScheduledJobRunner(
+            new ScheduledJobExecutionRepository(db),
+            NullLogger<ScheduledJobRunner>.Instance,
+            new CancelingDelayTimeProvider(),
+            new ScheduledJobRunnerOptions
+            {
+                MaxAttempts = 3,
+                RetryDelay = TimeSpan.FromMinutes(1),
+            });
+        var attempts = 0;
+
+        var execution = await runner.RunAsync(
+            ScheduledJobKey.StockPriceUpdate,
+            new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc),
+            "Asia/Taipei",
+            new DateOnly(2026, 8, 8),
+            (_, _) =>
+            {
+                attempts++;
+                return Task.FromResult(new ScheduledJobWorkflowResult
+                {
+                    Outcome = ScheduledJobWorkflowOutcome.Failed,
+                    Retryability = ScheduledJobRetryClassification.Retryable,
+                    TargetsEnumerated = false,
+                    ResultCode = "ProviderUnavailable",
+                });
+            });
+
+        Assert.Equal(3, attempts);
+        Assert.Equal(ScheduledJobExecutionStatus.Failed, execution.Status);
+        Assert.NotEqual("Canceled", execution.ResultCode);
+        Assert.Equal("MultipleFailures", execution.ResultCode);
     }
 
     /// <summary>驗證取消後保存 execution 狀態不會提交 workflow 留下的業務追蹤變更。</summary>
@@ -221,13 +410,14 @@ public sealed class ScheduledJobRunnerTests
         await using var db = CreateDb(connection);
         var runner = CreateRunner(db, retryDelay: TimeSpan.Zero);
         var attempts = 0;
+        using var cancellation = new CancellationTokenSource();
 
         var execution = await runner.RunAsync(
             ScheduledJobKey.StockPriceUpdate,
             new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc),
             "Asia/Taipei",
             new DateOnly(2026, 8, 8),
-            (_, _) =>
+            (_, token) =>
             {
                 attempts++;
                 if (attempts == 1)
@@ -245,14 +435,72 @@ public sealed class ScheduledJobRunnerTests
                     });
                 }
 
-                throw new OperationCanceledException();
-            });
+                cancellation.Cancel();
+                throw new OperationCanceledException(token);
+            },
+            cancellation.Token);
 
         Assert.Equal(ScheduledJobExecutionStatus.Canceled, execution.Status);
         Assert.Equal(2, execution.TargetCount);
         Assert.Equal(1, execution.SucceededCount);
         Assert.Equal(1, execution.FailedCount);
         Assert.Equal(1, execution.AffectedCount);
+    }
+
+    /// <summary>驗證 frozen target keys 依首次列舉輸入順序提供給後續 workflow。</summary>
+    [Fact]
+    public async Task RunAsync_PreservesFrozenTargetInsertionOrder()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        var runner = CreateRunner(db, retryDelay: TimeSpan.Zero);
+        var attempts = 0;
+        IReadOnlyCollection<string>? frozenTargets = null;
+
+        await runner.RunAsync(
+            ScheduledJobKey.StockPriceUpdate,
+            new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc),
+            "Asia/Taipei",
+            new DateOnly(2026, 8, 8),
+            (context, _) =>
+            {
+                attempts++;
+                if (attempts == 1)
+                {
+                    return Task.FromResult(new ScheduledJobWorkflowResult
+                    {
+                        Outcome = ScheduledJobWorkflowOutcome.Failed,
+                        Retryability = ScheduledJobRetryClassification.Retryable,
+                        TargetsEnumerated = true,
+                        TargetKeys = ["target-b", "target-a", "target-c"],
+                        FailedTargetCodes = new Dictionary<string, string>
+                        {
+                            ["target-b"] = "ProviderUnavailable",
+                            ["target-a"] = "ProviderUnavailable",
+                            ["target-c"] = "ProviderUnavailable",
+                        },
+                        ResultCode = "ProviderUnavailable",
+                    });
+                }
+
+                frozenTargets = context.FrozenTargetKeys;
+                return Task.FromResult(new ScheduledJobWorkflowResult
+                {
+                    Outcome = ScheduledJobWorkflowOutcome.Failed,
+                    Retryability = ScheduledJobRetryClassification.Permanent,
+                    TargetsEnumerated = true,
+                    TargetKeys = ["target-b", "target-a", "target-c"],
+                    FailedTargetCodes = new Dictionary<string, string>
+                    {
+                        ["target-b"] = "TargetChanged",
+                        ["target-a"] = "TargetChanged",
+                        ["target-c"] = "TargetChanged",
+                    },
+                    ResultCode = "TargetChanged",
+                });
+            });
+
+        Assert.Equal(["target-b", "target-a", "target-c"], frozenTargets);
     }
 
     /// <summary>驗證不論外部設定為何，同一 execution 最多只執行三次 attempt。</summary>
@@ -338,5 +586,21 @@ public sealed class ScheduledJobRunnerTests
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         return connection;
+    }
+
+    /// <summary>在 retry delay 建立 timer 時拋出未綁定 host token 的取消例外。</summary>
+    private sealed class CancelingDelayTimeProvider : TimeProvider
+    {
+        /// <summary>回傳固定 UTC 時間供 runner 使用。</summary>
+        public override DateTimeOffset GetUtcNow()
+            => new(new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc));
+
+        /// <summary>模擬內部 timer timeout 導致的非 host 取消例外。</summary>
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+            => throw new OperationCanceledException("內部 timer timeout");
     }
 }

@@ -14,8 +14,8 @@ public sealed class CurrentPriceProviderOptions
     public string? Endpoint { get; set; }
 }
 
-/// <summary>描述供應商回傳的單筆已正規化價格資料。</summary>
-public sealed record CurrentPriceRecord(string Symbol, decimal? Price);
+/// <summary>描述供應商回傳的單筆已正規化市場資料。</summary>
+public sealed record CurrentPriceRecord(string Symbol, decimal? Price, string? Name = null);
 
 /// <summary>描述不含原始 response 的 typed provider failure。</summary>
 public sealed record CurrentPriceProviderFailure(
@@ -162,12 +162,34 @@ public abstract class CurrentPriceProviderBase : ICurrentPriceProvider
                 true,
                 LogicalEndpoint);
         }
+        catch (IOException)
+        {
+            return CurrentPriceProviderResult.Failed(
+                ProviderName,
+                "NetworkError",
+                "行情服務回應讀取失敗",
+                true,
+                LogicalEndpoint);
+        }
         catch (CurrentPriceProviderParsingException exception)
         {
             return CurrentPriceProviderResult.Failed(
                 ProviderName,
                 exception.Code,
                 exception.SafeMessage,
+                false,
+                LogicalEndpoint);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return CurrentPriceProviderResult.Failed(
+                ProviderName,
+                "ProviderFailure",
+                "行情服務回應無法處理",
                 false,
                 LogicalEndpoint);
         }
@@ -250,6 +272,27 @@ public abstract class CurrentPriceProviderBase : ICurrentPriceProvider
             "行情服務回應缺少股票代號");
     }
 
+    /// <summary>解析 provider 名稱欄位，缺少名稱時保留 nullable 結果。</summary>
+    protected static string? ParseName(JsonElement item, params string[] propertyNames)
+    {
+        if (item.ValueKind is not JsonValueKind.Object)
+            throw new CurrentPriceProviderParsingException(
+                "InvalidProviderResponse",
+                "行情服務回應格式無效");
+
+        foreach (var propertyName in propertyNames)
+        {
+            if (!item.TryGetProperty(propertyName, out var value)
+                || value.ValueKind != JsonValueKind.String)
+                continue;
+            var name = value.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(name) && name.Length <= 200)
+                return name;
+        }
+
+        return null;
+    }
+
     /// <summary>解析 JSON array 並將格式錯誤轉成安全 parser exception。</summary>
     protected static JsonElement RequireArray(ReadOnlyMemory<byte> payload, out JsonDocument document)
     {
@@ -323,7 +366,8 @@ public sealed class TwseCurrentPriceProvider : CurrentPriceProviderBase
             return root.EnumerateArray()
                 .Select(item => new CurrentPriceRecord(
                     ParseSymbol(item, "Code") ?? string.Empty,
-                    ParsePrice(item, "ClosingPrice")))
+                    ParsePrice(item, "ClosingPrice"),
+                    ParseName(item, "Name")))
                 .Where(record => record.Symbol.Length > 0)
                 .ToList();
         }
@@ -360,7 +404,8 @@ public sealed class TpexCurrentPriceProvider : CurrentPriceProviderBase
             return root.EnumerateArray()
                 .Select(item => new CurrentPriceRecord(
                     ParseSymbol(item, "SecuritiesCompanyCode", "Code", "證券代號") ?? string.Empty,
-                    ParsePrice(item, "ClosingPrice", "Close", "ClosePrice", "收盤價")))
+                    ParsePrice(item, "ClosingPrice", "Close", "ClosePrice", "收盤價"),
+                    ParseName(item, "CompanyName", "Name", "公司名稱")))
                 .Where(record => record.Symbol.Length > 0)
                 .ToList();
         }

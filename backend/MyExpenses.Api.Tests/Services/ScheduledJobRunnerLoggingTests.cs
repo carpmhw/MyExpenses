@@ -64,13 +64,19 @@ public sealed class ScheduledJobRunnerLoggingTests
             logger,
             TimeProvider.System,
             new ScheduledJobRunnerOptions { RetryDelay = TimeSpan.Zero });
+        using var cancellation = new CancellationTokenSource();
 
         var execution = await runner.RunAsync(
             ScheduledJobKey.StockPriceUpdate,
             new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc),
             "Asia/Taipei",
             new DateOnly(2026, 8, 8),
-            (_, _) => throw new OperationCanceledException());
+            (_, token) =>
+            {
+                cancellation.Cancel();
+                throw new OperationCanceledException(token);
+            },
+            cancellation.Token);
 
         Assert.Equal(ScheduledJobExecutionStatus.Canceled, execution.Status);
         Assert.Contains(logger.Scopes, item =>

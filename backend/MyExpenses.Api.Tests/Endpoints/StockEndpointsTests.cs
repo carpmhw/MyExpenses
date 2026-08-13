@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Endpoints;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 using Xunit;
 
 namespace MyExpenses.Api.Tests.Endpoints;
@@ -292,7 +293,11 @@ public class StockEndpointsTests
 
         await using var app = await CreateStockAppAsync(
             (SqliteConnection)db.Database.GetDbConnection(),
-            new StubTwseHandler(lookupSymbol));
+            catalogService: new FakeCatalogService(
+                new OfficialMarketResolution(
+                    StockMarket.Twse,
+                    "Completed",
+                    new CurrentPriceRecord(lookupSymbol, 1100m, "測試股票"))));
 
         var response = await app.GetTestClient().GetAsync($"/api/stocks/lookup?symbol={Uri.EscapeDataString(lookupSymbol)}");
         response.EnsureSuccessStatusCode();
@@ -305,14 +310,84 @@ public class StockEndpointsTests
         Assert.Null(stock.LastPriceUpdate);
     }
 
+    /// <summary>驗證 lookup 會回傳唯一官方市場、名稱、價格及安全結果碼。</summary>
+    [Fact]
+    public async Task Lookup_ReturnsUniqueMarketNamePriceAndResultCode()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateStockAppAsync(
+            (SqliteConnection)db.Database.GetDbConnection(),
+            catalogService: new FakeCatalogService(
+                new OfficialMarketResolution(
+                    StockMarket.Tpex,
+                    "Completed",
+                    new CurrentPriceRecord("6488", 88m, "環球晶"))));
+
+        var response = await app.GetTestClient().GetAsync("/api/stocks/lookup?symbol=6488");
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal("環球晶", payload.GetProperty("name").GetString());
+        Assert.Equal(88m, payload.GetProperty("currentPrice").GetDecimal());
+        Assert.Equal("Tpex", payload.GetProperty("market").GetString());
+        Assert.Equal("Completed", payload.GetProperty("resultCode").GetString());
+    }
+
+    /// <summary>驗證 lookup 遇到市場歧義時保持 Unknown 且不回傳代號市場。</summary>
+    [Fact]
+    public async Task Lookup_ReturnsUnknownForAmbiguousMarket()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateStockAppAsync(
+            (SqliteConnection)db.Database.GetDbConnection(),
+            catalogService: new FakeCatalogService(
+                new OfficialMarketResolution(StockMarket.Unknown, "AmbiguousMarket")));
+
+        var response = await app.GetTestClient().GetAsync("/api/stocks/lookup?symbol=9999");
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("name").ValueKind);
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("currentPrice").ValueKind);
+        Assert.Equal("Unknown", payload.GetProperty("market").GetString());
+        Assert.Equal("AmbiguousMarket", payload.GetProperty("resultCode").GetString());
+    }
+
+    /// <summary>驗證 lookup 遇到官方來源失敗時回傳安全 Unknown 結果。</summary>
+    [Fact]
+    public async Task Lookup_ReturnsUnknownWhenCatalogUnavailable()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateStockAppAsync(
+            (SqliteConnection)db.Database.GetDbConnection(),
+            catalogService: new FakeCatalogService(
+                new OfficialMarketResolution(
+                    StockMarket.Unknown,
+                    "MarketDetectionUnavailable",
+                    Retryable: true,
+                    SafeMessage: "官方市場清單暫時無法使用")));
+
+        var response = await app.GetTestClient().GetAsync("/api/stocks/lookup?symbol=2330");
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal("Unknown", payload.GetProperty("market").GetString());
+        Assert.Equal("MarketDetectionUnavailable", payload.GetProperty("resultCode").GetString());
+    }
+
     /// <summary>Creates a stock API test application backed by the supplied SQLite connection.</summary>
-    private static async Task<WebApplication> CreateStockAppAsync(SqliteConnection connection, HttpMessageHandler? handler = null)
+    private static async Task<WebApplication> CreateStockAppAsync(
+        SqliteConnection connection,
+        HttpMessageHandler? handler = null,
+        IOfficialMarketCatalogService? catalogService = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
         var httpClientBuilder = builder.Services.AddHttpClient(string.Empty);
         httpClientBuilder.ConfigurePrimaryHttpMessageHandler(() => handler ?? new HttpClientHandler());
+        builder.Services.AddSingleton(catalogService ?? new FakeCatalogService(
+            new OfficialMarketResolution(StockMarket.Unknown, "MarketNotFound")));
         builder.Services.ConfigureHttpJsonOptions(options =>
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -342,6 +417,29 @@ public class StockEndpointsTests
                 "application/json");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         }
+    }
+
+    /// <summary>提供 endpoint 測試固定的官方市場辨識結果。</summary>
+    private sealed class FakeCatalogService : IOfficialMarketCatalogService
+    {
+        /// <summary>初始化固定市場辨識結果。</summary>
+        public FakeCatalogService(OfficialMarketResolution resolution)
+        {
+            Resolution = resolution;
+        }
+
+        /// <summary>取得測試固定的辨識結果。</summary>
+        public OfficialMarketResolution Resolution { get; }
+
+        /// <summary>回傳固定的市場辨識結果。</summary>
+        public Task<OfficialMarketResolution> LookupAsync(string? symbol, CancellationToken cancellationToken = default)
+            => Task.FromResult(Resolution);
+
+        /// <summary>回傳固定的官方快照，供介面完成。</summary>
+        public Task<OfficialMarketCatalogSnapshot> FetchAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new OfficialMarketCatalogSnapshot(
+                CurrentPriceProviderResult.Success("TWSE", [new CurrentPriceRecord("2330", 100m)]),
+                CurrentPriceProviderResult.Success("TPEx", [new CurrentPriceRecord("6488", 88m)])));
     }
 
     /// <summary>Creates JSON options that match API enum string serialization.</summary>

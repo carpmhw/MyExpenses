@@ -7,7 +7,7 @@ export function formatMoney(amount: number): string {
  */
 export function formatShares(shares: number): string {
   if (shares >= 1000) {
-    const lots = shares / 1000
+    const lots = Math.floor((shares / 1000) * 100) / 100
     return `${lots.toLocaleString(undefined, { maximumFractionDigits: 2 })} 張`
   }
   return `${shares.toLocaleString()} 股`
