@@ -1,7 +1,7 @@
 import type {
   Category, Transaction, Installment, CreditCard, CreditCardBill,
   BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, WithdrawalListResponse, PaymentMethod, PaginatedResponse,
-  StockInstrumentType,
+  StockInstrumentType, StockMarket,
   TransactionListResponse, InstallmentListResponse,
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary, DashboardSummary, NetWorthTrendPoint,
   StockStructureReport, StockValueTrendPoint, StockMarketRiskReport,
@@ -23,6 +23,13 @@ const BASE = '/api'
 
 export interface ApiRequestContext {
   signal?: AbortSignal
+}
+
+export interface StockLookupResponse {
+  name: string | null
+  currentPrice: number | null
+  market: StockMarket
+  resultCode: string
 }
 
 // Adds an optional owner signal to an API request without changing existing callers.
@@ -351,7 +358,7 @@ export const api = {
     delete: (id: number, context?: ApiRequestContext) =>
       request<void>(`/stocks/${id}`, withRequestContext({ method: 'DELETE' }, context)),
     lookup: (symbol: string, context?: ApiRequestContext) =>
-      request<{ name: string | null; currentPrice: number | null }>(`/stocks/lookup?symbol=${encodeURIComponent(symbol)}`, withRequestContext({}, context)),
+      request<StockLookupResponse>(`/stocks/lookup?symbol=${encodeURIComponent(symbol)}`, withRequestContext({}, context)),
   },
 
   withdrawals: {

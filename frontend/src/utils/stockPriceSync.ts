@@ -1,3 +1,5 @@
+import type { StockMarket } from '../types'
+
 export interface StockPriceState {
   currentPrice: number
   lastPriceUpdate: string | null
@@ -5,6 +7,8 @@ export interface StockPriceState {
 
 export interface StockPriceLookupResult {
   currentPrice: number | null
+  market: StockMarket
+  resultCode?: string
 }
 
 export type StockPriceLookup = (symbol: string) => Promise<StockPriceLookupResult>
@@ -14,13 +18,14 @@ export interface StockPriceSyncResult extends StockPriceState {
   status: StockPriceSyncStatus
 }
 
-/** Resolves the one-time stock price lookup result while preserving the existing state on failure. */
+/** 僅在 lookup 市場符合預期明確市場時套用一次性股價，失敗則保留既有狀態。 */
 export async function syncStockPriceOnSave(
   enabled: boolean,
   symbol: string,
   existingState: StockPriceState,
   lookup: StockPriceLookup,
   now: () => string,
+  expectedMarket: StockMarket,
 ): Promise<StockPriceSyncResult> {
   if (!enabled) {
     return { status: 'skipped', ...existingState }
@@ -33,7 +38,12 @@ export async function syncStockPriceOnSave(
 
   try {
     const result = await lookup(normalizedSymbol)
-    if (result.currentPrice == null) {
+    if (
+      result.currentPrice == null
+      || expectedMarket === 'Unknown'
+      || result.market === 'Unknown'
+      || result.market !== expectedMarket
+    ) {
       return { status: 'failed', ...existingState }
     }
 

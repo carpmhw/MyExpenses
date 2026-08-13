@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted } from 'vue'
 import { api } from '../../api'
-import type { Stock, StockInstrumentType, StockListItem, StockMarket } from '../../types'
+import type { Stock, StockListItem } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -18,6 +18,7 @@ import {
 } from '../../utils/stock'
 import { syncStockPriceOnSave } from '../../utils/stockPriceSync'
 import { usePagination } from '../../composables/usePagination'
+import { applyStockMarketLookup, resetStockMarketLookupFields } from '../../utils/stockMarketLookup'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 
@@ -29,7 +30,10 @@ const saving = ref(false)
 
 const modalOpen = ref(false)
 const editingItem = ref<StockListItem | null>(null)
-const form = ref({ name: '', symbol: '', market: 'Unknown' as StockMarket, instrumentType: 'Stock' as StockInstrumentType, shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null as string | null })
+type StockFormState = Omit<Stock, 'id' | 'broker'> & { broker: string }
+const form = ref<StockFormState>({ name: '', symbol: '', market: 'Unknown', instrumentType: 'Stock', shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null })
+const marketDirty = ref(false)
+const lookupDirty = ref({ name: false, currentPrice: false })
 const syncPrice = ref(true)
 const totalEstimatedNetSellValue = ref(0)
 const totalEstimatedGainLoss = ref(0)
@@ -111,28 +115,34 @@ watch([symbolFilter, brokerFilter], () => {
   fetchStocks()
 })
 
-// Builds the stock payload with normalized text fields before it is sent to the API.
-function buildStockPayload(): Omit<Stock, 'id'> {
+/** 依指定表單快照建立正規化持股 payload，避免非同步期間混入其他表單資料。 */
+function buildStockPayload(formState: StockFormState): Omit<Stock, 'id'> {
   return {
-    name: form.value.name.trim(),
-    symbol: form.value.symbol.trim(),
-    market: form.value.market,
-    instrumentType: form.value.instrumentType,
-    shares: form.value.shares,
-    buyPrice: form.value.buyPrice,
-    currentPrice: form.value.currentPrice,
-    broker: form.value.broker.trim(),
-    lastPriceUpdate: form.value.lastPriceUpdate,
+    name: formState.name.trim(),
+    symbol: formState.symbol.trim(),
+    market: formState.market,
+    instrumentType: formState.instrumentType,
+    shares: formState.shares,
+    buyPrice: formState.buyPrice,
+    currentPrice: formState.currentPrice,
+    broker: formState.broker.trim(),
+    lastPriceUpdate: formState.lastPriceUpdate,
   }
 }
 
+/** 開啟新增表單前使前一個表單的 symbol lookup 失效。 */
 function openCreate() {
+  invalidatePendingStockLookup()
   editingItem.value = null
   form.value = { name: '', symbol: '', market: 'Unknown', instrumentType: 'Stock', shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null }
+  marketDirty.value = false
+  lookupDirty.value = { name: false, currentPrice: false }
   modalOpen.value = true
 }
 
+/** 開啟指定持股編輯表單前使前一個表單的 symbol lookup 失效。 */
 function openEdit(item: StockListItem) {
+  invalidatePendingStockLookup()
   editingItem.value = item
   form.value = {
     name: item.name,
@@ -146,45 +156,78 @@ function openEdit(item: StockListItem) {
     lastPriceUpdate: item.lastPriceUpdate,
   }
   syncPrice.value = true
+  marketDirty.value = true
   modalOpen.value = true
 }
 
+/** 標記使用者手動選擇市場，避免後續 lookup 覆寫意圖。 */
+function markMarketDirty() {
+  if (!editingItem.value && modalOpen.value)
+    marketDirty.value = true
+}
+
+/** 儲存持股，編輯時依使用者選擇的市場同步同市場最新股價。 */
 async function save() {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
 
+  invalidatePendingStockLookup()
+  const editingSnapshot = editingItem.value
+  const formIdentity = form.value
+  const formSnapshot = { ...formIdentity }
+  const payloadSnapshot = buildStockPayload(formSnapshot)
+  const syncPriceSnapshot = syncPrice.value
+  let mutationSucceeded = false
   saving.value = true
   try {
-    if (editingItem.value) {
+    if (editingSnapshot) {
       const priceSyncResult = await syncStockPriceOnSave(
-        syncPrice.value,
-        form.value.symbol,
+        syncPriceSnapshot,
+        formSnapshot.symbol,
         {
-          currentPrice: form.value.currentPrice,
-          lastPriceUpdate: form.value.lastPriceUpdate,
+          currentPrice: formSnapshot.currentPrice,
+          lastPriceUpdate: formSnapshot.lastPriceUpdate,
         },
         (symbol) => api.stocks.lookup(symbol),
         () => new Date().toISOString(),
+        formSnapshot.market,
       )
-      form.value.currentPrice = priceSyncResult.currentPrice
-      form.value.lastPriceUpdate = priceSyncResult.lastPriceUpdate
 
-      await api.stocks.update(editingItem.value.id, buildStockPayload())
+      await api.stocks.update(editingSnapshot.id, {
+        ...payloadSnapshot,
+        currentPrice: priceSyncResult.currentPrice,
+        lastPriceUpdate: priceSyncResult.lastPriceUpdate,
+      })
+      if (editingItem.value === editingSnapshot && form.value === formIdentity) {
+        form.value.currentPrice = priceSyncResult.currentPrice
+        form.value.lastPriceUpdate = priceSyncResult.lastPriceUpdate
+        modalOpen.value = false
+      }
       if (priceSyncResult.status === 'failed') {
         toast.error('股票已更新，但取得最新股價失敗')
       } else {
         toast.success('股票已更新')
       }
+      mutationSucceeded = true
     } else {
-      await api.stocks.create(buildStockPayload())
+      await api.stocks.create(payloadSnapshot)
+      if (editingItem.value === editingSnapshot && form.value === formIdentity)
+        modalOpen.value = false
       toast.success('股票已建立')
+      mutationSucceeded = true
     }
-    modalOpen.value = false
-    await fetchStocks()
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '儲存失敗')
   } finally {
     saving.value = false
+  }
+
+  if (mutationSucceeded) {
+    try {
+      await fetchStocks()
+    } catch {
+      toast.error('股票已儲存，但重新整理清單失敗')
+    }
   }
 }
 
@@ -208,17 +251,54 @@ async function doDelete() {
 }
 
 let lookupTimer: ReturnType<typeof setTimeout> | null = null
+let lookupRequestId = 0
 
-watch(() => form.value.symbol, (val) => {
+/** 取消已排程的 symbol lookup，並使進行中的晚到 response 失效。 */
+function invalidatePendingStockLookup() {
+  lookupRequestId++
+  if (lookupTimer) {
+    clearTimeout(lookupTimer)
+    lookupTimer = null
+  }
+}
+
+// 代號 identity 改變時立即清除未手動修改的 lookup 衍生值，再查詢新代號。
+watch(() => form.value.symbol, (val, previousVal) => {
+  const requestId = ++lookupRequestId
   if (lookupTimer) clearTimeout(lookupTimer)
+  const symbolChanged = val.trim().toUpperCase() !== previousVal.trim().toUpperCase()
+  if (symbolChanged && !editingItem.value) {
+    const lookupState = resetStockMarketLookupFields(
+      {
+        name: form.value.name,
+        symbol: form.value.symbol,
+        market: form.value.market,
+        currentPrice: form.value.currentPrice,
+      },
+      { ...lookupDirty.value, market: marketDirty.value },
+    )
+    form.value = { ...form.value, ...lookupState }
+  }
   if (!val?.trim() || editingItem.value) return
   lookupTimer = setTimeout(async () => {
+    const requestedSymbol = val.trim()
     try {
-      const result = await api.stocks.lookup(val.trim())
-      if (!editingItem.value) {
-        if (result.name) form.value.name = result.name
-        if (result.currentPrice != null) form.value.currentPrice = result.currentPrice
-      }
+      const result = await api.stocks.lookup(requestedSymbol)
+      if (editingItem.value || requestId !== lookupRequestId) return
+      const lookupState = applyStockMarketLookup(
+        {
+          name: form.value.name,
+          symbol: form.value.symbol,
+          market: form.value.market,
+          currentPrice: form.value.currentPrice,
+        },
+        result,
+        requestedSymbol,
+        form.value.symbol,
+        marketDirty.value,
+        lookupDirty.value,
+      )
+      form.value = { ...form.value, ...lookupState }
     } catch {
       // lookup failed, values stay as-is
     }
@@ -359,21 +439,23 @@ onMounted(fetchStocks)
       </div>
     </Card>
 
-    <Modal :open="modalOpen" :title="editingItem ? '編輯股票' : '新增股票'" @update:open="modalOpen = $event">
-      <form class="space-y-4" @submit.prevent="save">
+    <Modal :open="modalOpen" :title="editingItem ? '編輯股票' : '新增股票'" :close-disabled="saving" @update:open="modalOpen = $event">
+      <form @submit.prevent="save">
+        <fieldset :disabled="saving" class="m-0 min-w-0 space-y-4 border-0 p-0">
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">代號</label>
           <Input v-model="form.symbol" placeholder="e.g. 2330" />
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">名稱</label>
-          <Input v-model="form.name" :error="formErrors.name" placeholder="e.g. 台積電" />
+          <Input v-model="form.name" :error="formErrors.name" placeholder="e.g. 台積電" @update:model-value="lookupDirty.name = true" />
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">交易市場</label>
           <select
-            v-model="form.market"
-            class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
+           v-model="form.market"
+           @change="markMarketDirty"
+           class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
           >
             <option v-for="option in STOCK_MARKET_OPTIONS" :key="option.value" :value="option.value">
               {{ option.label }}
@@ -417,7 +499,7 @@ onMounted(fetchStocks)
             :model-value="form.currentPrice || ''"
             type="number"
             step="0.01"
-            @update:model-value="form.currentPrice = Number($event) || 0"
+            @update:model-value="lookupDirty.currentPrice = true; form.currentPrice = Number($event) || 0"
           />
         </div>
         <div>
@@ -429,9 +511,10 @@ onMounted(fetchStocks)
            <label for="syncPrice" class="text-sm text-text-secondary cursor-pointer">儲存時取得最新股價</label>
         </div>
         <div class="flex justify-end gap-3 pt-2">
-          <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>
+          <Button variant="ghost" type="button" :disabled="saving" @click="modalOpen = false">取消</Button>
           <Button type="submit" :loading="saving">儲存</Button>
         </div>
+        </fieldset>
       </form>
     </Modal>
 

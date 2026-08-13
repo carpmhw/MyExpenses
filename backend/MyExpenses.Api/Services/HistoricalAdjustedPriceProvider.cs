@@ -192,6 +192,14 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
             {
                 throw new HistoricalPriceProviderException("network_error", "歷史行情服務連線失敗");
             }
+            catch (IOException) when (attempt < _options.MaxRetries)
+            {
+                await DelayBeforeRetryAsync(attempt, cancellationToken);
+            }
+            catch (IOException)
+            {
+                throw new HistoricalPriceProviderException("network_error", "歷史行情服務連線失敗");
+            }
         }
 
         throw new HistoricalPriceProviderException("network_error", "歷史行情服務連線失敗");

@@ -76,7 +76,8 @@ public sealed record ScheduledJobWorkflowContext(
 /// <summary>保存單一 execution 內不應重複計數的目標與業務 row disposition。</summary>
 public sealed class ScheduledJobExecutionAccumulator
 {
-    private readonly HashSet<string> _targetKeys = new(StringComparer.Ordinal);
+    private readonly List<string> _targetKeys = [];
+    private readonly HashSet<string> _targetKeyMembership = new(StringComparer.Ordinal);
     private readonly HashSet<string> _succeededTargetKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _failedTargetCodes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _affectedRowKeys = new(StringComparer.Ordinal);
@@ -187,7 +188,10 @@ public sealed class ScheduledJobExecutionAccumulator
             .Distinct(StringComparer.Ordinal)
             .ToList();
         foreach (var key in normalizedKeys)
-            _targetKeys.Add(key);
+        {
+            if (_targetKeyMembership.Add(key))
+                _targetKeys.Add(key);
+        }
         _fallbackTargetCount = normalizedKeys.Count > 0
             ? normalizedKeys.Count
             : result.TargetCount.GetValueOrDefault();
@@ -202,7 +206,7 @@ public sealed class ScheduledJobExecutionAccumulator
         foreach (var key in result.SucceededTargetKeys.Select(NormalizeKey).Where(key => key is not null))
         {
             var normalized = key!;
-            if (!_targetKeys.Contains(normalized))
+            if (!_targetKeyMembership.Contains(normalized))
                 continue;
             _succeededTargetKeys.Add(normalized);
             _failedTargetCodes.Remove(normalized);
@@ -219,7 +223,7 @@ public sealed class ScheduledJobExecutionAccumulator
         {
             var key = NormalizeKey(pair.Key);
             var code = NormalizeResultCode(pair.Value);
-            if (key is null || code is null || !_targetKeys.Contains(key) || _succeededTargetKeys.Contains(key))
+            if (key is null || code is null || !_targetKeyMembership.Contains(key) || _succeededTargetKeys.Contains(key))
                 continue;
             _failedTargetCodes[key] = code;
             AddFailureCode(_failureCodes, code);
@@ -243,7 +247,14 @@ public sealed class ScheduledJobExecutionAccumulator
         if (succeededCount > 0 && failedCount > 0)
             return "IncompleteTargets";
 
-        var codes = _failureCodes
+        var failureCodeSource = _targetKeys.Count > 0
+            ? _targetKeys
+                .Where(key => !_succeededTargetKeys.Contains(key))
+                .Select(key => _failedTargetCodes.TryGetValue(key, out var code)
+                    ? code
+                    : NormalizeResultCode(lastResult?.ResultCode) ?? "Failed")
+            : _failureCodes;
+        var codes = failureCodeSource
             .Select(NormalizeResultCode)
             .Where(code => code is not null)
             .Select(code => code!)
@@ -364,7 +375,7 @@ public sealed class ScheduledJobRunner
                 await _repository.IncrementAttemptAsync(reservation.Execution.Id, CancellationToken.None);
                 cancellationToken.ThrowIfCancellationRequested();
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 var canceledAggregate = aggregation.BuildAggregate(lastResult);
                 return await CompleteCanceledAsync(
@@ -394,7 +405,7 @@ public sealed class ScheduledJobRunner
                     cancellationToken);
                 aggregation.Apply(lastResult);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 var canceledAggregate = aggregation.BuildAggregate(lastResult);
                 return await CompleteCanceledAsync(
@@ -407,7 +418,9 @@ public sealed class ScheduledJobRunner
             {
                 lastResult = CreateUnexpectedFailure(exception);
                 aggregation.Apply(lastResult);
-                _logger.LogError(exception, "Scheduled job attempt raised an unexpected exception");
+                _logger.LogError(
+                    "Scheduled job attempt raised bounded failure with result code {ResultCode}",
+                    lastResult.ResultCode);
             }
 
             if (lastResult.Retryability == ScheduledJobRetryClassification.Retryable
@@ -420,7 +433,7 @@ public sealed class ScheduledJobRunner
                 {
                     await Task.Delay(NormalizeRetryDelay(), _timeProvider, cancellationToken);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     var canceledAggregate = aggregation.BuildAggregate(lastResult);
                     return await CompleteCanceledAsync(
@@ -428,6 +441,14 @@ public sealed class ScheduledJobRunner
                         normalizedScheduledForUtc,
                         reservation.Execution.Id,
                         canceledAggregate);
+                }
+                catch (OperationCanceledException exception)
+                {
+                    lastResult = CreateUnexpectedFailure(exception);
+                    aggregation.Apply(lastResult);
+                    _logger.LogError(
+                        "Scheduled job retry delay raised bounded failure with result code {ResultCode}",
+                        lastResult.ResultCode);
                 }
                 continue;
             }
@@ -548,9 +569,11 @@ public sealed class ScheduledJobRunner
             if (execution is not null)
                 return execution;
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _logger.LogCritical(exception, "Scheduled job execution status persistence failed");
+            _logger.LogCritical(
+                "Scheduled job execution status persistence failed with safe code {ResultCode}",
+                "ExecutionPersistenceFailed");
         }
 
         try
@@ -558,9 +581,11 @@ public sealed class ScheduledJobRunner
             var fallback = await _repository.GetByIdAsync(executionId, CancellationToken.None);
             return fallback ?? CreatePersistenceFailureFallback(executionId);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _logger.LogCritical(exception, "Scheduled job execution fallback query failed");
+            _logger.LogCritical(
+                "Scheduled job execution fallback query failed with safe code {ResultCode}",
+                "ExecutionPersistenceFailed");
             return CreatePersistenceFailureFallback(executionId);
         }
     }
@@ -586,9 +611,11 @@ public sealed class ScheduledJobRunner
                 _options.CleanupBatchSize,
                 CancellationToken.None);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _logger.LogWarning(exception, "Scheduled job execution retention cleanup failed");
+            _logger.LogWarning(
+                "Scheduled job execution retention cleanup failed with safe code {ResultCode}",
+                "RetentionCleanupFailed");
         }
     }
 
@@ -610,18 +637,22 @@ public sealed class ScheduledJobRunner
 
     /// <summary>把未預期例外轉成不含原始訊息的 bounded workflow failure。</summary>
     private static ScheduledJobWorkflowResult CreateUnexpectedFailure(Exception exception)
-        => new()
+    {
+        var retryable = exception is OperationCanceledException
+            || RetryClassification.IsRetryable(exception);
+        return new()
         {
             Outcome = ScheduledJobWorkflowOutcome.Failed,
-            Retryability = RetryClassification.IsRetryable(exception)
+            Retryability = retryable
                 ? ScheduledJobRetryClassification.Retryable
                 : ScheduledJobRetryClassification.Permanent,
             TargetsEnumerated = false,
-            ResultCode = RetryClassification.IsRetryable(exception)
+            ResultCode = retryable
                 ? "TransientFailure"
                 : "UnexpectedFailure",
             SafeMessage = "排程執行失敗",
         };
+    }
 
     /// <summary>取得明確 UTC 現在時間。</summary>
     private DateTime UtcNow()

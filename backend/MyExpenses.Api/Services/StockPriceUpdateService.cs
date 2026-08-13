@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+
 namespace MyExpenses.Api.Services;
 
 using MyExpenses.Api.Models;
@@ -42,7 +44,7 @@ public sealed class StockPriceUpdateService : BackgroundService
 
                 await RunScheduledExecutionAsync(scheduledForUtc, stoppingToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
@@ -86,8 +88,26 @@ public sealed class StockPriceUpdateService : BackgroundService
             scheduledForUtc,
             BusinessScheduleCalculator.TaiwanTimeZone.Id,
             localDate,
-            (context, token) => workflow.RunAsync(token, context.FrozenTargetKeys),
+            (context, token) => RunWorkflowAsync(workflow, context, token),
             cancellationToken);
+    }
+
+    /// <summary>執行目前價格 workflow，並在中止時先保留 partial aggregate 再重拋原始 cause。</summary>
+    private static async Task<ScheduledJobWorkflowResult> RunWorkflowAsync(
+        CurrentStockPriceWorkflow workflow,
+        ScheduledJobWorkflowContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await workflow.RunAsync(cancellationToken, context.FrozenTargetKeys);
+        }
+        catch (CurrentStockPricePartialFailureException exception)
+        {
+            context.Aggregation.Apply(exception.PartialResult);
+            ExceptionDispatchInfo.Capture(exception.InnerException ?? exception).Throw();
+            throw;
+        }
     }
 
     /// <summary>取得明確 UTC 現在時間。</summary>

@@ -149,6 +149,11 @@ builder.Services.AddHttpClient("historical-market-data", client =>
     client.BaseAddress = new Uri("https://query1.finance.yahoo.com/");
     client.Timeout = TimeSpan.FromSeconds(15);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("MyExpenses/1.0 (+https://github.com/MyExpenses)");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = false,
+    AutomaticDecompression = DecompressionMethods.None,
 });
 builder.Services.AddScoped<IHistoricalAdjustedPriceProvider>(services =>
     new YahooHistoricalAdjustedPriceProvider(
@@ -180,13 +185,22 @@ builder.Services.AddScoped<TwseCurrentPriceProvider>(services =>
 builder.Services.AddScoped<TpexCurrentPriceProvider>(services =>
     new TpexCurrentPriceProvider(
         services.GetRequiredService<IHttpClientFactory>().CreateClient("tpex-current-price")));
+builder.Services.AddSingleton<OfficialMarketCatalogCache>();
+builder.Services.AddScoped<OfficialMarketCatalogService>(services =>
+    new OfficialMarketCatalogService(
+        services.GetRequiredService<TwseCurrentPriceProvider>(),
+        services.GetRequiredService<TpexCurrentPriceProvider>(),
+        services.GetRequiredService<OfficialMarketCatalogCache>()));
+builder.Services.AddScoped<IOfficialMarketCatalogService>(services =>
+    services.GetRequiredService<OfficialMarketCatalogService>());
 builder.Services.AddScoped<CurrentStockPriceWorkflow>(services =>
     new CurrentStockPriceWorkflow(
         services.GetRequiredService<AppDbContext>(),
-         services.GetRequiredService<TwseCurrentPriceProvider>(),
-         services.GetRequiredService<TpexCurrentPriceProvider>(),
-         services.GetRequiredService<TimeProvider>(),
-         services.GetRequiredService<ILogger<CurrentStockPriceWorkflow>>()));
+          services.GetRequiredService<TwseCurrentPriceProvider>(),
+          services.GetRequiredService<TpexCurrentPriceProvider>(),
+          services.GetRequiredService<TimeProvider>(),
+          services.GetRequiredService<ILogger<CurrentStockPriceWorkflow>>(),
+          services.GetRequiredService<IOfficialMarketCatalogService>()));
 builder.Services.AddOpenApi();
 builder.Services.Configure<TimeZoneOptions>(
     builder.Configuration.GetSection(TimeZoneOptions.SectionName));
@@ -199,7 +213,13 @@ builder.Services.AddScoped<ScheduledJobExecutionRepository>();
 builder.Services.AddScoped<ScheduledJobExecutionRecoveryService>();
 builder.Services.AddScoped<ScheduledJobRunner>();
 builder.Services.AddScoped<AutomaticSnapshotWorkflow>();
-builder.Services.AddScoped<HistoricalMarketDataSynchronizer>();
+builder.Services.AddScoped<HistoricalMarketDataSynchronizer>(services =>
+    new HistoricalMarketDataSynchronizer(
+        services.GetRequiredService<AppDbContext>(),
+        services.GetRequiredService<IHistoricalAdjustedPriceProvider>(),
+        services.GetRequiredService<ILogger<HistoricalMarketDataSynchronizer>>(),
+        services.GetRequiredService<TimeProvider>(),
+        services.GetRequiredService<IOfficialMarketCatalogService>()));
 builder.Services.AddHostedService<SnapshotBackgroundService>();
 builder.Services.AddHostedService<StockPriceUpdateService>();
 builder.Services.AddHostedService<HistoricalMarketDataSyncService>();
