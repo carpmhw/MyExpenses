@@ -152,6 +152,25 @@ def test_stock_structure_report_filters_and_mobile_layout(mocked_page: Page) -> 
         "symbolAllocations": [{"key": "AAA", "label": "AAA", "value": 9960, "percentage": 100}],
         "instrumentTypeAllocations": [{"key": "Stock", "label": "股票", "value": 9960, "percentage": 100}],
         "brokerAllocations": [{"key": "甲券商", "label": "甲券商", "value": 9960, "percentage": 100}],
+        "marketAllocations": [{"key": "Twse", "label": "上市", "value": 9960, "percentage": 100}],
+        "concentration": {
+            "top1Percentage": 100,
+            "top3Percentage": 100,
+            "top5Percentage": 100,
+            "hhi": 1,
+            "effectiveHoldingCount": 1,
+        },
+        "dataQuality": {
+            "holdingCount": 1,
+            "positivePriceCount": 1,
+            "missingLastPriceUpdateCount": 0,
+            "stalePriceCount": 0,
+            "positivePriceCoverage": 1,
+            "oldestLastPriceUpdateUtc": "2026-08-06T00:00:00Z",
+            "latestLastPriceUpdateUtc": "2026-08-06T00:00:00Z",
+            "staleAfterHours": 72,
+            "generatedAtUtc": "2026-08-06T00:00:00Z",
+        },
         "holdings": [{
             "id": 1,
             "name": "標的一",
@@ -180,6 +199,7 @@ def test_stock_structure_report_filters_and_mobile_layout(mocked_page: Page) -> 
         "symbolAllocations": [],
         "instrumentTypeAllocations": [],
         "brokerAllocations": [],
+        "marketAllocations": [],
         "holdings": [],
     }
 
@@ -196,8 +216,8 @@ def test_stock_structure_report_filters_and_mobile_layout(mocked_page: Page) -> 
     mocked_page.set_viewport_size({"width": 375, "height": 800})
     mocked_page.goto("/reports")
 
-    expect(mocked_page.get_by_role("button", name="持股結構")).to_be_visible()
-    mocked_page.get_by_role("button", name="持股結構").click()
+    expect(mocked_page.get_by_role("tab", name="持股結構")).to_be_visible()
+    mocked_page.get_by_role("tab", name="持股結構").click()
     expect(mocked_page.get_by_text("標的一 (AAA)")).to_be_visible()
     expect(mocked_page.locator('input[type="date"]')).to_have_count(0)
     expect(mocked_page.get_by_text("尚無全部持股價值歷史")).to_be_visible()
@@ -268,7 +288,9 @@ def test_stock_market_risk_market_edit_period_and_mobile_matrix(mocked_page: Pag
         "calculationDate": "2026-08-07",
         "dataCutoffDate": "2026-08-06",
         "portfolioAnnualizedVolatility": {"value": 0.2, "unavailableReason": None},
+        "portfolioMaximumDrawdown": {"value": -0.15, "unavailableReason": None},
         "eligibleMarketValueCoverage": 0.95,
+        "eligibleMarketValueCoverageMetric": {"value": 0.95, "unavailableReason": None},
         "coverageThreshold": 0.9,
         "commonObservationCount": 200,
         "totalHoldingCount": 2,
@@ -288,11 +310,13 @@ def test_stock_market_risk_market_edit_period_and_mobile_matrix(mocked_page: Pag
             "unavailableReason": None,
         },
         "syncWarnings": [],
+        "riskContributions": [],
     }
     coverage_report = {
         **complete_report,
         "periodMonths": 3,
         "eligibleMarketValueCoverage": 0.75,
+        "eligibleMarketValueCoverageMetric": {"value": 0.75, "unavailableReason": None},
         "portfolioAnnualizedVolatility": {"value": None, "unavailableReason": "CoverageBelowThreshold"},
         "correlationMatrix": {**complete_report["correlationMatrix"], "unavailableReason": "InsufficientCommonDates"},
     }
@@ -304,7 +328,7 @@ def test_stock_market_risk_market_edit_period_and_mobile_matrix(mocked_page: Pag
     mocked_page.route("**/api/reports/stock-market-risk**", market_risk)
     mocked_page.set_viewport_size({"width": 375, "height": 800})
     mocked_page.goto("/reports")
-    mocked_page.get_by_role("button", name="市場風險").click()
+    mocked_page.get_by_role("tab", name="市場風險").click()
     expect(mocked_page.get_by_text("95.0%")).to_be_visible()
     expect(mocked_page.get_by_text("相關性矩陣")).to_be_visible()
     expect(mocked_page.get_by_role("columnheader", name="0050")).to_be_visible()

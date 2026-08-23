@@ -103,6 +103,91 @@ public class StockStructureReportCalculatorTests
         Assert.Equal("NoReminder", insight.Code);
     }
 
+    /// <summary>驗證市場配置跨券商合併、保留待辨識市場並依估值排序。</summary>
+    [Fact]
+    public void Calculate_GroupsMarketAllocationsAcrossBrokersAndPreservesUnknownMarket()
+    {
+        var holdings = new[]
+        {
+            CreateStock(1, "上市甲", "AAA", StockInstrumentType.Stock, 100m, 100m, 50m, "甲券商", StockMarket.Twse),
+            CreateStock(2, "上市乙", "BBB", StockInstrumentType.Stock, 100m, 100m, 30m, "乙券商", StockMarket.Twse),
+            CreateStock(3, "待辨識", "CCC", StockInstrumentType.Stock, 100m, 100m, 20m, "丙券商", StockMarket.Unknown),
+        };
+
+        var report = StockStructureReportCalculator.Calculate(holdings);
+        var twseValue = StockValuationCalculator.Calculate(holdings[0]).EstimatedNetSellValue
+            + StockValuationCalculator.Calculate(holdings[1]).EstimatedNetSellValue;
+        var unknownValue = StockValuationCalculator.Calculate(holdings[2]).EstimatedNetSellValue;
+        var total = twseValue + unknownValue;
+
+        Assert.Collection(
+            report.MarketAllocations,
+            allocation =>
+            {
+                Assert.Equal("Twse", allocation.Key);
+                Assert.Equal("上市", allocation.Label);
+                Assert.Equal(twseValue, allocation.Value);
+                Assert.Equal(twseValue / total * 100m, allocation.Percentage);
+            },
+            allocation =>
+            {
+                Assert.Equal("Unknown", allocation.Key);
+                Assert.Equal("市場待辨識", allocation.Label);
+                Assert.Equal(unknownValue, allocation.Value);
+                Assert.Equal(unknownValue / total * 100m, allocation.Percentage);
+            });
+    }
+
+    /// <summary>驗證集中度依標的配置計算且不受輸入順序影響。</summary>
+    [Fact]
+    public void Calculate_CalculatesConcentrationFromSymbolAllocationsIndependentlyOfInputOrder()
+    {
+        var holdings = new[]
+        {
+            CreateStock(1, "甲", "AAA", StockInstrumentType.Stock, 100m, 100m, 50m, "甲券商"),
+            CreateStock(2, "乙", "BBB", StockInstrumentType.Stock, 100m, 100m, 30m, "乙券商"),
+            CreateStock(3, "丙", "CCC", StockInstrumentType.Stock, 100m, 100m, 20m, "丙券商"),
+        };
+
+        var report = StockStructureReportCalculator.Calculate(holdings);
+        var reversedReport = StockStructureReportCalculator.Calculate(holdings.Reverse());
+        var weights = report.SymbolAllocations
+            .Select(allocation => allocation.Percentage!.Value / 100m)
+            .ToList();
+
+        Assert.Equal(report.SymbolAllocations.Take(1).Sum(allocation => allocation.Percentage), report.Concentration.Top1Percentage);
+        Assert.Equal(report.SymbolAllocations.Take(3).Sum(allocation => allocation.Percentage), report.Concentration.Top3Percentage);
+        Assert.Equal(report.SymbolAllocations.Take(5).Sum(allocation => allocation.Percentage), report.Concentration.Top5Percentage);
+        Assert.Equal(weights.Sum(weight => weight * weight), report.Concentration.Hhi);
+        Assert.Equal(1m / report.Concentration.Hhi, report.Concentration.EffectiveHoldingCount);
+        Assert.Equal(report.Concentration, reversedReport.Concentration);
+    }
+
+    /// <summary>驗證沒有持股或估值分母不正時不產生合成的市場比例或集中度。</summary>
+    [Fact]
+    public void Calculate_ReturnsUnavailableMarketPercentagesAndConcentrationForNonPositiveDenominator()
+    {
+        foreach (var currentPrice in new[] { 0m, -1m })
+        {
+            var report = StockStructureReportCalculator.Calculate(new[]
+            {
+                CreateStock(1, "無有效估值", "ZERO", StockInstrumentType.Stock, 100m, currentPrice, 10m, "甲券商"),
+            });
+
+            Assert.All(report.MarketAllocations, allocation => Assert.Null(allocation.Percentage));
+            Assert.Null(report.Concentration.Top1Percentage);
+            Assert.Null(report.Concentration.Top3Percentage);
+            Assert.Null(report.Concentration.Top5Percentage);
+            Assert.Null(report.Concentration.Hhi);
+            Assert.Null(report.Concentration.EffectiveHoldingCount);
+        }
+
+        var emptyReport = StockStructureReportCalculator.Calculate(Array.Empty<Stock>());
+
+        Assert.Empty(emptyReport.MarketAllocations);
+        Assert.Null(emptyReport.Concentration.Hhi);
+    }
+
     /// <summary>建立持股測試資料。</summary>
     private static Stock CreateStock(
         int id,
@@ -112,7 +197,8 @@ public class StockStructureReportCalculatorTests
         decimal buyPrice,
         decimal currentPrice,
         decimal shares,
-        string? broker)
+        string? broker,
+        StockMarket market = StockMarket.Unknown)
     {
         return new Stock
         {
@@ -124,6 +210,7 @@ public class StockStructureReportCalculatorTests
             CurrentPrice = currentPrice,
             Shares = shares,
             Broker = broker,
+            Market = market,
         };
     }
 }

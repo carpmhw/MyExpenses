@@ -358,7 +358,8 @@ public static class ReportEndpoints
     public static async Task<StockStructureReportResponse> GetStockStructureAsync(
         AppDbContext db,
         string? broker = null,
-        StockInstrumentType? instrumentType = null)
+        StockInstrumentType? instrumentType = null,
+        DateTime? asOfUtc = null)
     {
         var stocks = await db.Stocks
             .OrderBy(stock => stock.Id)
@@ -376,6 +377,10 @@ public static class ReportEndpoints
             .OrderBy(instrument => instrument)
             .ToList();
         var report = StockStructureReportCalculator.Calculate(stocks, broker, instrumentType);
+        var selectedHoldingIds = report.Holdings.Select(holding => holding.Id).ToHashSet();
+        var selectedStocks = stocks.Where(stock => selectedHoldingIds.Contains(stock.Id));
+        var generatedAt = StockReportDataQualityCalculator.NormalizeUtc(asOfUtc ?? DateTime.UtcNow);
+        var dataQuality = StockReportDataQualityCalculator.Calculate(selectedStocks, generatedAt);
 
         return new StockStructureReportResponse(
             report.Summary,
@@ -383,10 +388,13 @@ public static class ReportEndpoints
             report.SymbolAllocations,
             report.InstrumentTypeAllocations,
             report.BrokerAllocations,
+            report.MarketAllocations,
+            report.Concentration,
+            dataQuality,
             report.Holdings,
             availableBrokers,
             availableInstrumentTypes,
-            DateTime.UtcNow);
+            generatedAt);
     }
 
     /// <summary>只讀本機持股、歷史價格與同步狀態建立市場風險報表。</summary>
@@ -506,6 +514,9 @@ public sealed record StockStructureReportResponse(
     IReadOnlyList<StockStructureAllocation> SymbolAllocations,
     IReadOnlyList<StockStructureAllocation> InstrumentTypeAllocations,
     IReadOnlyList<StockStructureAllocation> BrokerAllocations,
+    IReadOnlyList<StockStructureAllocation> MarketAllocations,
+    StockStructureConcentration Concentration,
+    StockReportDataQuality DataQuality,
     IReadOnlyList<StockStructureHolding> Holdings,
     IReadOnlyList<string> AvailableBrokers,
     IReadOnlyList<StockInstrumentType> AvailableInstrumentTypes,

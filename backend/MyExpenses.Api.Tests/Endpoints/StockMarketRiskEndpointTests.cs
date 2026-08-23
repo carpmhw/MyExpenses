@@ -50,6 +50,14 @@ public sealed class StockMarketRiskEndpointTests
         Assert.Equal(StockMarketRiskUnavailableReason.NoHoldings,
             result.PortfolioAnnualizedVolatility.UnavailableReason);
         Assert.Null(result.PortfolioAnnualizedVolatility.Value);
+        Assert.Null(result.PortfolioMaximumDrawdown.Value);
+        Assert.Equal(StockMarketRiskUnavailableReason.NoHoldings,
+            result.PortfolioMaximumDrawdown.UnavailableReason);
+        Assert.Equal(0d, result.EligibleMarketValueCoverage);
+        Assert.Null(result.EligibleMarketValueCoverageMetric.Value);
+        Assert.Equal(StockMarketRiskUnavailableReason.NoHoldings,
+            result.EligibleMarketValueCoverageMetric.UnavailableReason);
+        Assert.Empty(result.RiskContributions);
     }
 
     /// <summary>驗證 endpoint 只讀本機行情並返回截止日、同步警告與完整統計。</summary>
@@ -79,6 +87,15 @@ public sealed class StockMarketRiskEndpointTests
                 FetchedAtUtc = DateTime.UtcNow,
             });
         }
+        db.HistoricalAdjustedPrices.Add(new HistoricalAdjustedPrice
+        {
+            Market = StockMarket.Twse,
+            Symbol = "UNRELATED",
+            TradingDate = new DateOnly(2026, 8, 7),
+            AdjustedClose = 100m,
+            Provider = "fixture",
+            FetchedAtUtc = DateTime.UtcNow,
+        });
         db.HistoricalPriceSyncStates.Add(new HistoricalPriceSyncState
         {
             Market = StockMarket.Twse,
@@ -100,6 +117,8 @@ public sealed class StockMarketRiskEndpointTests
         Assert.Equal(new DateOnly(2026, 3, 1), result.DataCutoffDate);
         Assert.Single(result.IncludedInstruments);
         Assert.NotNull(result.PortfolioAnnualizedVolatility.Value);
+        Assert.NotNull(result.PortfolioMaximumDrawdown.Value);
+        Assert.Single(result.RiskContributions);
         Assert.Single(result.SyncWarnings);
         Assert.Equal("保留最後成功資料", result.SyncWarnings[0].SafeMessage);
     }
@@ -118,6 +137,62 @@ public sealed class StockMarketRiskEndpointTests
 
         Assert.NotNull(metadata);
         Assert.Equal(ApiTokenScopes.ReportsRead, metadata!.RequiredScope);
+    }
+
+    /// <summary>驗證市場風險 HTTP JSON 以增量欄位提供最大回撤與風險貢獻。</summary>
+    [Fact]
+    public async Task GetStockMarketRisk_ReturnsMaximumDrawdownAndRiskContributionsJsonFields()
+    {
+        await using var db = await CreateDbContextAsync();
+        db.Stocks.Add(new Stock
+        {
+            Name = "台積電",
+            Symbol = "2330",
+            Market = StockMarket.Twse,
+            InstrumentType = StockInstrumentType.Stock,
+            Shares = 10m,
+            BuyPrice = 90m,
+            CurrentPrice = 100m,
+        });
+        foreach (var index in Enumerable.Range(0, 60))
+        {
+            db.HistoricalAdjustedPrices.Add(new HistoricalAdjustedPrice
+            {
+                Market = StockMarket.Twse,
+                Symbol = "2330",
+                TradingDate = new DateOnly(2026, 1, 1).AddDays(index),
+                AdjustedClose = 100m + index,
+                Provider = "fixture",
+                FetchedAtUtc = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        await using var app = await CreateReportAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/reports/stock-market-risk?periodMonths=3");
+        response.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.True(json.RootElement.TryGetProperty("portfolioMaximumDrawdown", out var maximumDrawdown));
+        Assert.Equal(JsonValueKind.Object, maximumDrawdown.ValueKind);
+        Assert.True(maximumDrawdown.TryGetProperty("value", out _));
+        Assert.True(maximumDrawdown.TryGetProperty("unavailableReason", out _));
+        Assert.True(json.RootElement.TryGetProperty("riskContributions", out var riskContributions));
+        Assert.Equal(JsonValueKind.Array, riskContributions.ValueKind);
+        var contribution = Assert.Single(riskContributions.EnumerateArray());
+        Assert.True(contribution.TryGetProperty("name", out _));
+        Assert.True(contribution.TryGetProperty("symbol", out _));
+        Assert.True(contribution.TryGetProperty("market", out _));
+        Assert.True(contribution.TryGetProperty("grossMarketValue", out _));
+        Assert.True(contribution.TryGetProperty("weight", out _));
+        Assert.True(contribution.TryGetProperty("componentVolatilityContribution", out _));
+        Assert.True(contribution.TryGetProperty("contributionPercentage", out _));
+        Assert.False(contribution.TryGetProperty("marketValueWeight", out _));
+        Assert.True(json.RootElement.TryGetProperty("eligibleMarketValueCoverageMetric", out var coverageMetric));
+        Assert.Equal(JsonValueKind.Object, coverageMetric.ValueKind);
+        Assert.True(coverageMetric.TryGetProperty("value", out _));
+        Assert.True(coverageMetric.TryGetProperty("unavailableReason", out _));
     }
 
     /// <summary>建立只映射報表端點的測試 app，故意不註冊任何外部 provider。</summary>

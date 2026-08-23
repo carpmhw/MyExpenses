@@ -50,6 +50,8 @@ public static class StockStructureReportCalculator
             holding => NormalizeText(holding.Broker) ?? UnspecifiedBrokerKey,
             holding => NormalizeText(holding.Broker) ?? "未指定券商",
             totalEstimatedNetSellValue);
+        var marketAllocations = BuildMarketAllocations(selectedStocks, totalEstimatedNetSellValue);
+        var concentration = BuildConcentration(symbolAllocations, totalEstimatedNetSellValue);
 
         return new StockStructureReport(
             new StockStructureSummary(
@@ -68,6 +70,8 @@ public static class StockStructureReportCalculator
             symbolAllocations,
             instrumentTypeAllocations,
             brokerAllocations,
+            marketAllocations,
+            concentration,
             holdings);
     }
 
@@ -138,6 +142,46 @@ public static class StockStructureReportCalculator
             .ToList();
 
         return ApplyAllocationPercentages(allocations, totalEstimatedNetSellValue);
+    }
+
+    /// <summary>依市場將篩選後持股的預估賣出淨值彙整為配置資料。</summary>
+    private static IReadOnlyList<StockStructureAllocation> BuildMarketAllocations(
+        IReadOnlyList<Stock> stocks,
+        decimal totalEstimatedNetSellValue)
+    {
+        var allocations = stocks
+            .GroupBy(stock => stock.Market)
+            .Select(group => new StockStructureAllocation(
+                group.Key.ToString(),
+                FormatMarket(group.Key),
+                group.Sum(stock => StockValuationCalculator.Calculate(stock).EstimatedNetSellValue),
+                null))
+            .ToList();
+
+        return ApplyAllocationPercentages(allocations, totalEstimatedNetSellValue);
+    }
+
+    /// <summary>依標的配置建立集中度統計，無有效正分母時回傳不可用欄位。</summary>
+    private static StockStructureConcentration BuildConcentration(
+        IReadOnlyList<StockStructureAllocation> symbolAllocations,
+        decimal totalEstimatedNetSellValue)
+    {
+        if (totalEstimatedNetSellValue <= 0m)
+            return new(null, null, null, null, null);
+
+        var weights = symbolAllocations
+            .Select(allocation => allocation.Value / totalEstimatedNetSellValue)
+            .ToList();
+        var hhi = weights.Sum(weight => weight * weight);
+        if (hhi <= 0m || hhi > 1m)
+            return new(null, null, null, null, null);
+
+        return new(
+            symbolAllocations.Take(1).Sum(allocation => allocation.Percentage),
+            symbolAllocations.Take(3).Sum(allocation => allocation.Percentage),
+            symbolAllocations.Take(5).Sum(allocation => allocation.Percentage),
+            hhi,
+            1m / hhi);
     }
 
     /// <summary>計算配置百分比並依配置金額由大到小排序。</summary>
@@ -280,6 +324,15 @@ public static class StockStructureReportCalculator
             StockInstrumentType.BondEtf => "債券 ETF",
             _ => instrumentType.ToString(),
         };
+
+    /// <summary>將市場列舉值轉為報表顯示名稱。</summary>
+    private static string FormatMarket(StockMarket market)
+        => market switch
+        {
+            StockMarket.Twse => "上市",
+            StockMarket.Tpex => "上櫃",
+            _ => "市場待辨識",
+        };
 }
 
 public sealed record StockStructureReport(
@@ -288,6 +341,8 @@ public sealed record StockStructureReport(
     IReadOnlyList<StockStructureAllocation> SymbolAllocations,
     IReadOnlyList<StockStructureAllocation> InstrumentTypeAllocations,
     IReadOnlyList<StockStructureAllocation> BrokerAllocations,
+    IReadOnlyList<StockStructureAllocation> MarketAllocations,
+    StockStructureConcentration Concentration,
     IReadOnlyList<StockStructureHolding> Holdings);
 
 public sealed record StockStructureSummary(
@@ -313,6 +368,13 @@ public sealed record StockStructureAllocation(
     string Label,
     decimal Value,
     decimal? Percentage);
+
+public sealed record StockStructureConcentration(
+    decimal? Top1Percentage,
+    decimal? Top3Percentage,
+    decimal? Top5Percentage,
+    decimal? Hhi,
+    decimal? EffectiveHoldingCount);
 
 public sealed record StockStructureHolding(
     int Id,
