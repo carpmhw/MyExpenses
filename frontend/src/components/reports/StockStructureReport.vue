@@ -44,6 +44,7 @@ ChartJS.register(
 const darkMode = inject<{ isDark: { value: boolean } }>('darkMode') ?? { isDark: ref(false) }
 const selectedBroker = ref('')
 const selectedInstrumentType = ref<StockInstrumentType | ''>('')
+const valueTrendMonths = ref<6 | 12 | 24 | 36 | 60>(12)
 
 const structureQuery = useAsyncQuery<StockStructureReportData>({
   key: () => ({
@@ -60,8 +61,8 @@ const structureQuery = useAsyncQuery<StockStructureReportData>({
 })
 
 const valueTrendQuery = useAsyncQuery<StockValueTrendPoint[]>({
-  key: () => ({ report: 'stock-value-trend', months: 6 }),
-  query: ({ signal }) => api.reports.stockValueTrend({ months: 6 }, { signal }),
+  key: () => ({ report: 'stock-value-trend', months: valueTrendMonths.value }),
+  query: ({ signal }) => api.reports.stockValueTrend({ months: valueTrendMonths.value }, { signal }),
   isEmpty: data => data.length === 0,
   immediate: false,
 })
@@ -91,6 +92,10 @@ const instrumentChartData = computed(() => createAllocationChartData(
 
 const brokerChartData = computed(() => createAllocationChartData(
   structureData.value?.brokerAllocations ?? [],
+))
+
+const marketChartData = computed(() => createAllocationChartData(
+  structureData.value?.marketAllocations ?? [],
 ))
 
 const symbolChartData = computed(() => ({
@@ -192,6 +197,11 @@ function formatAllocation(value: number | null): string {
   return formatPercentage(value)
 }
 
+// 將 ISO UTC 時間轉為資料品質摘要使用的簡短顯示文字。
+function formatDataQualityTime(value: string | null): string {
+  return value ? value.replace('T', ' ').replace('Z', ' UTC') : '無更新時間'
+}
+
 // 將空白代號明確標示記錄身份，避免同名持股在明細中無法區分。
 function formatHoldingLabel(name: string, symbol: string, id: number): string {
   const normalizedSymbol = symbol.trim()
@@ -219,6 +229,10 @@ function loadInitialData(): void {
 
 watch([selectedBroker, selectedInstrumentType], () => {
   void structureQuery.refresh()
+})
+
+watch(valueTrendMonths, () => {
+  void valueTrendQuery.refresh()
 })
 
 onMounted(loadInitialData)
@@ -313,10 +327,55 @@ onMounted(loadInitialData)
               <Doughnut :data="brokerChartData" :options="createDoughnutOptions(structureData.brokerAllocations)" />
             </div>
           </Card>
+          <Card>
+            <h3 class="text-sm font-semibold text-text-primary">市場配置</h3>
+            <div class="mt-3 h-[280px]">
+              <Doughnut :data="marketChartData" :options="createDoughnutOptions(structureData.marketAllocations)" />
+            </div>
+          </Card>
         </div>
         <Card v-else>
           <p class="text-sm text-text-secondary">目前預估賣出淨值不大於 0，無法計算持股配置比例。</p>
         </Card>
+
+        <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <Card>
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-sm font-semibold text-text-primary">集中度</h3>
+              <span class="text-xs text-text-tertiary">依預估賣出淨值計算</span>
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+              <div><dt class="text-text-tertiary">Top 1</dt><dd class="mt-1 font-semibold text-text-primary">{{ formatAllocation(structureData.concentration.top1Percentage) }}</dd></div>
+              <div><dt class="text-text-tertiary">Top 3</dt><dd class="mt-1 font-semibold text-text-primary">{{ formatAllocation(structureData.concentration.top3Percentage) }}</dd></div>
+              <div><dt class="text-text-tertiary">Top 5</dt><dd class="mt-1 font-semibold text-text-primary">{{ formatAllocation(structureData.concentration.top5Percentage) }}</dd></div>
+              <div><dt class="text-text-tertiary">HHI</dt><dd class="mt-1 font-semibold text-text-primary">{{ structureData.concentration.hhi?.toFixed(3) ?? '無法計算' }}</dd></div>
+              <div><dt class="text-text-tertiary">有效持股數</dt><dd class="mt-1 font-semibold text-text-primary">{{ structureData.concentration.effectiveHoldingCount?.toFixed(1) ?? '無法計算' }}</dd></div>
+            </dl>
+            <div data-testid="concentration-insights" class="mt-3 space-y-1 text-xs text-text-secondary">
+              <p>Top 5 涵蓋目前持股中前五大標的的預估賣出淨值占比。</p>
+              <p>HHI 越接近 1，代表目前配置越集中；兩者僅描述目前資料。</p>
+            </div>
+          </Card>
+          <Card
+            data-testid="data-quality-warning"
+            :title="`缺少更新與超過 ${structureData.dataQuality.staleAfterHours} 小時僅為資料新鮮度提示，不判定行情正確性。`"
+            :class="structureData.dataQuality.missingLastPriceUpdateCount > 0 || structureData.dataQuality.stalePriceCount > 0 ? 'border-color-warning-border bg-color-warning-bg text-color-warning-text' : ''"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-sm font-semibold text-text-primary">價格資料品質</h3>
+              <span class="text-xs text-text-tertiary">{{ structureData.dataQuality.positivePriceCount }} / {{ structureData.dataQuality.holdingCount }} 正價格</span>
+            </div>
+            <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+              <p class="text-text-secondary">價格覆蓋 <span class="font-semibold text-text-primary">{{ structureData.dataQuality.positivePriceCoverage === null ? '無法計算' : `${(structureData.dataQuality.positivePriceCoverage * 100).toFixed(1)}%` }}</span></p>
+              <p class="text-text-secondary">缺少更新 <span class="font-semibold text-text-primary">{{ structureData.dataQuality.missingLastPriceUpdateCount }} 筆</span></p>
+              <p class="text-text-secondary">最舊更新 <span class="font-semibold text-text-primary">{{ formatDataQualityTime(structureData.dataQuality.oldestLastPriceUpdateUtc) }}</span></p>
+              <p class="text-text-secondary">最新更新 <span class="font-semibold text-text-primary">{{ formatDataQualityTime(structureData.dataQuality.latestLastPriceUpdateUtc) }}</span></p>
+            </div>
+            <p class="mt-3 text-xs" :class="structureData.dataQuality.missingLastPriceUpdateCount > 0 || structureData.dataQuality.stalePriceCount > 0 ? 'text-color-warning-text' : 'text-text-tertiary'">
+              {{ structureData.dataQuality.stalePriceCount }} 筆超過 {{ structureData.dataQuality.staleAfterHours }} 小時；此為資料新鮮度提示，非行情正確性判定。
+            </p>
+          </Card>
+        </div>
 
         <Card>
           <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -356,8 +415,23 @@ onMounted(loadInitialData)
     </QueryState>
     <Card>
       <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <h3 class="text-sm font-semibold text-text-primary">全部持股價值趨勢</h3>
-        <span class="text-xs text-text-tertiary">不受目前篩選影響</span>
+        <div>
+          <h3 class="text-sm font-semibold text-text-primary">全部持股價值趨勢</h3>
+          <p class="mt-1 text-xs text-text-tertiary">歷史快照資產價值，不等同投資報酬率；不受目前篩選影響</p>
+        </div>
+        <div class="flex rounded-lg bg-bg-raised p-1" role="group" aria-label="持股價值趨勢期間">
+          <button
+            v-for="months in [6, 12, 24, 36, 60] as const"
+            :key="months"
+            :data-testid="`value-trend-period-${months}`"
+            type="button"
+            class="rounded-md px-2 py-1 text-xs transition-colors cursor-pointer"
+            :class="valueTrendMonths === months ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+            @click="valueTrendMonths = months"
+          >
+            {{ months }}M
+          </button>
+        </div>
       </div>
       <QueryState
         :status="valueTrendQuery.status.value"

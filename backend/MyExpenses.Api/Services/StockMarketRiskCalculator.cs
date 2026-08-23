@@ -23,6 +23,16 @@ public sealed record StockMarketRiskMetric(
     double? Value,
     StockMarketRiskUnavailableReason? UnavailableReason);
 
+/// <summary>描述單一標的對組合年化波動度的風險貢獻。</summary>
+public sealed record StockMarketRiskContribution(
+    string Name,
+    string Symbol,
+    StockMarket Market,
+    decimal GrossMarketValue,
+    double Weight,
+    double ComponentVolatilityContribution,
+    double ContributionPercentage);
+
 /// <summary>描述風險計算中的納入或排除標的。</summary>
 public sealed record StockMarketRiskInstrument(
     string Name,
@@ -75,7 +85,9 @@ public sealed record StockMarketRiskReport(
     DateOnly CalculationDate,
     DateOnly? DataCutoffDate,
     StockMarketRiskMetric PortfolioAnnualizedVolatility,
+    StockMarketRiskMetric PortfolioMaximumDrawdown,
     double EligibleMarketValueCoverage,
+    StockMarketRiskMetric EligibleMarketValueCoverageMetric,
     double CoverageThreshold,
     int CommonObservationCount,
     int TotalHoldingCount,
@@ -83,6 +95,7 @@ public sealed record StockMarketRiskReport(
     IReadOnlyList<StockMarketRiskInstrument> ExcludedInstruments,
     IReadOnlyList<StockMarketRiskVolatilityRanking> VolatilityRanking,
     StockMarketRiskCorrelationMatrix CorrelationMatrix,
+    IReadOnlyList<StockMarketRiskContribution> RiskContributions,
     IReadOnlyList<StockMarketRiskSyncWarning> SyncWarnings);
 
 /// <summary>不依賴 EF Core、HTTP 或外部狀態的市場風險計算單元。</summary>
@@ -157,10 +170,15 @@ public static class StockMarketRiskCalculator
                 syncStates);
         }
 
+        var recognizedHoldingKeys = stocks
+            .Where(stock => stock.Market is StockMarket.Twse or StockMarket.Tpex
+                && !string.IsNullOrWhiteSpace(stock.Symbol))
+            .Select(stock => (stock.Market, Symbol: NormalizeSymbol(stock.Symbol)))
+            .ToHashSet();
         var usablePrices = prices
-            .Where(price => price.TradingDate <= calculationDate && price.AdjustedClose > 0m)
-            .GroupBy(price => (price.Market, Symbol: NormalizeSymbol(price.Symbol)))
-            .SelectMany(group => group)
+            .Where(price => price.TradingDate <= calculationDate
+                && price.AdjustedClose > 0m
+                && recognizedHoldingKeys.Contains((price.Market, NormalizeSymbol(price.Symbol))))
             .ToList();
         var dataCutoffDate = usablePrices.Count == 0
             ? (DateOnly?)null
@@ -183,6 +201,15 @@ public static class StockMarketRiskCalculator
         var coverage = totalPositiveGrossValue > 0m
             ? (double)(eligibleGrossValue / totalPositiveGrossValue)
             : 0d;
+        var coverageMetric = totalPositiveGrossValue <= 0m
+            ? new StockMarketRiskMetric(
+                null,
+                stocks.Count == 0
+                    ? StockMarketRiskUnavailableReason.NoHoldings
+                    : StockMarketRiskUnavailableReason.NoEligibleInstruments)
+            : double.IsFinite(coverage)
+                ? new StockMarketRiskMetric(coverage, null)
+                : new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NonFiniteResult);
         var normalizedDenominator = eligibleGrossValue > 0m ? eligibleGrossValue : 1m;
 
         var includedInstruments = includedPositions
@@ -221,15 +248,31 @@ public static class StockMarketRiskCalculator
             commonDates,
             coverage,
             minimumObservations);
+        var portfolioMaximumDrawdown = CalculatePortfolioMaximumDrawdown(
+            includedPositions,
+            commonDates,
+            portfolioMetric);
+        var riskContributions = CalculateRiskContributions(
+            includedPositions,
+            commonDates,
+            portfolioMetric);
         var correlationMatrix = CalculateCorrelationMatrix(
             includedPositions,
             minimumObservations);
         var warnings = BuildSyncWarnings(stocks, syncStates);
 
         if (stocks.Count == 0)
+        {
             portfolioMetric = new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NoHoldings);
+            portfolioMaximumDrawdown = portfolioMetric;
+            riskContributions = [];
+        }
         else if (includedPositions.Count == 0)
+        {
             portfolioMetric = new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NoEligibleInstruments);
+            portfolioMaximumDrawdown = portfolioMetric;
+            riskContributions = [];
+        }
 
         return new StockMarketRiskReport(
             periodMonths,
@@ -237,7 +280,9 @@ public static class StockMarketRiskCalculator
             calculationDate,
             dataCutoffDate,
             portfolioMetric,
+            portfolioMaximumDrawdown,
             double.IsFinite(coverage) ? coverage : 0d,
+            coverageMetric,
             CoverageThreshold,
             commonDates.Count,
             stocks.Count,
@@ -245,6 +290,7 @@ public static class StockMarketRiskCalculator
             excludedInstruments,
             volatilityRanking,
             correlationMatrix,
+            riskContributions,
             warnings);
     }
 
@@ -311,13 +357,172 @@ public static class StockMarketRiskCalculator
         if (commonDates.Count < minimumObservations)
             return new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.InsufficientCommonDates);
 
-        var totalGross = positions.Sum(position => position.GrossMarketValue);
-        var returns = commonDates.Select(date => positions.Sum(position =>
-            (double)(position.GrossMarketValue / totalGross) * position.Returns[date])).ToList();
+        var returns = CalculatePortfolioReturns(positions, commonDates);
+        if (returns is null)
+            return new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NonFiniteResult);
         var volatility = AnnualizedVolatility(returns);
         return volatility.HasValue
             ? new StockMarketRiskMetric(volatility.Value, null)
             : new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NonFiniteResult);
+    }
+
+    /// <summary>以通過既有組合 gate 的共同日報酬計算最大回撤。</summary>
+    private static StockMarketRiskMetric CalculatePortfolioMaximumDrawdown(
+        IReadOnlyList<RiskPosition> positions,
+        IReadOnlyList<DateOnly> commonDates,
+        StockMarketRiskMetric portfolioMetric)
+    {
+        if (portfolioMetric.UnavailableReason is { } unavailableReason)
+            return new StockMarketRiskMetric(null, unavailableReason);
+
+        var returns = CalculatePortfolioReturns(positions, commonDates);
+        if (returns is null)
+            return new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NonFiniteResult);
+
+        return CalculateMaximumDrawdown(returns);
+    }
+
+    /// <summary>由每日組合報酬建立複利路徑並計算最大回撤。</summary>
+    private static StockMarketRiskMetric CalculateMaximumDrawdown(IReadOnlyList<double> returns)
+    {
+        var value = 1d;
+        var peak = 1d;
+        var maximumDrawdown = 0d;
+        foreach (var dailyReturn in returns)
+        {
+            value *= 1d + dailyReturn;
+            if (!double.IsFinite(value))
+                return new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NonFiniteResult);
+
+            peak = Math.Max(peak, value);
+            var drawdown = value / peak - 1d;
+            if (!double.IsFinite(drawdown))
+                return new StockMarketRiskMetric(null, StockMarketRiskUnavailableReason.NonFiniteResult);
+
+            maximumDrawdown = Math.Min(maximumDrawdown, drawdown);
+        }
+
+        return new StockMarketRiskMetric(maximumDrawdown, null);
+    }
+
+    /// <summary>以共同日期年化共變異數計算各標的組合風險貢獻。</summary>
+    private static IReadOnlyList<StockMarketRiskContribution> CalculateRiskContributions(
+        IReadOnlyList<RiskPosition> positions,
+        IReadOnlyList<DateOnly> commonDates,
+        StockMarketRiskMetric portfolioMetric)
+    {
+        if (!portfolioMetric.Value.HasValue || portfolioMetric.Value.Value <= 0d || !double.IsFinite(portfolioMetric.Value.Value))
+            return [];
+
+        var totalGross = positions.Sum(position => position.GrossMarketValue);
+        if (totalGross <= 0m || !double.IsFinite((double)totalGross))
+            return [];
+
+        var weights = positions.Select(position => (double)(position.GrossMarketValue / totalGross)).ToArray();
+        if (weights.Any(weight => !double.IsFinite(weight)))
+            return [];
+
+        var covariance = new double[positions.Count, positions.Count];
+        for (var row = 0; row < positions.Count; row++)
+        {
+            for (var column = 0; column < positions.Count; column++)
+            {
+                var value = AnnualizedCovariance(
+                    commonDates.Select(date => positions[row].Returns[date]),
+                    commonDates.Select(date => positions[column].Returns[date]));
+                if (!value.HasValue)
+                    return [];
+                covariance[row, column] = value.Value;
+            }
+        }
+
+        var covarianceRows = Enumerable.Range(0, positions.Count)
+            .Select(row => Enumerable.Range(0, positions.Count).Select(column => covariance[row, column]).ToList())
+            .Cast<IReadOnlyList<double>>()
+            .ToList();
+        var percentages = CalculateRiskContributionPercentages(covarianceRows, weights);
+        if (percentages.Count != positions.Count)
+            return [];
+
+        var contributions = new List<StockMarketRiskContribution>();
+        for (var index = 0; index < positions.Count; index++)
+        {
+            var position = positions[index];
+            contributions.Add(new StockMarketRiskContribution(
+                position.Name,
+                position.Symbol,
+                position.Market,
+                position.GrossMarketValue,
+                weights[index],
+                percentages[index] * portfolioMetric.Value!.Value,
+                percentages[index]));
+        }
+
+        return contributions
+            .OrderByDescending(contribution => contribution.ContributionPercentage)
+            .ToList();
+    }
+
+    /// <summary>由年化共變異數矩陣與權重計算未排序的風險貢獻百分比。</summary>
+    private static IReadOnlyList<double> CalculateRiskContributionPercentages(
+        IReadOnlyList<IReadOnlyList<double>> covariance,
+        IReadOnlyList<double> weights)
+    {
+        if (covariance.Count == 0
+            || covariance.Count != weights.Count
+            || weights.Any(weight => !double.IsFinite(weight))
+            || covariance.Any(row => row.Count != weights.Count || row.Any(value => !double.IsFinite(value))))
+            return [];
+
+        var variance = 0d;
+        for (var row = 0; row < weights.Count; row++)
+        {
+            for (var column = 0; column < weights.Count; column++)
+                variance += weights[row] * covariance[row][column] * weights[column];
+        }
+        if (!double.IsFinite(variance) || variance <= 0d)
+            return [];
+
+        var volatility = Math.Sqrt(variance);
+        if (!double.IsFinite(volatility) || volatility <= 0d)
+            return [];
+
+        var percentages = new List<double>();
+        for (var row = 0; row < weights.Count; row++)
+        {
+            var marginalNumerator = 0d;
+            for (var column = 0; column < weights.Count; column++)
+                marginalNumerator += covariance[row][column] * weights[column];
+
+            var percentage = weights[row] * marginalNumerator / variance;
+            if (!double.IsFinite(percentage))
+                return [];
+            percentages.Add(percentage);
+        }
+
+        return percentages;
+    }
+
+    /// <summary>以目前毛市值正規化權重彙整共同日期的每日組合報酬。</summary>
+    private static IReadOnlyList<double>? CalculatePortfolioReturns(
+        IReadOnlyList<RiskPosition> positions,
+        IReadOnlyList<DateOnly> commonDates)
+    {
+        var totalGross = positions.Sum(position => position.GrossMarketValue);
+        if (totalGross <= 0m || !double.IsFinite((double)totalGross))
+            return null;
+
+        var returns = new List<double>();
+        foreach (var date in commonDates)
+        {
+            var dailyReturn = positions.Sum(position =>
+                (double)(position.GrossMarketValue / totalGross) * position.Returns[date]);
+            if (!double.IsFinite(dailyReturn))
+                return null;
+            returns.Add(dailyReturn);
+        }
+
+        return returns;
     }
 
     /// <summary>依目前毛市值前十大的合格標的建立共同日期相關矩陣。</summary>
@@ -387,6 +592,27 @@ public static class StockMarketRiskCalculator
         return double.IsFinite(result) ? result : null;
     }
 
+    /// <summary>計算樣本共變異數並以交易日數年化。</summary>
+    private static double? AnnualizedCovariance(IEnumerable<double> first, IEnumerable<double> second)
+    {
+        var firstValues = first.ToArray();
+        var secondValues = second.ToArray();
+        if (firstValues.Length != secondValues.Length
+            || firstValues.Length < 2
+            || firstValues.Any(value => !double.IsFinite(value))
+            || secondValues.Any(value => !double.IsFinite(value)))
+            return null;
+
+        var firstMean = firstValues.Average();
+        var secondMean = secondValues.Average();
+        var covariance = 0d;
+        for (var index = 0; index < firstValues.Length; index++)
+            covariance += (firstValues[index] - firstMean) * (secondValues[index] - secondMean);
+
+        var annualized = covariance / (firstValues.Length - 1) * AnnualizationFactor;
+        return double.IsFinite(annualized) ? annualized : null;
+    }
+
     /// <summary>計算樣本標準差並以 sqrt(252) 年化。</summary>
     private static double? AnnualizedVolatility(IEnumerable<double> returns)
     {
@@ -412,7 +638,9 @@ public static class StockMarketRiskCalculator
             calculationDate,
             null,
             new StockMarketRiskMetric(null, reason),
+            new StockMarketRiskMetric(null, reason),
             0d,
+            new StockMarketRiskMetric(null, reason),
             CoverageThreshold,
             0,
             stocks.Count,
@@ -420,6 +648,7 @@ public static class StockMarketRiskCalculator
             [],
             [],
             new StockMarketRiskCorrelationMatrix([], [], 0, reason),
+            [],
             BuildSyncWarnings(stocks, syncStates));
 
     /// <summary>只回傳目前持股對應的非成功同步狀態，排除已刪除標的殘留警告。</summary>

@@ -30,6 +30,9 @@ const rankingMaximum = computed(() => Math.max(
   ...(riskData.value?.volatilityRanking.map(item => item.annualizedVolatility) ?? [0]),
   0.0001,
 ))
+// 防禦性依風險貢獻降冪排序，避免 API 傳入順序影響排名呈現。
+const riskContributions = computed(() => [...(riskData.value?.riskContributions ?? [])]
+  .sort((left, right) => right.contributionPercentage - left.contributionPercentage))
 
 // 將查詢錯誤轉換成不暴露內部資訊的畫面訊息。
 function queryErrorMessage(error: unknown): string {
@@ -41,11 +44,23 @@ function formatPercentage(value: number | null | undefined): string {
   return value === null || value === undefined ? '不可用' : `${(value * 100).toFixed(1)}%`
 }
 
+// 將可正可負的風險貢獻保留明確符號，避免正值與無方向比例混淆。
+function formatSignedPercentage(value: number): string {
+  return `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)}%`
+}
+
 // 將年化波動度 metric 轉成可辨識的結果或原因。
 function formatMetric(metric: StockMarketRiskMetric | undefined): string {
   if (!metric || metric.value === null)
     return `不可用：${formatReason(metric?.unavailableReason)}`
   return formatPercentage(metric.value)
+}
+
+// 為零波動的已知除零情境提供風險貢獻專用說明。
+function riskContributionEmptyMessage(metric: StockMarketRiskMetric): string {
+  if (metric.value === 0)
+    return '組合波動度為 0，無法計算風險貢獻。'
+  return `尚無可用風險貢獻；${formatReason(metric.unavailableReason)}。`
 }
 
 // 將後端 unavailable reason code 轉成使用者可理解的中文說明。
@@ -136,14 +151,18 @@ onMounted(loadInitialData)
       :retry="riskQuery.retry"
     >
       <div v-if="riskData" class="space-y-6">
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <Card>
             <p class="text-xs text-text-secondary">組合年化波動度</p>
             <p class="mt-2 text-xl font-bold text-text-primary">{{ formatMetric(riskData.portfolioAnnualizedVolatility) }}</p>
           </Card>
           <Card>
+            <p class="text-xs text-text-secondary">組合最大回撤</p>
+            <p class="mt-2 text-xl font-bold text-text-primary">{{ formatMetric(riskData.portfolioMaximumDrawdown) }}</p>
+          </Card>
+          <Card>
             <p class="text-xs text-text-secondary">行情市值覆蓋率</p>
-            <p class="mt-2 text-xl font-bold text-text-primary">{{ formatPercentage(riskData.eligibleMarketValueCoverage) }}</p>
+            <p class="mt-2 text-xl font-bold text-text-primary">{{ formatMetric(riskData.eligibleMarketValueCoverageMetric) }}</p>
             <p class="mt-1 text-xs text-text-tertiary">門檻 {{ formatPercentage(riskData.coverageThreshold) }}</p>
           </Card>
           <Card>
@@ -165,7 +184,12 @@ onMounted(loadInitialData)
           <p class="mt-1 text-sm text-text-secondary">{{ formatReason(riskData.portfolioAnnualizedVolatility.unavailableReason) }}。系統不會以零波動代表缺少資料。</p>
         </Card>
 
-        <Card v-if="riskData.syncWarnings.length > 0" class="border-color-warning-border">
+        <Card
+          v-if="riskData.syncWarnings.length > 0"
+          data-testid="market-sync-warning"
+          title="同步有警告時保留最後成功資料；此狀態不會判定投資價值。"
+          class="border-color-warning-border bg-color-warning-bg text-color-warning-text"
+        >
           <div class="flex items-center justify-between gap-3">
             <h3 class="text-sm font-semibold text-color-warning-text">行情同步狀態</h3>
             <span class="text-xs text-text-tertiary">保留最後成功資料</span>
@@ -232,6 +256,25 @@ onMounted(loadInitialData)
             <p v-if="riskData.correlationMatrix.unavailableReason === null" class="mt-3 text-xs text-text-tertiary">
               共同觀測 {{ riskData.correlationMatrix.commonObservationCount }} 筆；數值只描述同一期間的歷史共同變動，不代表因果或買賣訊號。
             </p>
+          </Card>
+          <Card>
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-sm font-semibold text-text-primary">風險貢獻排名</h3>
+              <span class="text-xs text-text-tertiary">依貢獻由高到低</span>
+            </div>
+            <p class="mt-1 text-xs text-text-tertiary">以目前持股權重與所選期間共同歷史報酬估算；負值表示該期間分散效果。</p>
+            <p v-if="riskContributions.length === 0" class="py-8 text-center text-sm text-text-tertiary">
+              {{ riskContributionEmptyMessage(riskData.portfolioAnnualizedVolatility) }}
+            </p>
+            <div v-else class="mt-4 space-y-3">
+              <div v-for="item in riskContributions" :key="`${item.market}-${item.symbol}-${item.name}`" class="flex items-start justify-between gap-3 text-sm">
+                <div class="min-w-0">
+                  <p class="truncate font-medium text-text-primary">{{ item.name }} ({{ item.symbol || '無代號' }})</p>
+                  <p class="mt-1 text-xs text-text-tertiary">{{ formatStockMarket(item.market) }} · 市值權重 {{ formatPercentage(item.weight) }}</p>
+                </div>
+                <span class="shrink-0 font-semibold" :class="item.contributionPercentage < 0 ? 'text-color-info' : 'text-text-primary'">{{ formatSignedPercentage(item.contributionPercentage) }}</span>
+              </div>
+            </div>
           </Card>
         </div>
 

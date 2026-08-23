@@ -101,6 +101,41 @@ public sealed class StockMarketRiskCalculatorTests
             result.PortfolioAnnualizedVolatility.UnavailableReason);
     }
 
+    /// <summary>驗證無正毛市值分母時保留舊 coverage 零值，但另以 typed metric 標示不可用。</summary>
+    [Fact]
+    public void Calculate_MarksCoverageMetricUnavailableWithoutPositiveGrossValue()
+    {
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("零市值", "AAA", StockMarket.Twse, 0m, 100m)],
+            [],
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Equal(0d, result.EligibleMarketValueCoverage);
+        Assert.Null(result.EligibleMarketValueCoverageMetric.Value);
+        Assert.Equal(StockMarketRiskUnavailableReason.NoEligibleInstruments,
+            result.EligibleMarketValueCoverageMetric.UnavailableReason);
+    }
+
+    /// <summary>驗證不相關標的較新的本機行情不會改變目前持股的資料截止日。</summary>
+    [Fact]
+    public void Calculate_UsesOnlyCurrentRecognizedHoldingPricesForDataCutoffDate()
+    {
+        var holdingPrices = CreatePriceSeries(StockMarket.Twse, "AAA", 60, 100m, 1.01m);
+        var prices = holdingPrices
+            .Append(Price(StockMarket.Twse, "UNRELATED", new DateOnly(2026, 8, 7), 100m))
+            .ToList();
+
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("目前持股", " aaa ", StockMarket.Twse, 1m, 100m)],
+            prices,
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Equal(holdingPrices.Max(price => price.TradingDate), result.DataCutoffDate);
+        Assert.Single(result.IncludedInstruments);
+    }
+
     /// <summary>驗證個別與組合波動度使用樣本標準差及 sqrt(252) 年化。</summary>
     [Fact]
     public void Calculate_AnnualizesSampleVolatilityFromCommonReturns()
@@ -204,6 +239,216 @@ public sealed class StockMarketRiskCalculatorTests
         Assert.Equal("2330", warning.Symbol);
     }
 
+    /// <summary>驗證單調上升的組合累積路徑沒有最大回撤。</summary>
+    [Fact]
+    public void Calculate_ReturnsZeroMaximumDrawdownForMonotonicGrowth()
+    {
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("上升", "AAA", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", Enumerable.Repeat(0.01d, 50)),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Equal(0d, result.PortfolioMaximumDrawdown.Value!.Value, 10);
+        Assert.Null(result.PortfolioMaximumDrawdown.UnavailableReason);
+    }
+
+    /// <summary>驗證最大回撤會取峰值至谷底的最大損失。</summary>
+    [Fact]
+    public void Calculate_ReturnsPeakToTroughMaximumDrawdown()
+    {
+        var returns = new[] { 0.10d, -0.20d }.Concat(Enumerable.Repeat(0d, 48));
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("回撤", "AAA", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", returns),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Equal(-0.20d, result.PortfolioMaximumDrawdown.Value!.Value, 10);
+    }
+
+    /// <summary>驗證日組合報酬為負百分之百時，最大回撤為負一而不是非有限結果。</summary>
+    [Fact]
+    public void CalculateMaximumDrawdown_ReturnsNegativeOneForCompleteLoss()
+    {
+        var result = InvokeMaximumDrawdown([-1d]);
+
+        Assert.Equal(-1d, result.Value);
+        Assert.Null(result.UnavailableReason);
+    }
+
+    /// <summary>驗證非有限日組合報酬會使最大回撤安全地標示為不可用。</summary>
+    [Fact]
+    public void CalculateMaximumDrawdown_MarksNonFiniteDailyReturnUnavailable()
+    {
+        var result = InvokeMaximumDrawdown([double.PositiveInfinity]);
+
+        Assert.Null(result.Value);
+        Assert.Equal(StockMarketRiskUnavailableReason.NonFiniteResult, result.UnavailableReason);
+    }
+
+    /// <summary>驗證創新高後的回撤以新峰值重新計算。</summary>
+    [Fact]
+    public void Calculate_ResetsMaximumDrawdownPeakAfterNewHigh()
+    {
+        var returns = new[] { 0.10d, -0.10d, 0.20d, -0.25d }.Concat(Enumerable.Repeat(0d, 46));
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("重設峰值", "AAA", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", returns),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Equal(-0.25d, result.PortfolioMaximumDrawdown.Value!.Value, 10);
+    }
+
+    /// <summary>驗證最大回撤沿用覆蓋率、共同日期與空持股的不可用 gate。</summary>
+    [Theory]
+    [InlineData(StockMarketRiskUnavailableReason.NoHoldings)]
+    [InlineData(StockMarketRiskUnavailableReason.CoverageBelowThreshold)]
+    [InlineData(StockMarketRiskUnavailableReason.InsufficientCommonDates)]
+    public void Calculate_MarksMaximumDrawdownUnavailableWhenPortfolioGateFails(StockMarketRiskUnavailableReason expectedReason)
+    {
+        IReadOnlyList<Stock> holdings = expectedReason switch
+        {
+            StockMarketRiskUnavailableReason.NoHoldings => [],
+            StockMarketRiskUnavailableReason.CoverageBelowThreshold =>
+            [
+                Stock("合格", "AAA", StockMarket.Twse, 899m, 1m),
+                Stock("不足", "BBB", StockMarket.Twse, 101m, 1m),
+            ],
+            _ =>
+            [
+                Stock("共同日期不足甲", "AAA", StockMarket.Twse, 1m, 100m),
+                Stock("共同日期不足乙", "BBB", StockMarket.Twse, 1m, 100m),
+            ],
+        };
+        IReadOnlyList<HistoricalAdjustedPrice> prices = expectedReason switch
+        {
+            StockMarketRiskUnavailableReason.NoHoldings => [],
+            StockMarketRiskUnavailableReason.InsufficientCommonDates => CreateReturnSeries(StockMarket.Twse, "AAA", Enumerable.Repeat(0.01d, 50))
+                .Concat(CreateReturnSeries(StockMarket.Twse, "BBB", Enumerable.Repeat(0.01d, 50), new DateOnly(2026, 1, 2))).ToList(),
+            _ => CreateReturnSeries(StockMarket.Twse, "AAA", Enumerable.Repeat(0.01d, 50)),
+        };
+
+        var result = StockMarketRiskCalculator.Calculate(holdings, prices, 3, new DateOnly(2026, 8, 7));
+
+        Assert.Null(result.PortfolioMaximumDrawdown.Value);
+        Assert.Equal(expectedReason, result.PortfolioMaximumDrawdown.UnavailableReason);
+    }
+
+    /// <summary>驗證單一標的承擔全部組合風險貢獻。</summary>
+    [Fact]
+    public void Calculate_ReturnsOneHundredPercentRiskContributionForSingleInstrument()
+    {
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("唯一", "AAA", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", CreateAlternatingReturns(50, 0.01d, -0.01d)),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        var contribution = Assert.Single(result.RiskContributions);
+        Assert.Equal("AAA", contribution.Symbol);
+        Assert.Equal(1d, contribution.Weight, 10);
+        Assert.Equal(result.PortfolioAnnualizedVolatility.Value!.Value, contribution.ComponentVolatilityContribution, 10);
+        Assert.Equal(1d, contribution.ContributionPercentage, 10);
+    }
+
+    /// <summary>驗證等權且完全相關的標的各承擔一半風險。</summary>
+    [Fact]
+    public void Calculate_ReturnsEqualRiskContributionsForEqualCorrelatedInstruments()
+    {
+        var returns = CreateAlternatingReturns(50, 0.01d, -0.01d);
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("甲", "AAA", StockMarket.Twse, 1m, 100m), Stock("乙", "BBB", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", returns)
+                .Concat(CreateReturnSeries(StockMarket.Twse, "BBB", returns)).ToList(),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.All(result.RiskContributions, contribution => Assert.Equal(0.5d, contribution.ContributionPercentage, 10));
+        Assert.Equal(1d, result.RiskContributions.Sum(contribution => contribution.ContributionPercentage), 10);
+    }
+
+    /// <summary>驗證不等市值權重的完全相關標的依權重分配風險且總和近似一。</summary>
+    [Fact]
+    public void Calculate_ReturnsWeightedRiskContributionsThatSumToOne()
+    {
+        var returns = CreateAlternatingReturns(50, 0.01d, -0.01d);
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("大", "AAA", StockMarket.Twse, 3m, 100m), Stock("小", "BBB", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", returns)
+                .Concat(CreateReturnSeries(StockMarket.Twse, "BBB", returns)).ToList(),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Equal(["AAA", "BBB"], result.RiskContributions.Select(contribution => contribution.Symbol));
+        Assert.Equal(0.75d, result.RiskContributions[0].ContributionPercentage, 10);
+        Assert.Equal(0.25d, result.RiskContributions[1].ContributionPercentage, 10);
+        Assert.InRange(result.RiskContributions.Sum(contribution => contribution.ContributionPercentage), 0.999999999d, 1.000000001d);
+    }
+
+    /// <summary>驗證分散標的的負風險貢獻不會被截斷為零。</summary>
+    [Fact]
+    public void Calculate_PreservesNegativeDiversificationRiskContribution()
+    {
+        var firstReturns = CreateAlternatingReturns(50, 0.02d, -0.01d);
+        var inverseReturns = firstReturns.Select(value => -value).ToList();
+        var result = StockMarketRiskCalculator.Calculate(
+            [Stock("主風險", "AAA", StockMarket.Twse, 4m, 100m), Stock("分散", "BBB", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", firstReturns)
+                .Concat(CreateReturnSeries(StockMarket.Twse, "BBB", inverseReturns)).ToList(),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Contains(result.RiskContributions, contribution => contribution.Symbol == "BBB" && contribution.ContributionPercentage < 0d);
+        Assert.Equal(1d, result.RiskContributions.Sum(contribution => contribution.ContributionPercentage), 10);
+    }
+
+    /// <summary>驗證不可用 gate 與零變異數時不建立合成風險貢獻。</summary>
+    [Fact]
+    public void Calculate_ReturnsNoRiskContributionsWhenPortfolioOrVarianceIsUnavailable()
+    {
+        var unavailable = StockMarketRiskCalculator.Calculate(
+            [Stock("不足", "AAA", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", Enumerable.Repeat(0.01d, 49)),
+            3,
+            new DateOnly(2026, 8, 7));
+        var zeroVariance = StockMarketRiskCalculator.Calculate(
+            [Stock("固定", "AAA", StockMarket.Twse, 1m, 100m)],
+            CreateReturnSeries(StockMarket.Twse, "AAA", Enumerable.Repeat(0d, 50)),
+            3,
+            new DateOnly(2026, 8, 7));
+
+        Assert.Empty(unavailable.RiskContributions);
+        Assert.Empty(zeroVariance.RiskContributions);
+    }
+
+    /// <summary>驗證非有限共變異數不會產生風險貢獻。</summary>
+    [Fact]
+    public void CalculateRiskContributionPercentages_ReturnsEmptyForNonFiniteCovariance()
+    {
+        IReadOnlyList<IReadOnlyList<double>> covariance = [[double.NaN]];
+
+        var result = InvokeRiskContributionPercentages(covariance, [1d]);
+
+        Assert.Empty(result);
+    }
+
+    /// <summary>驗證溢位成非有限組合變異數時不會產生風險貢獻。</summary>
+    [Fact]
+    public void CalculateRiskContributionPercentages_ReturnsEmptyForNonFiniteVariance()
+    {
+        IReadOnlyList<IReadOnlyList<double>> covariance =
+        [
+            [double.MaxValue, double.MaxValue],
+            [double.MaxValue, double.MaxValue],
+        ];
+
+        var result = InvokeRiskContributionPercentages(covariance, [1d, 1d]);
+
+        Assert.Empty(result);
+    }
+
     /// <summary>建立指定市場、代號與價格的歷史點。</summary>
     private static HistoricalAdjustedPrice Price(StockMarket market, string symbol, DateOnly date, decimal value)
         => new()
@@ -268,5 +513,51 @@ public sealed class StockMarketRiskCalculatorTests
         }
 
         return points;
+    }
+
+    /// <summary>由指定日報酬建立連續還原價格序列。</summary>
+    private static IReadOnlyList<HistoricalAdjustedPrice> CreateReturnSeries(
+        StockMarket market,
+        string symbol,
+        IEnumerable<double> returns,
+        DateOnly? startDate = null)
+    {
+        var points = new List<HistoricalAdjustedPrice>();
+        var price = 100m;
+        var firstDate = startDate ?? new DateOnly(2026, 1, 1);
+        points.Add(Price(market, symbol, firstDate, price));
+        foreach (var dailyReturn in returns)
+        {
+            price *= (decimal)(1d + dailyReturn);
+            points.Add(Price(market, symbol, firstDate.AddDays(points.Count), price));
+        }
+
+        return points;
+    }
+
+    /// <summary>建立固定兩種日報酬交替的共同日期測試資料。</summary>
+    private static IReadOnlyList<double> CreateAlternatingReturns(int count, double first, double second)
+        => Enumerable.Range(0, count).Select(index => index % 2 == 0 ? first : second).ToList();
+
+    /// <summary>呼叫由市場風險計算器實際使用的最大回撤純數學 helper。</summary>
+    private static StockMarketRiskMetric InvokeMaximumDrawdown(IReadOnlyList<double> returns)
+    {
+        var method = typeof(StockMarketRiskCalculator).GetMethod(
+            "CalculateMaximumDrawdown",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        return Assert.IsType<StockMarketRiskMetric>(method!.Invoke(null, [returns]));
+    }
+
+    /// <summary>呼叫由市場風險計算器實際使用的風險貢獻純數學 helper。</summary>
+    private static IReadOnlyList<double> InvokeRiskContributionPercentages(
+        IReadOnlyList<IReadOnlyList<double>> covariance,
+        IReadOnlyList<double> weights)
+    {
+        var method = typeof(StockMarketRiskCalculator).GetMethod(
+            "CalculateRiskContributionPercentages",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        return Assert.IsAssignableFrom<IReadOnlyList<double>>(method!.Invoke(null, [covariance, weights]));
     }
 }

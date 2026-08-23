@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Routing;
@@ -35,6 +36,89 @@ public class StockStructureReportEndpointTests
         Assert.Contains("乙券商", report.AvailableBrokers);
         Assert.Contains(StockInstrumentType.Stock, report.AvailableInstrumentTypes);
         Assert.Contains(StockInstrumentType.StockEtf, report.AvailableInstrumentTypes);
+    }
+
+    /// <summary>驗證結構端點回傳增量分析欄位且資料品質遵守相同篩選範圍與固定 UTC 基準。</summary>
+    [Fact]
+    public async Task GetStockStructure_ReturnsEnhancedAnalyticsAndFilteredDataQuality()
+    {
+        await using var db = await CreateDbContextAsync();
+        var asOfUtc = new DateTime(2026, 8, 23, 12, 0, 0, DateTimeKind.Utc);
+
+        var report = await ReportEndpoints.GetStockStructureAsync(
+            db,
+            broker: "甲券商",
+            instrumentType: StockInstrumentType.Stock,
+            asOfUtc: asOfUtc);
+
+        var market = Assert.Single(report.MarketAllocations);
+        Assert.Equal("Twse", market.Key);
+        Assert.Equal("上市", market.Label);
+        Assert.Equal(100m, market.Percentage);
+        Assert.Equal(100m, report.Concentration.Top1Percentage);
+        Assert.Equal(100m, report.Concentration.Top3Percentage);
+        Assert.Equal(100m, report.Concentration.Top5Percentage);
+        Assert.Equal(1m, report.Concentration.Hhi);
+        Assert.Equal(1m, report.Concentration.EffectiveHoldingCount);
+        Assert.Equal(1, report.DataQuality.HoldingCount);
+        Assert.Equal(1m, report.DataQuality.PositivePriceCoverage);
+        Assert.Equal(0, report.DataQuality.MissingLastPriceUpdateCount);
+        Assert.Equal(1, report.DataQuality.StalePriceCount);
+        Assert.Equal(72, report.DataQuality.StaleAfterHours);
+        Assert.Equal(new DateTime(2026, 8, 20, 11, 0, 0, DateTimeKind.Utc), report.DataQuality.OldestLastPriceUpdateUtc);
+        Assert.Equal(report.DataQuality.OldestLastPriceUpdateUtc, report.DataQuality.LatestLastPriceUpdateUtc);
+        Assert.Equal(asOfUtc, report.DataQuality.GeneratedAtUtc);
+        Assert.Equal(asOfUtc, report.GeneratedAt);
+    }
+
+    /// <summary>驗證可注入的 Local 與 Unspecified UTC 基準會同時正規化至頂層與資料品質時間。</summary>
+    [Theory]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public async Task GetStockStructure_NormalizesInjectedAsOfUtcForResponseAndDataQuality(DateTimeKind inputKind)
+    {
+        await using var db = await CreateDbContextAsync();
+        var input = new DateTime(2026, 8, 23, 12, 0, 0, inputKind);
+        var expected = inputKind == DateTimeKind.Local
+            ? input.ToUniversalTime()
+            : DateTime.SpecifyKind(input, DateTimeKind.Utc);
+
+        var report = await ReportEndpoints.GetStockStructureAsync(db, asOfUtc: input);
+
+        Assert.Equal(expected, report.GeneratedAt);
+        Assert.Equal(DateTimeKind.Utc, report.GeneratedAt.Kind);
+        Assert.Equal(report.GeneratedAt, report.DataQuality.GeneratedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, report.DataQuality.GeneratedAtUtc.Kind);
+    }
+
+    /// <summary>驗證結構報表 HTTP 回應序列化增量分析欄位，且品質摘要遵守 query 篩選。</summary>
+    [Fact]
+    public async Task GetStockStructure_OverHttpSerializesEnhancedAnalyticsAndFilteredDataQuality()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateReportAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/api/reports/stock-structure?broker=%E7%94%B2%E5%88%B8%E5%95%86&instrumentType=Stock");
+
+        response.EnsureSuccessStatusCode();
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = payload.RootElement;
+        Assert.True(root.TryGetProperty("marketAllocations", out var marketAllocations));
+        Assert.Single(marketAllocations.EnumerateArray());
+        Assert.True(root.TryGetProperty("concentration", out var concentration));
+        Assert.Equal(1m, concentration.GetProperty("hhi").GetDecimal());
+        Assert.False(concentration.TryGetProperty("herfindahlHirschmanIndex", out _));
+        Assert.Equal(1m, concentration.GetProperty("effectiveHoldingCount").GetDecimal());
+        Assert.True(root.TryGetProperty("dataQuality", out var dataQuality));
+        Assert.Equal(1, dataQuality.GetProperty("holdingCount").GetInt32());
+        Assert.True(dataQuality.TryGetProperty("positivePriceCoverage", out var positivePriceCoverage));
+        Assert.Equal(1m, positivePriceCoverage.GetDecimal());
+        Assert.Equal(0, dataQuality.GetProperty("missingLastPriceUpdateCount").GetInt32());
+        Assert.True(dataQuality.TryGetProperty("oldestLastPriceUpdateUtc", out _));
+        Assert.True(dataQuality.TryGetProperty("latestLastPriceUpdateUtc", out _));
+        Assert.Equal(72, dataQuality.GetProperty("staleAfterHours").GetInt32());
+        Assert.True(dataQuality.TryGetProperty("generatedAtUtc", out _));
     }
 
     /// <summary>驗證持股結構報表路由要求 reports:read scope。</summary>
@@ -159,6 +243,8 @@ public class StockStructureReportEndpointTests
                 BuyPrice = 80m,
                 CurrentPrice = 100m,
                 Broker = "甲券商",
+                Market = StockMarket.Twse,
+                LastPriceUpdate = new DateTime(2026, 8, 20, 11, 0, 0, DateTimeKind.Utc),
             },
             new Stock
             {
@@ -169,6 +255,8 @@ public class StockStructureReportEndpointTests
                 BuyPrice = 80m,
                 CurrentPrice = 100m,
                 Broker = "乙券商",
+                Market = StockMarket.Tpex,
+                LastPriceUpdate = null,
             });
         await db.SaveChangesAsync();
         return db;

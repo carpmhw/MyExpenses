@@ -4,8 +4,9 @@ import { api } from '../../src/api'
 import ReportsPage from '../../src/pages/reports/index.vue'
 import SnapshotsPage from '../../src/pages/snapshots/index.vue'
 import ComparePage from '../../src/pages/snapshots/compare.vue'
-import type { SnapshotBatch } from '../../src/types'
+import type { SnapshotBatch, StockMarketRiskReport, StockStructureReport } from '../../src/types'
 import ConfirmDialog from '../../src/components/ui/ConfirmDialog.vue'
+import StockPortfolioOverview from '../../src/components/reports/StockPortfolioOverview.vue'
 import { createTestRouter, mountWithAppProviders } from '../support/render'
 
 vi.mock('vue-chartjs', () => ({
@@ -44,6 +45,27 @@ const reportDefaults = {
   forecast: [],
 }
 
+// 建立符合目前 API contract 的空持股結構報表 fixture。
+function createEmptyStructureReport(): StockStructureReport {
+  return {
+    summary: { holdingCount: 0, totalEstimatedBuyCost: 0, totalGrossMarketValue: 0, totalEstimatedNetSellValue: 0, totalEstimatedGainLoss: 0, estimatedGainLossPercentage: null },
+    insights: [], symbolAllocations: [], instrumentTypeAllocations: [], brokerAllocations: [], marketAllocations: [],
+    concentration: { top1Percentage: null, top3Percentage: null, top5Percentage: null, hhi: null, effectiveHoldingCount: null },
+    dataQuality: { holdingCount: 0, positivePriceCount: 0, missingLastPriceUpdateCount: 0, stalePriceCount: 0, positivePriceCoverage: null, oldestLastPriceUpdateUtc: null, latestLastPriceUpdateUtc: null, staleAfterHours: 72, generatedAtUtc: '2026-08-06T00:00:00Z' },
+    holdings: [], availableBrokers: [], availableInstrumentTypes: [], generatedAt: '2026-08-06T00:00:00Z',
+  }
+}
+
+// 建立符合目前 API contract 的空市場風險報表 fixture。
+function createEmptyRiskReport(): StockMarketRiskReport {
+  return {
+    periodMonths: 12, scenarioDescription: '情境', calculationDate: '2026-08-07', dataCutoffDate: null,
+    portfolioAnnualizedVolatility: { value: null, unavailableReason: 'NoHoldings' }, portfolioMaximumDrawdown: { value: null, unavailableReason: 'NoHoldings' },
+    eligibleMarketValueCoverage: 0, eligibleMarketValueCoverageMetric: { value: null, unavailableReason: 'NoHoldings' }, coverageThreshold: 0.9, commonObservationCount: 0, totalHoldingCount: 0,
+    includedInstruments: [], excludedInstruments: [], volatilityRanking: [], correlationMatrix: { labels: [], values: [], commonObservationCount: 0, unavailableReason: 'NoHoldings' }, syncWarnings: [], riskContributions: [],
+  }
+}
+
 describe('report and snapshot query ownership', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -75,17 +97,7 @@ describe('report and snapshot query ownership', () => {
   })
 
   it('lazy-loads stock structure and hides transaction date controls on its tab', async () => {
-    const stockStructure = vi.spyOn(api.reports, 'stockStructure').mockResolvedValue({
-      summary: { holdingCount: 0, totalEstimatedBuyCost: 0, totalGrossMarketValue: 0, totalEstimatedNetSellValue: 0, totalEstimatedGainLoss: 0, estimatedGainLossPercentage: null },
-      insights: [],
-      symbolAllocations: [],
-      instrumentTypeAllocations: [],
-      brokerAllocations: [],
-      holdings: [],
-      availableBrokers: [],
-      availableInstrumentTypes: [],
-      generatedAt: '2026-08-06T00:00:00Z',
-    })
+    const stockStructure = vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createEmptyStructureReport())
     const stockValueTrend = vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue([])
     const wrapper = mountWithAppProviders(ReportsPage, {
       global: { stubs: { Bar: { template: '<div />' }, Line: { template: '<div />' }, Doughnut: { template: '<div />' } } },
@@ -103,35 +115,51 @@ describe('report and snapshot query ownership', () => {
     expect(wrapper.findAll('input[type="date"]')).toHaveLength(0)
   })
 
-  it('lazy-loads market risk after stock structure and keeps date and broker filters out', async () => {
-    const stockStructure = vi.spyOn(api.reports, 'stockStructure').mockResolvedValue({
-      summary: { holdingCount: 0, totalEstimatedBuyCost: 0, totalGrossMarketValue: 0, totalEstimatedNetSellValue: 0, totalEstimatedGainLoss: 0, estimatedGainLossPercentage: null },
-      insights: [],
-      symbolAllocations: [],
-      instrumentTypeAllocations: [],
-      brokerAllocations: [],
-      holdings: [],
-      availableBrokers: [],
-      availableInstrumentTypes: [],
-      generatedAt: '2026-08-06T00:00:00Z',
-    })
+  it('places stock overview after category, keeps report tabs local-scrollable, and lazy-loads its owned queries', async () => {
+    const stockStructure = vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createEmptyStructureReport())
+    const marketRisk = vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue(createEmptyRiskReport())
     const stockValueTrend = vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue([])
-    const marketRisk = vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue({
-      periodMonths: 12,
-      scenarioDescription: '目前持股歷史情境',
-      calculationDate: '2026-08-07',
-      dataCutoffDate: null,
-      portfolioAnnualizedVolatility: { value: null, unavailableReason: 'NoHoldings' },
-      eligibleMarketValueCoverage: 0,
-      coverageThreshold: 0.9,
-      commonObservationCount: 0,
-      totalHoldingCount: 0,
-      includedInstruments: [],
-      excludedInstruments: [],
-      volatilityRanking: [],
-      correlationMatrix: { labels: [], values: [], commonObservationCount: 0, unavailableReason: 'NoHoldings' },
-      syncWarnings: [],
+    const wrapper = mountWithAppProviders(ReportsPage, {
+      global: { stubs: { Bar: { template: '<div />' }, Line: { template: '<div />' }, Doughnut: { template: '<div />' } } },
     })
+    await flushPromises()
+
+    const labels = wrapper.findAll('button').map(button => button.text())
+    expect(labels.indexOf('股票總覽')).toBeGreaterThan(labels.indexOf('類別分布'))
+    expect(labels.indexOf('股票總覽')).toBeLessThan(labels.indexOf('持股結構'))
+    expect(wrapper.find('[data-testid="report-tabs"]').classes()).toEqual(expect.arrayContaining(['max-w-full', 'whitespace-nowrap', 'overflow-x-auto']))
+    expect(stockStructure).not.toHaveBeenCalled()
+    expect(marketRisk).not.toHaveBeenCalled()
+    expect(stockValueTrend).not.toHaveBeenCalled()
+
+    await wrapper.findAll('button').find(button => button.text() === '股票總覽')!.trigger('click')
+    await flushPromises()
+
+    expect(stockStructure).toHaveBeenCalledTimes(1)
+    expect(marketRisk).toHaveBeenCalledWith({ periodMonths: 12 }, expect.anything())
+    expect(stockValueTrend).toHaveBeenCalledWith({ months: 12 }, expect.anything())
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(true)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(7)
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('股票總覽')
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').attributes('aria-controls')).toBe('report-panel-stockOverview')
+    expect(wrapper.get('#report-panel-stockOverview').attributes('role')).toBe('tabpanel')
+
+    const overview = wrapper.findComponent(StockPortfolioOverview)
+    overview.vm.$emit('navigate', 'stockStructure')
+    await flushPromises()
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('持股結構')
+
+    await wrapper.findAll('button').find(button => button.text() === '股票總覽')!.trigger('click')
+    await flushPromises()
+    wrapper.findComponent(StockPortfolioOverview).vm.$emit('navigate', 'marketRisk')
+    await flushPromises()
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('市場風險')
+  })
+
+  it('lazy-loads market risk after stock structure and keeps date and broker filters out', async () => {
+    const stockStructure = vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createEmptyStructureReport())
+    const stockValueTrend = vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue([])
+    const marketRisk = vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue(createEmptyRiskReport())
     const wrapper = mountWithAppProviders(ReportsPage, {
       global: { stubs: { Bar: { template: '<div />' }, Line: { template: '<div />' }, Doughnut: { template: '<div />' } } },
     })

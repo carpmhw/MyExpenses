@@ -228,6 +228,26 @@ export interface StockStructureAllocation {
   percentage: number | null
 }
 
+export interface StockStructureConcentration {
+  top1Percentage: number | null
+  top3Percentage: number | null
+  top5Percentage: number | null
+  hhi: number | null
+  effectiveHoldingCount: number | null
+}
+
+export interface StockStructureDataQuality {
+  holdingCount: number
+  positivePriceCount: number
+  missingLastPriceUpdateCount: number
+  stalePriceCount: number
+  positivePriceCoverage: number | null
+  oldestLastPriceUpdateUtc: string | null
+  latestLastPriceUpdateUtc: string | null
+  staleAfterHours: number
+  generatedAtUtc: string
+}
+
 export interface StockStructureHolding {
   id: number
   name: string
@@ -253,6 +273,9 @@ export interface StockStructureReport {
   symbolAllocations: StockStructureAllocation[]
   instrumentTypeAllocations: StockStructureAllocation[]
   brokerAllocations: StockStructureAllocation[]
+  marketAllocations: StockStructureAllocation[]
+  concentration: StockStructureConcentration
+  dataQuality: StockStructureDataQuality
   holdings: StockStructureHolding[]
   availableBrokers: string[]
   availableInstrumentTypes: StockInstrumentType[]
@@ -324,13 +347,25 @@ export interface StockMarketRiskSyncWarning {
   latestTradingDate: string | null
 }
 
+export interface StockMarketRiskContribution {
+  name: string
+  symbol: string
+  market: StockMarket
+  grossMarketValue: number
+  weight: number
+  componentVolatilityContribution: number
+  contributionPercentage: number
+}
+
 export interface StockMarketRiskReport {
   periodMonths: 3 | 6 | 12
   scenarioDescription: string
   calculationDate: string
   dataCutoffDate: string | null
   portfolioAnnualizedVolatility: StockMarketRiskMetric
+  portfolioMaximumDrawdown: StockMarketRiskMetric
   eligibleMarketValueCoverage: number
+  eligibleMarketValueCoverageMetric: StockMarketRiskMetric
   coverageThreshold: number
   commonObservationCount: number
   totalHoldingCount: number
@@ -339,6 +374,7 @@ export interface StockMarketRiskReport {
   volatilityRanking: StockMarketRiskVolatilityRanking[]
   correlationMatrix: StockMarketRiskCorrelationMatrix
   syncWarnings: StockMarketRiskSyncWarning[]
+  riskContributions: StockMarketRiskContribution[]
 }
 
 export interface StockValueTrendPoint {

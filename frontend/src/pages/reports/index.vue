@@ -12,6 +12,7 @@ import { useTimeZone } from '../../composables/useTimeZone'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import StockStructureReport from '../../components/reports/StockStructureReport.vue'
 import StockMarketRiskReport from '../../components/reports/StockMarketRiskReport.vue'
+import StockPortfolioOverview from '../../components/reports/StockPortfolioOverview.vue'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -39,7 +40,7 @@ function getDefaultEndDate(): string {
   return getCurrentYearRange(new Date(), timeZone.timeZoneId.value).end
 }
 
-const activeTab = ref<'trend' | 'category' | 'stockStructure' | 'marketRisk' | 'networth' | 'forecast'>('trend')
+const activeTab = ref<'trend' | 'category' | 'stockOverview' | 'stockStructure' | 'marketRisk' | 'networth' | 'forecast'>('trend')
 const startDate = ref(getDefaultStartDate())
 const endDate = ref(getDefaultEndDate())
 const chartType = ref<'bar' | 'line'>('bar')
@@ -139,6 +140,11 @@ function loadActiveTab() {
     void netWorthTrendQuery.refresh()
   }
   if (activeTab.value === 'forecast') void forecastQuery.refresh()
+}
+
+// 接收總覽元件的導覽意圖並切換到對應詳細報表分頁。
+function handleOverviewNavigate(target: 'stockStructure' | 'marketRisk'): void {
+  activeTab.value = target
 }
 
 watch([startDate, endDate], () => {
@@ -352,18 +358,23 @@ function selectCategory(item: CategoryDistribution) {
       </div>
     </div>
 
-    <div class="flex gap-1 border-b border-border-default">
+    <div data-testid="report-tabs" role="tablist" aria-label="報表類型" class="flex max-w-full gap-1 overflow-x-auto whitespace-nowrap border-b border-border-default">
       <button
         v-for="tab in ([
-           { key: 'trend', label: '收支趨勢' },
-           { key: 'category', label: '類別分布' },
-           { key: 'stockStructure', label: '持股結構' },
+            { key: 'trend', label: '收支趨勢' },
+            { key: 'category', label: '類別分布' },
+            { key: 'stockOverview', label: '股票總覽' },
+            { key: 'stockStructure', label: '持股結構' },
            { key: 'marketRisk', label: '市場風險' },
            { key: 'networth', label: '資產負債' },
           { key: 'forecast', label: '分期預測' },
         ] as const)"
         :key="tab.key"
-        class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px cursor-pointer"
+        :id="`report-tab-${tab.key}`"
+        role="tab"
+        :aria-selected="activeTab === tab.key"
+        :aria-controls="`report-panel-${tab.key}`"
+        class="shrink-0 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px cursor-pointer"
         :class="activeTab === tab.key
           ? 'border-accent-primary text-accent-primary'
           : 'border-transparent text-text-secondary hover:text-text-primary'"
@@ -374,7 +385,7 @@ function selectCategory(item: CategoryDistribution) {
     </div>
 
     <!-- 收支趨勢 -->
-    <div v-if="activeTab === 'trend'">
+    <div v-if="activeTab === 'trend'" id="report-panel-trend" role="tabpanel" aria-labelledby="report-tab-trend">
       <Card>
         <QueryState
           :status="trendQuery.status.value"
@@ -407,7 +418,7 @@ function selectCategory(item: CategoryDistribution) {
     </div>
 
     <!-- 類別分布 -->
-    <div v-else-if="activeTab === 'category'">
+    <div v-else-if="activeTab === 'category'" id="report-panel-category" role="tabpanel" aria-labelledby="report-tab-category">
       <Card>
         <QueryState
           :status="categoryQuery.status.value"
@@ -450,17 +461,22 @@ function selectCategory(item: CategoryDistribution) {
     </div>
 
     <!-- 持股結構 -->
-    <div v-else-if="activeTab === 'stockStructure'">
+    <div v-else-if="activeTab === 'stockOverview'" id="report-panel-stockOverview" role="tabpanel" aria-labelledby="report-tab-stockOverview">
+      <StockPortfolioOverview @navigate="handleOverviewNavigate" />
+    </div>
+
+    <!-- 持股結構 -->
+    <div v-else-if="activeTab === 'stockStructure'" id="report-panel-stockStructure" role="tabpanel" aria-labelledby="report-tab-stockStructure">
       <StockStructureReport />
     </div>
 
     <!-- 市場風險 -->
-    <div v-else-if="activeTab === 'marketRisk'">
+    <div v-else-if="activeTab === 'marketRisk'" id="report-panel-marketRisk" role="tabpanel" aria-labelledby="report-tab-marketRisk">
       <StockMarketRiskReport />
     </div>
 
     <!-- 資產負債 -->
-    <div v-else-if="activeTab === 'networth'">
+    <div v-else-if="activeTab === 'networth'" id="report-panel-networth" role="tabpanel" aria-labelledby="report-tab-networth">
       <QueryState
         :status="netWorthQuery.status.value"
         :error-message="queryErrorMessage(netWorthQuery.error.value)"
@@ -550,7 +566,7 @@ function selectCategory(item: CategoryDistribution) {
     </div>
 
     <!-- 分期預測 -->
-    <div v-else-if="activeTab === 'forecast'">
+    <div v-else-if="activeTab === 'forecast'" id="report-panel-forecast" role="tabpanel" aria-labelledby="report-tab-forecast">
       <Card>
         <QueryState
           :status="forecastQuery.status.value"
