@@ -9,6 +9,16 @@
 - MCP Server：Node.js、Model Context Protocol SDK
 - 部署：Docker Compose、nginx reverse proxy
 
+## 核心功能
+
+- **收支與帳戶管理**：管理收入、支出、分類、付款方式、銀行帳戶與提款紀錄。
+- **信用卡分期**：建立分期消費、追蹤每期應繳與付款狀態。
+- **財務快照與比較**：建立資產負債快照、保留歷史明細並比較不同時間點的淨資產變化。
+- **股票持倉**：管理持股、券商、商品類型與估值，支援台灣上市／上櫃市場辨識及價格同步。
+- **報表分析**：查看收支趨勢、分類分布、淨資產、分期預估、持股結構、股價趨勢與市場風險。
+- **自動化排程**：檢視自動化快照與作業的排程、執行歷史及狀態。
+- **MCP 整合**：讓已授權的 AI agent 透過 API token 查詢資料與建立交易。
+
 ## 部署邊界
 
 MyExpenses 是單一 owner 的個人系統。Production 只能從 nginx 入口存取；backend `5000` port 僅供容器或 process network 使用，不應發布到 host。
@@ -162,6 +172,42 @@ npm run dev
 ```
 
 直接使用 backend port、Vite dev server 或 Development-only secret 只適合本機開發。
+
+### 核心驗證
+
+前端驗證涵蓋 TypeScript/Vue typecheck、既有 Node/Vitest tests 與 production build；部署 scripts 驗證 Compose、nginx 與 smoke-test 設定。
+
+```bash
+cd frontend
+npm run typecheck
+npm test
+npm run build
+
+cd ..
+sh scripts/test-deployment-config.sh
+sh scripts/test-smoke-deployment.sh
+```
+
+## Frontend Dependency Security
+
+`frontend/package-lock.json` 是前端可重現安裝的基準。前端相依安全 workflow 會在相關 pull request 與 `main` push 先執行 `npm ci`，再以 `npm audit --audit-level=high` 阻擋 High 或 Critical advisory，並通過 typecheck、test 與 build。Dependabot 僅管理 `/frontend` npm 相依，採每週更新，一般版本更新最多同時開啟五個 pull request；security update PR 依 Dependabot 的安全更新機制處理，且不會自動合併。
+
+相依更新後執行完整驗證：
+
+```bash
+cd frontend
+npm ci
+npm ls nanoid postcss radix-vue vite
+npm audit --omit=dev --audit-level=high
+npm audit --audit-level=high
+npm run typecheck
+npm test
+npm run build
+cd ..
+docker build -t myexpenses-frontend:cve-fix ./frontend
+```
+
+不得 unattended 執行 `npm audit fix --force`、忽略 audit failure 或降低安全門檻。若標準 resolver 無法取得相容修補版，應先審查上游 semver 約束與 lockfile diff，再採用限定 parent dependency 的最小 override；不相關的直接相依與 major 版本應保持不變。
 
 ## License
 
