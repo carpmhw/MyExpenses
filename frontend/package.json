@@ -33,7 +33,7 @@
     "@vue/test-utils": "^2.4.11",
     "jsdom": "^30.0.1",
     "typescript": "~6.0.2",
-    "vite": "^8.0.12",
+    "vite": "^8.2.2",
     "vitest": "^4.1.10",
     "vue-tsc": "^3.2.8"
   }
