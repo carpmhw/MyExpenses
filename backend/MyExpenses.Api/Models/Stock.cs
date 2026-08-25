@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MyExpenses.Api.Models;
 
 public class Stock
@@ -12,4 +14,6 @@ public class Stock
     public decimal CurrentPrice { get; set; }
     public string? Broker { get; set; }
     public DateTime? LastPriceUpdate { get; set; }
+    [JsonIgnore]
+    public ICollection<StockTransaction> Transactions { get; set; } = [];
 }

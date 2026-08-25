@@ -1,26 +1,29 @@
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted } from 'vue'
 import { api } from '../../api'
-import type { Stock, StockListItem } from '../../types'
+import type { Stock, StockLedgerTransactionRequest, StockListItem, StockTransactionListItem, StockTransactionType } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
-import DataTable from '../../components/ui/DataTable.vue'
 import Modal from '../../components/ui/Modal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Input from '../../components/ui/Input.vue'
 import Icon from '../../components/ui/Icon.vue'
-import { formatMoney, formatShares } from '../../utils/format'
+import StockHoldingsTable from '../../components/stocks/StockHoldingsTable.vue'
+import StockTransactionLedger from '../../components/stocks/StockTransactionLedger.vue'
+import StockLedgerInitialization from '../../components/stocks/StockLedgerInitialization.vue'
+import StockTransactionModal from '../../components/stocks/StockTransactionModal.vue'
+import { formatMoney } from '../../utils/format'
 import {
   STOCK_INSTRUMENT_TYPE_OPTIONS,
   STOCK_MARKET_OPTIONS,
-  formatStockInstrumentType,
-  formatStockMarket,
 } from '../../utils/stock'
 import { syncStockPriceOnSave } from '../../utils/stockPriceSync'
 import { usePagination } from '../../composables/usePagination'
 import { applyStockMarketLookup, resetStockMarketLookupFields } from '../../utils/stockMarketLookup'
+import { useTimeZone } from '../../composables/useTimeZone'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
+const timeZone = useTimeZone()
 
 const pagination = usePagination(1, 15)
 
@@ -30,8 +33,29 @@ const saving = ref(false)
 
 const modalOpen = ref(false)
 const editingItem = ref<StockListItem | null>(null)
-type StockFormState = Omit<Stock, 'id' | 'broker'> & { broker: string }
-const form = ref<StockFormState>({ name: '', symbol: '', market: 'Unknown', instrumentType: 'Stock', shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null })
+type StockFormState = Omit<Stock, 'id' | 'broker'> & {
+  broker: string
+  tradeDate: string
+  initialTransactionType: 'Buy' | 'OpeningBalance'
+}
+// 建立新增股票表單的預設值，初始交易與股票建立將由 atomic position command 一次完成。
+function createEmptyStockForm(): StockFormState {
+  return {
+    name: '',
+    symbol: '',
+    market: 'Unknown',
+    instrumentType: 'Stock',
+    shares: 0,
+    buyPrice: 0,
+    currentPrice: 0,
+    broker: '',
+    lastPriceUpdate: null,
+    tradeDate: timeZone.getToday(),
+    initialTransactionType: 'Buy',
+  }
+}
+
+const form = ref<StockFormState>(createEmptyStockForm())
 const marketDirty = ref(false)
 const lookupDirty = ref({ name: false, currentPrice: false })
 const syncPrice = ref(true)
@@ -39,45 +63,42 @@ const totalEstimatedNetSellValue = ref(0)
 const totalEstimatedGainLoss = ref(0)
 const symbolFilter = ref('')
 const brokerFilter = ref('')
+const includeClosed = ref(false)
+const activeTab = ref<'holdings' | 'ledger'>('holdings')
+const ledgerItems = ref<StockTransactionListItem[]>([])
+const ledgerLoading = ref(false)
+const ledgerPage = ref(1)
+const ledgerTotal = ref(0)
+const ledgerPageSize = 20
+const ledgerStockId = ref<number | null>(null)
+const ledgerType = ref<StockTransactionType | ''>('')
+const ledgerDateStart = ref('')
+const ledgerDateEnd = ref('')
+const transactionModalOpen = ref(false)
+const transactionStockId = ref<number | null>(null)
+const transactionEditing = ref<StockTransactionListItem | null>(null)
+const transactionSaving = ref(false)
+const transactionError = ref('')
+const initializationLoading = ref(false)
+const initializationResponse = ref<Awaited<ReturnType<typeof api.stocks.ledger.initialize>> | null>(null)
 
-function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale' {
-  if (!lastUpdate) return 'stale'
-  const daysSinceUpdate = Math.floor(
-    (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24)
-  )
-  if (daysSinceUpdate <= 1) return 'fresh'
-  if (daysSinceUpdate <= 3) return 'warning'
-  return 'stale'
-}
-
-const freshnessColors: Record<string, string> = {
-  fresh: 'text-color-income-text',
-  warning: 'text-color-warning-text',
-  stale: 'text-color-expense-text',
-}
+const editingLedgerManaged = computed(() => editingItem.value?.hasLedger === true)
+const hasUninitializedActiveHoldings = computed(() => stocks.value.some(stock => stock.shares > 0 && stock.hasLedger !== true))
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
+const transactionConfirmOpen = ref(false)
+const deletingTransactionId = ref<number | null>(null)
 const snapshotLoading = ref(false)
-
-const columns = [
-  { key: 'seq', label: '序號' },
-  { key: 'name', label: '名稱' },
-  { key: 'symbol', label: '代號' },
-  { key: 'market', label: '市場' },
-  { key: 'instrumentType', label: '商品類型' },
-  { key: 'shares', label: '股數' },
-  { key: 'buyPrice', label: '買入均價', align: 'right' as const },
-  { key: 'currentPrice', label: '現價', align: 'right' as const },
-  { key: 'pnl', label: '預估損益', align: 'right' as const },
-  { key: 'broker', label: '券商' },
-]
 
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
   if (!form.value.name?.trim()) errs.name = '請填寫股票名稱'
   if (form.value.shares <= 0) errs.shares = '股數必須大於零'
   if (form.value.buyPrice <= 0) errs.buyPrice = '買入均價必須大於零'
+  if (!editingItem.value && form.value.initialTransactionType === 'OpeningBalance' && form.value.currentPrice <= 0) {
+    errs.currentPrice = '既有部位帶入需要目前價格'
+  }
   return errs
 })
 
@@ -95,6 +116,7 @@ async function fetchStocks() {
       pageSize: pagination.pageSize.value,
       symbol: symbolFilter.value,
       broker: brokerFilter.value,
+      includeClosed: includeClosed.value,
     })
     stocks.value = result.items
     pagination.total.value = result.total
@@ -102,6 +124,41 @@ async function fetchStocks() {
     totalEstimatedGainLoss.value = result.totalEstimatedGainLoss
   } finally {
     loading.value = false
+  }
+}
+
+// 只在交易紀錄 tab 啟用時載入 Ledger，避免股票頁初始查詢被非必要資料拖慢。
+async function fetchLedger() {
+  ledgerLoading.value = true
+  try {
+    const result = await api.stocks.ledger.list({
+      stockId: ledgerStockId.value ?? undefined,
+      type: ledgerType.value || undefined,
+      dateStart: ledgerDateStart.value || undefined,
+      dateEnd: ledgerDateEnd.value || undefined,
+      page: ledgerPage.value,
+      pageSize: ledgerPageSize,
+    })
+    ledgerItems.value = result.items
+    ledgerTotal.value = result.total
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '載入交易紀錄失敗')
+  } finally {
+    ledgerLoading.value = false
+  }
+}
+
+// 送出 atomic Ledger initialization，成功後重新整理持股 projection 與初始化狀態。
+async function initializeLedger(baselineDate: string): Promise<void> {
+  initializationLoading.value = true
+  try {
+    initializationResponse.value = await api.stocks.ledger.initialize({ baselineDate })
+    await fetchStocks()
+    toast.success(initializationResponse.value.blockingCount > 0 ? '部分持股需要先補正資料' : 'Ledger 初始化完成')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Ledger 初始化失敗')
+  } finally {
+    initializationLoading.value = false
   }
 }
 
@@ -113,6 +170,24 @@ watch([symbolFilter, brokerFilter], () => {
     return
   }
   fetchStocks()
+})
+
+watch(includeClosed, () => {
+  pagination.page.value = 1
+  void fetchStocks()
+})
+
+watch(activeTab, (tab) => {
+  if (tab === 'ledger') void fetchLedger()
+})
+
+watch(ledgerPage, () => {
+  if (activeTab.value === 'ledger') void fetchLedger()
+})
+
+watch([ledgerStockId, ledgerType, ledgerDateStart, ledgerDateEnd], () => {
+  ledgerPage.value = 1
+  if (activeTab.value === 'ledger') void fetchLedger()
 })
 
 /** 依指定表單快照建立正規化持股 payload，避免非同步期間混入其他表單資料。 */
@@ -134,7 +209,7 @@ function buildStockPayload(formState: StockFormState): Omit<Stock, 'id'> {
 function openCreate() {
   invalidatePendingStockLookup()
   editingItem.value = null
-  form.value = { name: '', symbol: '', market: 'Unknown', instrumentType: 'Stock', shares: 0, buyPrice: 0, currentPrice: 0, broker: '', lastPriceUpdate: null }
+  form.value = createEmptyStockForm()
   marketDirty.value = false
   lookupDirty.value = { name: false, currentPrice: false }
   modalOpen.value = true
@@ -154,10 +229,81 @@ function openEdit(item: StockListItem) {
     currentPrice: item.currentPrice,
     broker: item.broker || '',
     lastPriceUpdate: item.lastPriceUpdate,
+    tradeDate: timeZone.getToday(),
+    initialTransactionType: 'Buy',
   }
   syncPrice.value = true
   marketDirty.value = true
   modalOpen.value = true
+}
+
+// 以目前第一檔持股作為新增交易的預設標的，實際欄位由 transaction modal 管理。
+function openTransaction(stockId = stocks.value[0]?.id): void {
+  if (!stockId) return
+  transactionEditing.value = null
+  transactionError.value = ''
+  transactionStockId.value = stockId
+  transactionModalOpen.value = true
+}
+
+// 以選取的 Ledger row 開啟編輯表單，保持交易 id 與 replay row 的對應。
+function editTransaction(item: StockTransactionListItem): void {
+  transactionEditing.value = item
+  transactionError.value = ''
+  transactionStockId.value = item.stockId
+  transactionModalOpen.value = true
+}
+
+// 開啟交易刪除確認，避免在 replay 歷史上誤刪資料。
+function confirmDeleteTransaction(id: number): void {
+  deletingTransactionId.value = id
+  transactionConfirmOpen.value = true
+}
+
+// 透過 Ledger delete command 刪除交易，成功後同步重新載入 projection。
+async function deleteTransaction(): Promise<void> {
+  if (deletingTransactionId.value === null) return
+  try {
+    await api.stocks.ledger.delete(deletingTransactionId.value)
+    transactionConfirmOpen.value = false
+    deletingTransactionId.value = null
+    toast.success('交易已刪除')
+    await Promise.all([fetchLedger(), fetchStocks()])
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '刪除交易失敗')
+  }
+}
+
+// 建立或修改交易，成功後重新載入 Ledger rows 與持股 projection。
+async function saveTransaction(request: StockLedgerTransactionRequest): Promise<void> {
+  transactionSaving.value = true
+  transactionError.value = ''
+  let mutationSucceeded = false
+  try {
+    if (transactionEditing.value) {
+      await api.stocks.ledger.update(transactionEditing.value.id, request)
+      toast.success('交易已更新')
+    } else {
+      await api.stocks.ledger.create(request)
+      toast.success('交易已建立')
+    }
+    mutationSucceeded = true
+    transactionModalOpen.value = false
+    transactionEditing.value = null
+  } catch (error) {
+    transactionError.value = error instanceof Error ? error.message : '儲存交易失敗'
+    toast.error(transactionError.value)
+  } finally {
+    transactionSaving.value = false
+  }
+
+  if (mutationSucceeded) {
+    try {
+      await Promise.all([fetchLedger(), fetchStocks()])
+    } catch {
+      toast.error('交易已儲存，但重新整理資料失敗')
+    }
+  }
 }
 
 /** 標記使用者手動選擇市場，避免後續 lookup 覆寫意圖。 */
@@ -210,7 +356,21 @@ async function save() {
       }
       mutationSucceeded = true
     } else {
-      await api.stocks.create(payloadSnapshot)
+      await api.stocks.positions.create({
+        name: payloadSnapshot.name,
+        symbol: payloadSnapshot.symbol,
+        market: payloadSnapshot.market,
+        instrumentType: payloadSnapshot.instrumentType,
+        shares: payloadSnapshot.shares,
+        buyPrice: payloadSnapshot.buyPrice,
+        currentPrice: payloadSnapshot.currentPrice,
+        tradeDate: formSnapshot.tradeDate,
+        initialTransactionType: formSnapshot.initialTransactionType,
+        broker: payloadSnapshot.broker,
+        openingMarketValue: formSnapshot.initialTransactionType === 'OpeningBalance'
+          ? formSnapshot.shares * formSnapshot.currentPrice
+          : null,
+      })
       if (editingItem.value === editingSnapshot && form.value === formIdentity)
         modalOpen.value = false
       toast.success('股票已建立')
@@ -329,9 +489,49 @@ onMounted(fetchStocks)
       </div>
       <div class="flex items-center gap-2">
         <Button :loading="snapshotLoading" @click="takeSnapshot" title="紀錄所有銀行帳戶與股票的當前狀態">📷 拍照</Button>
+        <Button v-if="stocks.length > 0" data-testid="new-stock-transaction" variant="ghost" @click="openTransaction()">+ 新增交易</Button>
         <Button @click="openCreate">+ 新增股票</Button>
       </div>
     </div>
+
+    <div data-testid="stock-tabs" role="tablist" aria-label="股票資料類型" class="mb-6 flex max-w-full gap-1 overflow-x-auto whitespace-nowrap border-b border-border-default">
+      <button
+        data-testid="stock-tab-holdings"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === 'holdings'"
+        class="shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer"
+        :class="activeTab === 'holdings' ? 'border-accent-primary text-accent-primary' : 'border-transparent text-text-secondary hover:text-text-primary'"
+        @click="activeTab = 'holdings'"
+      >持股</button>
+      <button
+        data-testid="stock-tab-ledger"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === 'ledger'"
+        class="shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer"
+        :class="activeTab === 'ledger' ? 'border-accent-primary text-accent-primary' : 'border-transparent text-text-secondary hover:text-text-primary'"
+        @click="activeTab = 'ledger'"
+      >交易紀錄</button>
+      <button
+        data-testid="stock-closed-toggle"
+        type="button"
+        role="switch"
+        :aria-pressed="includeClosed"
+        class="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-xs transition-colors cursor-pointer"
+        :class="includeClosed ? 'bg-bg-active text-text-primary' : 'text-text-secondary hover:bg-bg-raised'"
+        @click="includeClosed = !includeClosed"
+      >{{ includeClosed ? '隱藏已結清' : '顯示已結清' }}</button>
+    </div>
+
+    <div v-if="activeTab === 'holdings'">
+      <StockLedgerInitialization
+        :has-active-holdings="hasUninitializedActiveHoldings"
+        :loading="initializationLoading"
+        :response="initializationResponse"
+        :holdings="stocks"
+        @initialize="initializeLedger"
+      />
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
       <Card>
@@ -390,41 +590,14 @@ onMounted(fetchStocks)
           />
         </div>
       </div>
-      <DataTable :columns="columns" :loading="loading" :items="stocks">
-        <template #empty>
-          <div class="text-center text-text-tertiary py-4">尚無股票資料</div>
-        </template>
-        <tr v-for="(item, idx) in stocks" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
-          <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
-          <td class="py-3 px-4 text-text-primary font-medium">{{ item.name }}</td>
-            <td class="py-3 px-4 text-text-secondary font-mono">{{ item.symbol }}</td>
-           <td class="py-3 px-4 text-text-secondary text-sm whitespace-nowrap">{{ formatStockMarket(item.market) }}</td>
-           <td class="py-3 px-4 text-text-secondary text-sm whitespace-nowrap">{{ formatStockInstrumentType(item.instrumentType) }}</td>
-          <td class="py-3 px-4 text-text-primary text-sm">{{ formatShares(item.shares) }}</td>
-          <td class="py-3 px-4 text-text-primary text-sm text-right">{{ formatMoney(item.buyPrice) }}</td>
-          <td class="py-3 px-4 text-text-primary text-sm text-right" :class="freshnessColors[priceFreshness(item.lastPriceUpdate)]">{{ formatMoney(item.currentPrice) }}</td>
-          <td class="py-3 px-4 text-sm text-right font-semibold" :class="item.estimatedGainLoss >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
-            {{ formatMoney(item.estimatedGainLoss) }}
-          </td>
-          <td class="py-3 px-4 text-text-secondary text-sm">{{ item.broker }}</td>
-          <td class="py-3 px-4 w-[80px]">
-            <div class="flex items-center gap-1">
-              <button
-                class="p-1.5 rounded-lg hover:bg-bg-raised text-text-secondary cursor-pointer transition-colors"
-                @click="openEdit(item)"
-              >
-                <Icon name="pencil" :size="16" />
-              </button>
-              <button
-                class="p-1.5 rounded-lg hover:bg-bg-raised text-color-expense-text cursor-pointer transition-colors"
-                @click="confirmDelete(item.id)"
-              >
-                <Icon name="trash-2" :size="16" />
-              </button>
-            </div>
-          </td>
-        </tr>
-      </DataTable>
+      <StockHoldingsTable
+        :items="stocks"
+        :loading="loading"
+        :page="pagination.page.value"
+        :page-size="pagination.pageSize.value"
+        @edit="openEdit"
+        @delete="confirmDelete"
+      />
       <div class="flex items-center justify-between px-4 py-3 border-t border-border-default">
         <span class="text-sm text-text-secondary">共 {{ pagination.total.value }} 筆</span>
         <div class="flex items-center gap-2">
@@ -438,6 +611,62 @@ onMounted(fetchStocks)
         </div>
       </div>
     </Card>
+    </div>
+
+    <div v-else data-testid="stock-ledger-panel">
+      <Card class="mb-4">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div>
+            <label for="ledger-stock-filter" class="mb-1 block text-xs font-medium text-text-secondary">股票</label>
+            <select
+              id="ledger-stock-filter"
+              v-model="ledgerStockId"
+              data-testid="ledger-stock-filter"
+              class="min-h-11 w-full rounded-lg border border-border-strong bg-bg-card px-3 py-2 text-sm text-text-primary focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-focus-ring"
+            >
+              <option :value="null">全部股票</option>
+              <option v-for="stock in stocks" :key="stock.id" :value="stock.id">{{ stock.symbol }} {{ stock.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label for="ledger-type-filter" class="mb-1 block text-xs font-medium text-text-secondary">交易類型</label>
+            <select
+              id="ledger-type-filter"
+              v-model="ledgerType"
+              data-testid="ledger-type-filter"
+              class="min-h-11 w-full rounded-lg border border-border-strong bg-bg-card px-3 py-2 text-sm text-text-primary focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-focus-ring"
+            >
+              <option value="">全部類型</option>
+              <option value="OpeningBalance">期初部位</option>
+              <option value="Buy">買入</option>
+              <option value="Sell">賣出</option>
+              <option value="Dividend">股息</option>
+            </select>
+          </div>
+          <div>
+            <label for="ledger-date-start" class="mb-1 block text-xs font-medium text-text-secondary">起始日期</label>
+            <input id="ledger-date-start" v-model="ledgerDateStart" data-testid="ledger-date-start" type="date" class="min-h-11 w-full rounded-lg border border-border-strong bg-bg-card px-3 py-2 text-sm text-text-primary focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-focus-ring" />
+          </div>
+          <div>
+            <label for="ledger-date-end" class="mb-1 block text-xs font-medium text-text-secondary">結束日期</label>
+            <input id="ledger-date-end" v-model="ledgerDateEnd" data-testid="ledger-date-end" type="date" class="min-h-11 w-full rounded-lg border border-border-strong bg-bg-card px-3 py-2 text-sm text-text-primary focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-focus-ring" />
+          </div>
+        </div>
+      </Card>
+      <StockTransactionLedger
+        :items="ledgerItems"
+        :loading="ledgerLoading"
+        :total="ledgerTotal"
+        :has-stocks="stocks.length > 0"
+        :page="ledgerPage"
+        :page-size="ledgerPageSize"
+        @create="openTransaction()"
+        @edit="editTransaction"
+        @delete="confirmDeleteTransaction"
+        @previous="ledgerPage = Math.max(1, ledgerPage - 1)"
+        @next="ledgerPage += 1"
+      />
+    </div>
 
     <Modal :open="modalOpen" :title="editingItem ? '編輯股票' : '新增股票'" :close-disabled="saving" @update:open="modalOpen = $event">
       <form @submit.prevent="save">
@@ -473,15 +702,35 @@ onMounted(fetchStocks)
             </option>
           </select>
         </div>
+        <template v-if="!editingItem">
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">初始部位來源</label>
+            <select
+              v-model="form.initialTransactionType"
+              data-testid="stock-initial-transaction-type"
+              class="w-full px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
+            >
+              <option value="Buy">新買入</option>
+              <option value="OpeningBalance">既有部位帶入</option>
+            </select>
+            <p class="mt-1 text-xs text-text-secondary">股票與第一筆 Ledger 會以單一 atomic request 建立。</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">初始交易日期</label>
+            <Input v-model="form.tradeDate" data-testid="stock-initial-trade-date" type="date" :error="formErrors.tradeDate" />
+          </div>
+        </template>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">股數</label>
           <Input
             :model-value="form.shares || ''"
             type="number"
             step="1"
+            :disabled="editingLedgerManaged"
             :error="formErrors.shares"
             @update:model-value="form.shares = Number($event) || 0"
           />
+          <p v-if="editingLedgerManaged" class="mt-1 text-xs text-text-secondary">股數由交易紀錄管理</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">買入均價</label>
@@ -489,6 +738,7 @@ onMounted(fetchStocks)
             :model-value="form.buyPrice || ''"
             type="number"
             step="0.01"
+            :disabled="editingLedgerManaged"
             :error="formErrors.buyPrice"
             @update:model-value="form.buyPrice = Number($event) || 0"
           />
@@ -499,6 +749,7 @@ onMounted(fetchStocks)
             :model-value="form.currentPrice || ''"
             type="number"
             step="0.01"
+            :error="formErrors.currentPrice"
             @update:model-value="lookupDirty.currentPrice = true; form.currentPrice = Number($event) || 0"
           />
         </div>
@@ -518,6 +769,17 @@ onMounted(fetchStocks)
       </form>
     </Modal>
 
+    <StockTransactionModal
+      :open="transactionModalOpen"
+      :stocks="stocks"
+      :stock-id="transactionStockId"
+      :transaction="transactionEditing"
+      :loading="transactionSaving"
+      :error-message="transactionError"
+      @update:open="transactionModalOpen = $event"
+      @save="saveTransaction"
+    />
+
     <ConfirmDialog
       :open="confirmOpen"
       title="刪除股票"
@@ -525,6 +787,15 @@ onMounted(fetchStocks)
       variant="danger"
       @update:open="confirmOpen = $event"
       @confirm="doDelete"
+    />
+
+    <ConfirmDialog
+      :open="transactionConfirmOpen"
+      title="刪除交易"
+      description="確定要刪除此筆交易嗎？系統會重新 replay 後續歷史。"
+      variant="danger"
+      @update:open="transactionConfirmOpen = $event"
+      @confirm="deleteTransaction"
     />
   </div>
 </template>

@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../src/api'
 import StockPortfolioOverview from '../../src/components/reports/StockPortfolioOverview.vue'
-import type { StockMarketRiskReport, StockStructureReport, StockValueTrendPoint } from '../../src/types'
+import type { StockMarketRiskReport, StockPerformanceReport, StockStructureReport, StockValueTrendPoint } from '../../src/types'
 import { deferred } from '../support/deferred'
 import { mountWithAppProviders } from '../support/render'
 import { Line } from 'vue-chartjs'
@@ -103,6 +103,23 @@ const trend: StockValueTrendPoint[] = [
   { month: '2026/08', snapshotDate: '2026-08-01T00:00:00Z', name: '八月快照', totalStockValue: 209500, basis: 'AssetsOnly' },
 ]
 
+function createPerformanceReport(): StockPerformanceReport {
+  return {
+    dateStart: '2026-01-01',
+    dateEnd: '2026-08-07',
+    trackingStartDate: '2026-01-01',
+    hasSyntheticOpeningBalances: false,
+    terminalValuationSource: 'CurrentGrossMarketValue',
+    ledgerCoverage: { value: 1, unavailableReason: 'None' },
+    summary: { currentGrossMarketValue: 209500, remainingCostBasis: 180000, realizedGainLoss: 1000, unrealizedGainLoss: 28500, netDividendIncome: 500, totalGainLoss: 30000 },
+    twr: { value: 0.12, unavailableReason: 'None' },
+    xirr: { value: 0.18, unavailableReason: 'None' },
+    monthlyPoints: [{ month: '2026-08', endingMarketValue: 209500, netContribution: 0, realizedGainLoss: 1000, dividendIncome: 500, cumulativeTwr: 0.12 }],
+    instrumentBreakdown: [{ stockId: 1, name: '台積電', symbol: '2330', market: 'Twse', broker: '甲券商', currentShares: 1000, grossMarketValue: 209500, remainingCostBasis: 180000, realizedGainLoss: 1000, unrealizedGainLoss: 28500, dividendIncome: 500, totalGainLoss: 30000, isClosed: false }],
+    dataQuality: { activeInstrumentCount: 1, ledgerManagedInstrumentCount: 1, priceObservationCount: 10, priceCoverage: 1, trackingStartReason: 'None', hasIncompleteLedgerCoverage: false },
+  }
+}
+
 describe('StockPortfolioOverview', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -129,6 +146,36 @@ describe('StockPortfolioOverview', () => {
     expect(wrapper.text()).toContain('資料新鮮度提示')
     expect(wrapper.text()).toContain('最舊更新 2026-08-01 00:00:00 UTC')
     expect(wrapper.text()).toContain('最新更新 2026-08-06 00:00:00 UTC')
+  })
+
+  // 驗證總覽顯示績效摘要，並提供前往完整績效 tab 的導覽事件。
+  it('renders the performance summary and navigates to the full report', async () => {
+    vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createStructureReport())
+    vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue(createRiskReport())
+    vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue(trend)
+    vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createPerformanceReport())
+
+    const wrapper = mountWithAppProviders(StockPortfolioOverview)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="overview-performance-summary"]').text()).toContain('12.0%')
+    await wrapper.get('[data-testid="navigate-stock-performance"]').trigger('click')
+    expect(wrapper.emitted('navigate')).toContainEqual(['stockPerformance'])
+  })
+
+  // 驗證績效摘要失敗時只影響自己的 QueryState，既有結構與風險仍可用。
+  it('keeps structure and risk visible when performance summary fails', async () => {
+    vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createStructureReport())
+    vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue(createRiskReport())
+    vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue(trend)
+    vi.spyOn(api.reports, 'stockPerformance').mockRejectedValue(new Error('performance unavailable'))
+
+    const wrapper = mountWithAppProviders(StockPortfolioOverview)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('預估賣出淨值')
+    expect(wrapper.text()).toContain('12M 年化波動度')
+    expect(wrapper.text()).toContain('performance unavailable')
   })
 
   it('keeps successful structure sections visible when the independent risk query fails', async () => {

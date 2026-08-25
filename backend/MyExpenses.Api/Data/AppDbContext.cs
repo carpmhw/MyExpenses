@@ -43,6 +43,10 @@ public class AppDbContext : DbContext
                 nameof(Stock.Symbol),
                 nameof(Stock.Broker),
             },
+            [typeof(StockTransaction)] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(StockTransaction.Notes),
+            },
             [typeof(Withdrawal)] = new HashSet<string>(StringComparer.Ordinal)
             {
                 nameof(Withdrawal.Description),
@@ -83,6 +87,7 @@ public class AppDbContext : DbContext
     public DbSet<CreditCardBill> CreditCardBills => Set<CreditCardBill>();
     public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
     public DbSet<Stock> Stocks => Set<Stock>();
+    public DbSet<StockTransaction> StockTransactions => Set<StockTransaction>();
     public DbSet<HistoricalAdjustedPrice> HistoricalAdjustedPrices => Set<HistoricalAdjustedPrice>();
     public DbSet<HistoricalPriceSyncState> HistoricalPriceSyncStates => Set<HistoricalPriceSyncState>();
     public DbSet<Withdrawal> Withdrawals => Set<Withdrawal>();
@@ -221,15 +226,57 @@ public class AppDbContext : DbContext
             e.Property(s => s.Broker).HasMaxLength(100);
         });
 
+        modelBuilder.Entity<StockTransaction>(e =>
+        {
+            e.ToTable("StockTransactions", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_StockTransactions_FeeTax_NonNegative",
+                    "Fee >= 0 AND Tax >= 0");
+                table.HasCheckConstraint(
+                    "CK_StockTransactions_TypeFields",
+                    "(Type = 'OpeningBalance' AND Shares > 0 AND Price > 0 AND OpeningMarketValue > 0 AND CashAmount IS NULL) "
+                    + "OR (Type IN ('Buy', 'Sell') AND Shares > 0 AND Price > 0 AND OpeningMarketValue IS NULL AND CashAmount IS NULL) "
+                    + "OR (Type = 'Dividend' AND CashAmount > 0 AND Shares IS NULL AND Price IS NULL AND OpeningMarketValue IS NULL)");
+            });
+            e.Property(t => t.Type)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .IsRequired();
+            e.Property(t => t.TradeDate).HasColumnType("TEXT").IsRequired();
+            e.Property(t => t.Shares).HasColumnType("decimal(18,4)").HasPrecision(18, 4);
+            e.Property(t => t.Price).HasColumnType("decimal(18,2)").HasPrecision(18, 2);
+            e.Property(t => t.Fee).HasColumnType("decimal(18,2)").HasPrecision(18, 2).IsRequired();
+            e.Property(t => t.Tax).HasColumnType("decimal(18,2)").HasPrecision(18, 2).IsRequired();
+            e.Property(t => t.CashAmount).HasColumnType("decimal(18,2)").HasPrecision(18, 2);
+            e.Property(t => t.OpeningMarketValue).HasColumnType("decimal(18,2)").HasPrecision(18, 2);
+            e.Property(t => t.Notes).HasMaxLength(1000);
+            e.Property(t => t.CreatedAtUtc).HasColumnType("TEXT").IsRequired();
+            e.Property(t => t.UpdatedAtUtc).HasColumnType("TEXT").IsRequired();
+            e.HasOne(t => t.Stock)
+                .WithMany(s => s.Transactions)
+                .HasForeignKey(t => t.StockId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(t => new { t.StockId, t.TradeDate, t.Sequence }).IsUnique();
+            e.HasIndex(t => new { t.StockId, t.Type, t.TradeDate });
+        });
+
         modelBuilder.Entity<HistoricalAdjustedPrice>(e =>
         {
-            e.ToTable("HistoricalAdjustedPrices", table => table.HasCheckConstraint(
-                "CK_HistoricalAdjustedPrices_AdjustedClose_Positive",
-                "AdjustedClose > 0"));
+            e.ToTable("HistoricalAdjustedPrices", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_HistoricalAdjustedPrices_AdjustedClose_Positive",
+                    "AdjustedClose > 0");
+                table.HasCheckConstraint(
+                    "CK_HistoricalAdjustedPrices_Close_Positive",
+                    "Close IS NULL OR Close > 0");
+            });
             e.Property(price => price.Market).HasConversion<string>().HasMaxLength(20).IsRequired();
             e.Property(price => price.Symbol).HasMaxLength(20).IsRequired();
             e.Property(price => price.TradingDate).HasColumnType("TEXT").IsRequired();
             e.Property(price => price.AdjustedClose).HasColumnType("decimal(18,6)").IsRequired();
+            e.Property(price => price.Close).HasColumnType("decimal(18,6)").HasPrecision(18, 6);
             e.Property(price => price.Provider).HasMaxLength(50).IsRequired();
             e.Property(price => price.FetchedAtUtc).HasColumnType("TEXT").IsRequired();
             e.HasIndex(price => new { price.Market, price.Symbol, price.TradingDate })

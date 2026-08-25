@@ -375,19 +375,45 @@ describe('StocksPage market contract', () => {
     const lookup = deferred<Awaited<ReturnType<typeof api.stocks.lookup>>>()
     vi.spyOn(api.stocks, 'lookup').mockReturnValue(lookup.promise)
     const createResult = {
-      id: 1,
-      name: '自訂名稱',
-      symbol: '2330',
-      market: 'Unknown' as const,
-      instrumentType: 'Stock' as const,
-      shares: 10,
-      buyPrice: 500,
-      currentPrice: 0,
-      broker: null,
-      lastPriceUpdate: null,
-    }
-    const createRequest = deferred<Awaited<ReturnType<typeof api.stocks.create>>>()
-    const create = vi.spyOn(api.stocks, 'create').mockReturnValue(createRequest.promise)
+      stock: {
+        id: 1,
+        name: '自訂名稱',
+        symbol: '2330',
+        market: 'Unknown' as const,
+        instrumentType: 'Stock' as const,
+        shares: 10,
+        buyPrice: 500,
+        currentPrice: 0,
+        broker: null,
+      },
+      transaction: {
+        id: 1,
+        stockId: 1,
+        type: 'Buy' as const,
+        tradeDate: '2026-08-25',
+        sequence: 1,
+        shares: 10,
+        price: 500,
+        fee: 0,
+        tax: 0,
+        cashAmount: null,
+        openingMarketValue: null,
+        notes: null,
+        createdAtUtc: '2026-08-25T00:00:00Z',
+        updatedAtUtc: '2026-08-25T00:00:00Z',
+      },
+      replay: {
+        projection: { remainingShares: 10, remainingCostBasis: 5000, executionAveragePrice: 500 },
+        realizedGainLoss: 0,
+        netDividendIncome: 0,
+        entries: [],
+        remainingShares: 10,
+        remainingCostBasis: 5000,
+        executionAveragePrice: 500,
+      },
+    } as Awaited<ReturnType<typeof api.stocks.positions.create>>
+    const createRequest = deferred<Awaited<ReturnType<typeof api.stocks.positions.create>>>()
+    const create = vi.spyOn(api.stocks.positions, 'create').mockReturnValue(createRequest.promise)
 
     const wrapper = mountWithAppProviders(StocksPage)
     await flushPromises()
@@ -426,8 +452,62 @@ describe('StocksPage market contract', () => {
     await flushPromises()
 
     expect.soft(create).toHaveBeenCalledTimes(1)
+    expect.soft(create).toHaveBeenCalledWith(expect.objectContaining({
+      name: '自訂名稱',
+      symbol: '2330',
+      initialTransactionType: 'Buy',
+      tradeDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    }))
     expect.soft(marketAfterLookup).toBe('Unknown')
     expect.soft(currentPriceAfterLookup).toBe('')
     expect.soft(document.body.querySelector('form')).toBeNull()
+  })
+
+  // 驗證既有部位帶入使用單一 atomic position request，並帶出 OpeningMarketValue。
+  it('creates an opening position through the atomic command', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 15,
+      totalEstimatedNetSellValue: 0,
+      totalEstimatedGainLoss: 0,
+    })
+    const create = vi.spyOn(api.stocks.positions, 'create').mockResolvedValue({} as Awaited<ReturnType<typeof api.stocks.positions.create>>)
+
+    const wrapper = mountWithAppProviders(StocksPage)
+    await flushPromises()
+    const createButton = wrapper.findAll('button').find(button => button.text().includes('新增股票'))!
+    await createButton.trigger('click')
+    await flushPromises()
+
+    const form = document.body.querySelector<HTMLFormElement>('form')!
+    const setInput = (selector: string, value: string): void => {
+      const input = form.querySelector<HTMLInputElement>(selector)
+      if (!input) throw new Error(`Missing ${selector}`)
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    setInput('input[placeholder="e.g. 台積電"]', '既有台積電')
+    setInput('input[placeholder="e.g. 2330"]', '2330')
+    setInput('input[type="number"][step="1"]', '10')
+    const priceInputs = form.querySelectorAll<HTMLInputElement>('input[type="number"][step="0.01"]')
+    priceInputs[0].value = '500'
+    priceInputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+    priceInputs[1].value = '600'
+    priceInputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    const source = form.querySelector<HTMLSelectElement>('[data-testid="stock-initial-transaction-type"]')!
+    source.value = 'OpeningBalance'
+    source.dispatchEvent(new Event('change', { bubbles: true }))
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      initialTransactionType: 'OpeningBalance',
+      shares: 10,
+      buyPrice: 500,
+      currentPrice: 600,
+      openingMarketValue: 6000,
+    }))
   })
 })

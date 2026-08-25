@@ -8,6 +8,7 @@ public sealed class HistoricalAdjustedPrice
     public string Symbol { get; set; } = string.Empty;
     public DateOnly TradingDate { get; set; }
     public decimal AdjustedClose { get; set; }
+    public decimal? Close { get; set; }
     public string Provider { get; set; } = string.Empty;
     public DateTime FetchedAtUtc { get; set; }
 }

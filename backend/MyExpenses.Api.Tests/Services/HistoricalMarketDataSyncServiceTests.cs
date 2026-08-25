@@ -290,7 +290,7 @@ public sealed class HistoricalMarketDataSyncServiceTests
                     symbol + ".TW",
                     "TAI",
                     "TWD",
-                    [new HistoricalPricePoint(new DateOnly(2026, 8, 6), 100m)]));
+                     [new HistoricalPricePoint(new DateOnly(2026, 8, 6), 100m, 100m)]));
             }
 
             _cancellation.Cancel();

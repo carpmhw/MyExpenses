@@ -63,6 +63,40 @@ describe('central API client', () => {
     })
   })
 
+  // 驗證 Ledger typed error 的 code 與安全 message 不會被 central client 丟失。
+  it('parses typed ledger errors into a safe ApiError', async () => {
+    createFetchMock(() => jsonResponse({
+      code: 'InsufficientShares',
+      message: '賣出股數超過可用股數',
+      details: { availableShares: 2, requestedShares: 5 },
+    }, 409))
+
+    const error = await request('/stocks/ledger/transactions').catch(value => value)
+
+    expect(error).toMatchObject({
+      status: 409,
+      code: 'InsufficientShares',
+      detail: '賣出股數超過可用股數',
+      userMessage: '賣出股數超過可用股數',
+    })
+  })
+
+  // 驗證 Ledger 初始化的 typed blocking response 即使是 422 仍可被 UI 讀取。
+  it('returns typed initialization blocking data from a 422 response', async () => {
+    createFetchMock(() => jsonResponse({
+      initializedCount: 0,
+      skippedCount: 1,
+      blockingCount: 1,
+      totalCount: 2,
+      blockingStocks: [{ stockId: 2, symbol: '2330', reason: 'MissingBuyPrice', code: 'MissingBuyPrice', buyPrice: 0, currentPrice: 600 }],
+    }, 422))
+
+    await expect(api.stocks.ledger.initialize({ baselineDate: '2026-08-01' })).resolves.toMatchObject({
+      blockingCount: 1,
+      blockingStocks: [{ symbol: '2330', code: 'MissingBuyPrice' }],
+    })
+  })
+
   it('uses a safe fallback for non-JSON failures without exposing the raw body', async () => {
     createFetchMock(() => new Response('SQL exception and stack trace', {
       status: 500,
@@ -145,5 +179,62 @@ describe('central API client', () => {
       '/api/reports/stock-market-risk?periodMonths=3',
       expect.objectContaining({ signal: controller.signal }),
     )
+  })
+
+  // 驗證股票績效期間參數與 request signal 透過中央 API client 傳送。
+  it('serializes stock performance period and forwards the abort signal', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse({}))
+    const controller = new AbortController()
+
+    await api.reports.stockPerformance(
+      { dateStart: '2026-01-01', dateEnd: '2026-12-31' },
+      { signal: controller.signal },
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/reports/stock-performance?dateStart=2026-01-01&dateEnd=2026-12-31',
+      expect.objectContaining({ signal: controller.signal }),
+    )
+  })
+
+  // 驗證 Ledger filter、交易 mutation、初始化與 atomic position 都使用指定 API contract。
+  it('serializes stock ledger queries and atomic position commands', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse({}))
+
+    await api.stocks.ledger.list({
+      stockId: 3,
+      type: 'Sell',
+      dateStart: '2026-01-01',
+      dateEnd: '2026-01-31',
+      page: 2,
+      pageSize: 10,
+    })
+    await api.stocks.ledger.create({
+      stockId: 3,
+      type: 'Dividend',
+      tradeDate: '2026-01-15',
+      cashAmount: 100,
+      fee: 1,
+      tax: 2,
+    })
+    await api.stocks.ledger.initialize({ baselineDate: '2026-01-01' })
+    await api.stocks.positions.create({
+      name: '測試標的',
+      symbol: '2330',
+      market: 'Twse',
+      instrumentType: 'Stock',
+      shares: 10,
+      buyPrice: 100,
+      currentPrice: 110,
+      tradeDate: '2026-01-01',
+      initialTransactionType: 'Buy',
+    })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/stocks/ledger?stockId=3&type=Sell&dateStart=2026-01-01&dateEnd=2026-01-31&page=2&pageSize=10')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/stocks/ledger/transactions')
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/stocks/ledger/initialize')
+    expect(fetchMock.mock.calls[3]?.[0]).toBe('/api/stocks/positions')
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({ baselineDate: '2026-01-01' })
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toMatchObject({ initialTransactionType: 'Buy' })
   })
 })

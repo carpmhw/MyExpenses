@@ -194,11 +194,212 @@ export interface StockListItem extends Stock {
   securitiesTransactionTax: number
   estimatedNetSellValue: number
   estimatedGainLoss: number
+  hasLedger: boolean
 }
 
 export interface StockListResponse extends PaginatedResponse<StockListItem> {
   totalEstimatedNetSellValue: number
   totalEstimatedGainLoss: number
+}
+
+export type StockTransactionType = 'OpeningBalance' | 'Buy' | 'Sell' | 'Dividend'
+
+export interface StockTransaction {
+  id: number
+  stockId: number
+  type: StockTransactionType
+  tradeDate: string
+  sequence: number
+  shares: number | null
+  price: number | null
+  fee: number
+  tax: number
+  cashAmount: number | null
+  openingMarketValue: number | null
+  notes: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+export interface StockTransactionListItem {
+  id: number
+  stockId: number
+  stockName: string
+  symbol: string
+  market: StockMarket
+  broker: string | null
+  type: StockTransactionType
+  tradeDate: string
+  sequence: number
+  shares: number | null
+  price: number | null
+  fee: number
+  tax: number
+  cashAmount: number | null
+  openingMarketValue: number | null
+  notes: string | null
+  grossAmount: number
+  netCashFlow: number
+  allocatedCostBasis: number | null
+  realizedGainLoss: number
+  netDividend: number
+  remainingShares: number
+  remainingCostBasis: number
+  executionAveragePrice: number
+}
+
+export interface StockTransactionListResponse {
+  items: StockTransactionListItem[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface StockLedgerTransactionRequest {
+  stockId: number
+  type: StockTransactionType
+  tradeDate: string
+  shares?: number | null
+  price?: number | null
+  fee?: number
+  tax?: number
+  cashAmount?: number | null
+  openingMarketValue?: number | null
+  notes?: string | null
+}
+
+export interface StockLedgerBlockingStock {
+  stockId: number
+  symbol: string
+  reason: string
+  code: string
+  buyPrice: number
+  currentPrice: number
+}
+
+export interface StockLedgerInitializationResponse {
+  initializedCount: number
+  skippedCount: number
+  blockingCount: number
+  totalCount: number
+  blockingStocks: StockLedgerBlockingStock[]
+}
+
+export interface StockPositionRequest {
+  name: string
+  symbol: string
+  market: StockMarket
+  instrumentType: StockInstrumentType
+  shares: number
+  buyPrice: number
+  currentPrice: number
+  tradeDate: string
+  initialTransactionType: 'Buy' | 'OpeningBalance'
+  broker?: string | null
+  fee?: number
+  tax?: number
+  openingMarketValue?: number | null
+  notes?: string | null
+}
+
+export interface StockLedgerProjection {
+  remainingShares: number
+  remainingCostBasis: number
+  executionAveragePrice: number
+}
+
+export interface StockLedgerResult {
+  projection: StockLedgerProjection
+  realizedGainLoss: number
+  netDividendIncome: number
+  entries: unknown[]
+  remainingShares: number
+  remainingCostBasis: number
+  executionAveragePrice: number
+}
+
+export interface StockPositionResponse {
+  stock: Stock
+  transaction: StockTransaction
+  replay: StockLedgerResult
+}
+
+export type StockPerformanceUnavailableReason =
+  | 'None'
+  | 'NoHoldings'
+  | 'NoLedgerHistory'
+  | 'IncompleteLedgerCoverage'
+  | 'PeriodBeforeTrackingStart'
+  | 'InsufficientCashFlows'
+  | 'NoCashFlowSignChange'
+  | 'MissingTerminalValue'
+  | 'NoConvergence'
+  | 'NonFiniteResult'
+  | 'InsufficientHistoricalPrices'
+  | 'ZeroDenominator'
+  | 'InvalidPeriod'
+
+export interface StockPerformanceMetric {
+  value: number | null
+  unavailableReason: StockPerformanceUnavailableReason
+}
+
+export interface StockPerformanceSummary {
+  currentGrossMarketValue: number
+  remainingCostBasis: number
+  realizedGainLoss: number
+  unrealizedGainLoss: number
+  netDividendIncome: number
+  totalGainLoss: number
+}
+
+export interface StockPerformanceDataQuality {
+  activeInstrumentCount: number
+  ledgerManagedInstrumentCount: number
+  priceObservationCount: number
+  priceCoverage: number
+  trackingStartReason: StockPerformanceUnavailableReason
+  hasIncompleteLedgerCoverage: boolean
+}
+
+export interface StockPerformanceMonthlyPoint {
+  month: string
+  endingMarketValue: number
+  netContribution: number
+  realizedGainLoss: number
+  dividendIncome: number
+  cumulativeTwr: number | null
+}
+
+export interface StockPerformanceInstrumentBreakdown {
+  stockId: number
+  name: string
+  symbol: string
+  market: StockMarket
+  broker: string | null
+  currentShares: number
+  grossMarketValue: number
+  remainingCostBasis: number
+  realizedGainLoss: number
+  unrealizedGainLoss: number
+  dividendIncome: number
+  totalGainLoss: number
+  isClosed: boolean
+}
+
+export interface StockPerformanceReport {
+  dateStart: string
+  dateEnd: string
+  trackingStartDate: string | null
+  hasSyntheticOpeningBalances: boolean
+  terminalValuationSource: string
+  ledgerCoverage: StockPerformanceMetric
+  summary: StockPerformanceSummary
+  twr: StockPerformanceMetric
+  xirr: StockPerformanceMetric
+  monthlyPoints: StockPerformanceMonthlyPoint[]
+  instrumentBreakdown: StockPerformanceInstrumentBreakdown[]
+  dataQuality: StockPerformanceDataQuality
 }
 
 export interface StockStructureSummary {

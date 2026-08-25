@@ -339,6 +339,184 @@ def test_stock_market_risk_market_edit_period_and_mobile_matrix(mocked_page: Pag
     expect(mocked_page.get_by_text("覆蓋不足。系統不會以零波動代表缺少資料。", exact=True)).to_be_visible()
 
 
+# 驗證股票 Ledger 初始化、Buy mutation 與投資績效 tab 可在瀏覽器中完成最小 smoke。
+def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) -> None:
+    stock = {
+        "id": 1,
+        "name": "台積電",
+        "symbol": "2330",
+        "market": "Twse",
+        "instrumentType": "Stock",
+        "shares": 10,
+        "buyPrice": 500,
+        "currentPrice": 600,
+        "broker": "測試券商",
+        "lastPriceUpdate": None,
+        "grossMarketValue": 6000,
+        "buyCommission": 0,
+        "sellCommission": 0,
+        "securitiesTransactionTax": 0,
+        "estimatedNetSellValue": 6000,
+        "estimatedGainLoss": 1000,
+        "hasLedger": False,
+    }
+    stock_list = {
+        "items": [stock],
+        "total": 1,
+        "page": 1,
+        "pageSize": 15,
+        "totalEstimatedNetSellValue": 6000,
+        "totalEstimatedGainLoss": 1000,
+    }
+    ledger_row = {
+        "id": 1,
+        "stockId": 1,
+        "stockName": "台積電",
+        "symbol": "2330",
+        "market": "Twse",
+        "broker": "測試券商",
+        "type": "Buy",
+        "tradeDate": "2026-08-01",
+        "sequence": 1,
+        "shares": 10,
+        "price": 500,
+        "fee": 0,
+        "tax": 0,
+        "cashAmount": None,
+        "openingMarketValue": None,
+        "notes": None,
+        "grossAmount": 5000,
+        "netCashFlow": -5000,
+        "allocatedCostBasis": 5000,
+        "realizedGainLoss": 0,
+        "netDividend": 0,
+        "remainingShares": 10,
+        "remainingCostBasis": 5000,
+        "executionAveragePrice": 500,
+    }
+    performance = {
+        "dateStart": "2026-01-01",
+        "dateEnd": "2026-08-25",
+        "trackingStartDate": "2026-01-01",
+        "hasSyntheticOpeningBalances": False,
+        "terminalValuationSource": "CurrentGrossMarketValue",
+        "ledgerCoverage": {"value": 1, "unavailableReason": "None"},
+        "summary": {
+            "currentGrossMarketValue": 6000,
+            "remainingCostBasis": 5000,
+            "realizedGainLoss": 0,
+            "unrealizedGainLoss": 1000,
+            "netDividendIncome": 0,
+            "totalGainLoss": 1000,
+        },
+        "twr": {"value": 0.12, "unavailableReason": "None"},
+        "xirr": {"value": 0.18, "unavailableReason": "None"},
+        "monthlyPoints": [{
+            "month": "2026-08",
+            "endingMarketValue": 6000,
+            "netContribution": 0,
+            "realizedGainLoss": 0,
+            "dividendIncome": 0,
+            "cumulativeTwr": 0.12,
+        }],
+        "instrumentBreakdown": [{
+            "stockId": 1,
+            "name": "台積電",
+            "symbol": "2330",
+            "market": "Twse",
+            "broker": "測試券商",
+            "currentShares": 10,
+            "grossMarketValue": 6000,
+            "remainingCostBasis": 5000,
+            "realizedGainLoss": 0,
+            "unrealizedGainLoss": 1000,
+            "dividendIncome": 0,
+            "totalGainLoss": 1000,
+            "isClosed": False,
+        }],
+        "dataQuality": {
+            "activeInstrumentCount": 1,
+            "ledgerManagedInstrumentCount": 1,
+            "priceObservationCount": 10,
+            "priceCoverage": 1,
+            "trackingStartReason": "None",
+            "hasIncompleteLedgerCoverage": False,
+        },
+    }
+    created_operations: list[str] = []
+
+    def stocks_and_ledger(route: Route) -> None:
+        path = urlparse(route.request.url).path
+        if path == "/api/stocks" and route.request.method == "GET":
+            route_json(route, stock_list)
+            return
+        if path.endswith("/initialize"):
+            route_json(route, {"initializedCount": 1, "skippedCount": 0, "blockingCount": 0, "totalCount": 1, "blockingStocks": []})
+            return
+        if path == "/api/stocks/positions" and route.request.method == "POST":
+            created_operations.append("position")
+            route_json(route, {"stock": stock, "transaction": ledger_row, "replay": {"projection": {}, "entries": []}}, status=201)
+            return
+        if path == "/api/stocks/ledger" and route.request.method == "GET":
+            route_json(route, {"items": [ledger_row], "total": 1, "page": 1, "pageSize": 20})
+            return
+        if path.endswith("/transactions") and route.request.method == "POST":
+            created_operations.append("transaction")
+            route_json(route, ledger_row, status=201)
+            return
+        route.fallback()
+
+    mocked_page.route("**/api/stocks**", stocks_and_ledger)
+    mocked_page.route("**/api/reports/stock-performance**", lambda route: route_json(route, performance))
+    mocked_page.goto("/stocks")
+
+    mocked_page.get_by_role("button", name="+ 新增股票").click()
+    stock_dialog = mocked_page.get_by_role("dialog")
+    stock_dialog.locator('input[placeholder="e.g. 台積電"]').fill("台積電")
+    stock_dialog.locator('input[placeholder="e.g. 2330"]').fill("2330")
+    stock_dialog.locator('input[type="number"][step="1"]').fill("10")
+    stock_dialog.locator('input[type="number"][step="0.01"]').nth(0).fill("500")
+    stock_dialog.locator('input[type="number"][step="0.01"]').nth(1).fill("600")
+    stock_dialog.get_by_role("button", name="儲存").click()
+    expect(mocked_page.get_by_text("股票已建立")).to_be_visible()
+
+    expect(mocked_page.get_by_test_id("ledger-initialization")).to_be_visible()
+    mocked_page.get_by_test_id("initialize-ledger").click()
+    expect(mocked_page.get_by_text("Ledger 初始化完成")).to_be_visible()
+
+    mocked_page.get_by_test_id("stock-tab-ledger").click()
+    mocked_page.get_by_test_id("ledger-new-transaction").click()
+    dialog = mocked_page.get_by_role("dialog")
+    dialog.get_by_test_id("transaction-shares").fill("2")
+    dialog.get_by_test_id("transaction-price").fill("610")
+    dialog.get_by_test_id("transaction-save").click()
+    expect(mocked_page.get_by_text("交易已建立").last).to_be_visible()
+
+    mocked_page.get_by_test_id("ledger-new-transaction").click()
+    dialog = mocked_page.get_by_role("dialog")
+    dialog.get_by_test_id("transaction-type").select_option("Dividend")
+    dialog.get_by_test_id("transaction-cash-amount").fill("100")
+    dialog.get_by_test_id("transaction-save").click()
+    expect(mocked_page.get_by_text("交易已建立").last).to_be_visible()
+
+    mocked_page.get_by_test_id("ledger-new-transaction").click()
+    dialog = mocked_page.get_by_role("dialog")
+    dialog.get_by_test_id("transaction-type").select_option("Sell")
+    dialog.get_by_test_id("transaction-shares").fill("2")
+    dialog.get_by_test_id("transaction-price").fill("610")
+    dialog.get_by_test_id("transaction-save").click()
+    expect(mocked_page.get_by_text("交易已建立").last).to_be_visible()
+    assert created_operations.count("position") == 1
+    assert created_operations.count("transaction") == 3
+    expect(mocked_page.get_by_text("已實現損益")).to_be_visible()
+    expect(mocked_page.get_by_text("剩餘股數")).to_be_visible()
+
+    mocked_page.goto("/reports")
+    mocked_page.get_by_role("tab", name="投資績效").click()
+    expect(mocked_page.get_by_test_id("performance-kpis")).to_contain_text("TWR")
+    expect(mocked_page.get_by_test_id("performance-kpis")).to_contain_text("12.00%")
+
+
 # 驗證中斷的初始請求可以透過 inline retry 恢復成真正的空成功狀態。
 def test_interrupted_installment_request_recovers(mocked_page: Page) -> None:
     attempts = 0

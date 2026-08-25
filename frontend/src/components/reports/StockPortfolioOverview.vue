@@ -3,21 +3,24 @@ import { computed, inject, onMounted, ref, watch } from 'vue'
 import { Line } from 'vue-chartjs'
 import { CategoryScale, Chart as ChartJS, Filler, Legend, LinearScale, LineElement, PointElement, Tooltip } from 'chart.js'
 import { api } from '../../api'
-import type { StockMarketRiskMetric, StockMarketRiskReport, StockMarketRiskUnavailableReason, StockStructureReport, StockValueTrendPoint } from '../../types'
+import type { StockMarketRiskMetric, StockMarketRiskReport, StockMarketRiskUnavailableReason, StockPerformanceReport, StockStructureReport, StockValueTrendPoint } from '../../types'
 import Card from '../ui/Card.vue'
 import QueryState from '../ui/QueryState.vue'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { formatMoney } from '../../utils/format'
 import { getThemeColor } from '../../utils/themeColor'
+import { getCurrentYearRange } from '../../utils/timezone'
+import { useTimeZone } from '../../composables/useTimeZone'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
 
 const emit = defineEmits<{
-  navigate: [target: 'stockStructure' | 'marketRisk']
+  navigate: [target: 'stockPerformance' | 'stockStructure' | 'marketRisk']
 }>()
 
 const valueTrendMonths = ref<6 | 12 | 24 | 36 | 60>(12)
 const darkMode = inject<{ isDark: { value: boolean } }>('darkMode') ?? { isDark: ref(false) }
+const timeZone = useTimeZone()
 
 const structureQuery = useAsyncQuery<StockStructureReport>({
   key: () => ({ report: 'stock-structure' }),
@@ -40,9 +43,23 @@ const valueTrendQuery = useAsyncQuery<StockValueTrendPoint[]>({
   immediate: false,
 })
 
+const performanceQuery = useAsyncQuery<StockPerformanceReport>({
+  key: () => {
+    const range = getCurrentYearRange(new Date(), timeZone.timeZoneId.value)
+    return { report: 'stock-performance-summary', dateStart: range.start, dateEnd: range.end }
+  },
+  query: ({ signal }) => {
+    const range = getCurrentYearRange(new Date(), timeZone.timeZoneId.value)
+    return api.reports.stockPerformance({ dateStart: range.start, dateEnd: range.end }, { signal })
+  },
+  isEmpty: data => data.instrumentBreakdown.length === 0 && data.monthlyPoints.length === 0,
+  immediate: false,
+})
+
 const structureData = computed(() => structureQuery.data.value)
 const riskData = computed(() => riskQuery.data.value)
 const valueTrendData = computed(() => valueTrendQuery.data.value ?? [])
+const performanceData = computed(() => performanceQuery.data.value)
 const topRiskContributions = computed(() => [...(riskData.value?.riskContributions ?? [])]
   .sort((left, right) => right.contributionPercentage - left.contributionPercentage)
   .slice(0, 5))
@@ -99,6 +116,23 @@ function formatSignedRiskPercentage(value: number): string {
   return `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)}%`
 }
 
+// 將績效 metric 轉成總覽摘要的百分比，並保留後端 unavailable reason。
+function formatPerformanceMetric(value: StockPerformanceReport['twr']): string {
+  if (value.value === null) return `不可用：${formatPerformanceReason(value.unavailableReason)}`
+  return `${(value.value * 100).toFixed(1)}%`
+}
+
+// 將績效摘要的 unavailable reason 轉成簡短繁體中文。
+function formatPerformanceReason(reason: string): string {
+  return {
+    NoHoldings: '尚無目前持股',
+    NoLedgerHistory: '尚無 Ledger 歷史',
+    IncompleteLedgerCoverage: 'Ledger 覆蓋不完整',
+    InsufficientHistoricalPrices: '歷史價格不足',
+    PeriodBeforeTrackingStart: '早於追蹤起點',
+  }[reason] ?? '資料不足'
+}
+
 // 將資料品質 UTC 時間轉為簡短文字，並清楚標示缺少的更新時間。
 function formatDataQualityTime(value: string | null): string {
   return value ? value.replace('T', ' ').replace('Z', ' UTC') : '尚無更新時間'
@@ -141,6 +175,7 @@ function loadInitialData(): void {
   void structureQuery.refresh()
   void riskQuery.refresh()
   void valueTrendQuery.refresh()
+  void performanceQuery.refresh()
 }
 
 watch(valueTrendMonths, () => {
@@ -158,10 +193,37 @@ onMounted(loadInitialData)
         <p class="mt-1 text-xs text-text-secondary">整合目前持股估值與本機歷史風險；持股價值趨勢不等同投資績效。</p>
       </div>
       <div class="flex gap-2">
+        <button data-testid="navigate-stock-performance" type="button" class="rounded-lg border border-border-strong px-3 py-2 text-sm text-text-primary" @click="emit('navigate', 'stockPerformance')">查看投資績效</button>
         <button data-testid="navigate-stock-structure" type="button" class="rounded-lg border border-border-strong px-3 py-2 text-sm text-text-primary" @click="emit('navigate', 'stockStructure')">查看持股結構</button>
         <button data-testid="navigate-market-risk" type="button" class="rounded-lg border border-border-strong px-3 py-2 text-sm text-text-primary" @click="emit('navigate', 'marketRisk')">查看市場風險</button>
       </div>
     </div>
+
+    <QueryState :status="performanceQuery.status.value" :error-message="queryErrorMessage(performanceQuery.error.value)" :empty-message="'尚無可用投資績效摘要'" :last-success-at="performanceQuery.lastSuccessAt.value" :retry="performanceQuery.retry">
+      <Card v-if="performanceData" data-testid="overview-performance-summary">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-text-primary">投資績效摘要</h3>
+            <p class="mt-1 text-xs text-text-secondary">今年以來 · 以 Ledger 與 raw Close 計算</p>
+          </div>
+          <button type="button" class="rounded-lg border border-border-strong px-3 py-2 text-sm text-text-primary" @click="emit('navigate', 'stockPerformance')">查看完整績效</button>
+        </div>
+        <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <p class="text-xs text-text-secondary">總損益</p>
+            <p class="mt-1 text-lg font-semibold" :class="performanceData.summary.totalGainLoss >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatMoney(performanceData.summary.totalGainLoss) }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary">TWR</p>
+            <p class="mt-1 text-lg font-semibold text-text-primary">{{ formatPerformanceMetric(performanceData.twr) }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary">XIRR</p>
+            <p class="mt-1 text-lg font-semibold text-text-primary">{{ formatPerformanceMetric(performanceData.xirr) }}</p>
+          </div>
+        </div>
+      </Card>
+    </QueryState>
 
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
       <QueryState :status="structureQuery.status.value" :error-message="queryErrorMessage(structureQuery.error.value)" :empty-message="'尚無目前持股'" :last-success-at="structureQuery.lastSuccessAt.value" :retry="structureQuery.retry">

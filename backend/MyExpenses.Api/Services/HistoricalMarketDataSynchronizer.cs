@@ -50,6 +50,7 @@ public sealed class HistoricalMarketDataSynchronizer
     private readonly IOfficialMarketCatalogService _catalogService;
     private readonly ILogger<HistoricalMarketDataSynchronizer> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly HistoricalMarketDataOptions _options;
     private IReadOnlyDictionary<string, FrozenTargetDescriptor>? _frozenTargets;
     private readonly Dictionary<int, StockMarket> _automaticallyResolvedMarkets = [];
 
@@ -59,27 +60,30 @@ public sealed class HistoricalMarketDataSynchronizer
         IHistoricalAdjustedPriceProvider provider,
         ILogger<HistoricalMarketDataSynchronizer>? logger = null,
         TimeProvider? timeProvider = null,
-        IOfficialMarketCatalogService? catalogService = null)
+        IOfficialMarketCatalogService? catalogService = null,
+        HistoricalMarketDataOptions? options = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _logger = logger ?? NullLogger<HistoricalMarketDataSynchronizer>.Instance;
         _catalogService = catalogService ?? new UnavailableMarketCatalogService();
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _options = options ?? new HistoricalMarketDataOptions();
+        _options.Validate();
     }
 
     /// <summary>正規化持股代號，作為跨券商歷史行情的穩定身分。</summary>
     public static string NormalizeSymbol(string symbol)
         => symbol.Trim().ToUpperInvariant();
 
-    /// <summary>依指定台灣日期同步目前持股的滾動 13 個月歷史行情。</summary>
+    /// <summary>依指定台灣日期同步目前持股的設定期間雙價格歷史行情。</summary>
     public async Task<HistoricalMarketDataSyncResult> SyncAsync(
         DateOnly? asOfDate = null,
         CancellationToken cancellationToken = default,
         IReadOnlyCollection<string>? frozenTargetKeys = null)
     {
         var endDate = asOfDate ?? GetTaiwanDate();
-        var startDate = endDate.AddMonths(-13);
+        var startDate = endDate.AddMonths(-_options.HistoryMonths);
         List<Stock> stocks;
         try
         {
@@ -734,7 +738,8 @@ public sealed class HistoricalMarketDataSynchronizer
         var points = result.Prices
             .Where(point => point.TradingDate >= startDate
                 && point.TradingDate <= endDate
-                && point.AdjustedClose > 0m)
+                && point.AdjustedClose > 0m
+                && point.Close > 0m)
             .GroupBy(point => point.TradingDate)
             .Select(group => group.Last())
             .ToList();
@@ -762,6 +767,7 @@ public sealed class HistoricalMarketDataSynchronizer
             if (existingByDate.TryGetValue(point.TradingDate, out var stored))
             {
                 stored.AdjustedClose = point.AdjustedClose;
+                stored.Close = point.Close;
                 stored.Provider = result.Provider;
                 stored.FetchedAtUtc = fetchedAt;
             }
@@ -773,6 +779,7 @@ public sealed class HistoricalMarketDataSynchronizer
                     Symbol = symbol,
                     TradingDate = point.TradingDate,
                     AdjustedClose = point.AdjustedClose,
+                    Close = point.Close,
                     Provider = result.Provider,
                     FetchedAtUtc = fetchedAt,
                 });

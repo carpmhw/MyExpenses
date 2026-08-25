@@ -59,6 +59,9 @@ public sealed class StockMarketDataMigrationTests
         Assert.Equal(
             "decimal(18,6)",
             await GetColumnTypeAsync(db, "HistoricalAdjustedPrices", "AdjustedClose"));
+        Assert.Equal(
+            "decimal(18,6)",
+            await GetColumnTypeAsync(db, "HistoricalAdjustedPrices", "Close"));
     }
 
     /// <summary>驗證歷史價格不接受重複身分或非正值。</summary>
@@ -81,6 +84,10 @@ public sealed class StockMarketDataMigrationTests
         await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlRawAsync(
             "INSERT INTO HistoricalAdjustedPrices (Market, Symbol, TradingDate, AdjustedClose, Provider, FetchedAtUtc) " +
             "VALUES ('Twse', '2331', '2026-08-01', 0, 'fixture', '2026-08-02 00:00:00')"));
+
+        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlRawAsync(
+            "INSERT INTO HistoricalAdjustedPrices (Market, Symbol, TradingDate, AdjustedClose, Close, Provider, FetchedAtUtc) " +
+            "VALUES ('Twse', '2332', '2026-08-01', 100, 0, 'fixture', '2026-08-02 00:00:00')"));
     }
 
     /// <summary>驗證回滾到前一版 migration 會移除衍生的市場行情 schema。</summary>

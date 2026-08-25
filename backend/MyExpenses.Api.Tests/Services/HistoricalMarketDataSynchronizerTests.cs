@@ -47,6 +47,7 @@ public sealed class HistoricalMarketDataSynchronizerTests
         Assert.Equal(StockMarket.Tpex, stocks[2].Market);
         Assert.Equal(StockMarket.Unknown, stocks[3].Market);
         Assert.Equal(2, await db.HistoricalAdjustedPrices.CountAsync());
+        Assert.All(await db.HistoricalAdjustedPrices.ToListAsync(), price => Assert.True(price.Close > 0m));
         Assert.Equal(2, provider.Requests.Count);
         Assert.Equal(2, result.ProcessedInstrumentCount);
         Assert.Equal(2, result.SuccessfulInstrumentCount);
@@ -55,9 +56,33 @@ public sealed class HistoricalMarketDataSynchronizerTests
         Assert.Equal(2, result.TargetCount);
         Assert.All(provider.Requests, request =>
         {
-            Assert.Equal(new DateOnly(2025, 7, 7), request.StartDate);
+            Assert.Equal(new DateOnly(2021, 8, 7), request.StartDate);
             Assert.Equal(new DateOnly(2026, 8, 7), request.EndDate);
         });
+    }
+
+    /// <summary>驗證同步器使用可設定的歷史期間而非固定月份常數。</summary>
+    [Fact]
+    public async Task SyncAsync_UsesConfiguredHistoryHorizon()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = CreateDb(connection);
+        db.Stocks.Add(CreateStock("台積電", "2330", StockMarket.Twse, "甲券商"));
+        await db.SaveChangesAsync();
+        var provider = new FakeProvider((_, _, _, _) => Success("2330", "2330.TW", 100m));
+        var synchronizer = new HistoricalMarketDataSynchronizer(
+            db,
+            provider,
+            catalogService: new FakeCatalogService(CreateCatalog(
+                [new CurrentPriceRecord("2330", 100m)],
+                [])),
+            options: new HistoricalMarketDataOptions { HistoryMonths = 3 });
+
+        await synchronizer.SyncAsync(new DateOnly(2026, 8, 7));
+
+        var request = Assert.Single(provider.Requests);
+        Assert.Equal(new DateOnly(2026, 5, 7), request.StartDate);
+        Assert.Equal(new DateOnly(2026, 8, 7), request.EndDate);
     }
 
     /// <summary>驗證相同交易日的重新同步會更新而非新增重複歷史價格。</summary>
@@ -93,6 +118,7 @@ public sealed class HistoricalMarketDataSynchronizerTests
         var prices = await db.HistoricalAdjustedPrices.ToListAsync();
         var revised = Assert.Single(prices, price => price.TradingDate == new DateOnly(2026, 8, 6));
         Assert.Equal(110m, revised.AdjustedClose);
+        Assert.Equal(110m, revised.Close);
         Assert.Equal("YahooChart", revised.Provider);
         Assert.Single(prices);
     }
@@ -1469,7 +1495,7 @@ public sealed class HistoricalMarketDataSynchronizerTests
             resolvedSymbol,
             "TAI",
             "TWD",
-            [new HistoricalPricePoint(new DateOnly(2026, 8, 6), price)]);
+            [new HistoricalPricePoint(new DateOnly(2026, 8, 6), price, price)]);
 
     /// <summary>建立測試用完整官方雙市場 catalog snapshot。</summary>
     private static OfficialMarketCatalogSnapshot CreateCatalog(
