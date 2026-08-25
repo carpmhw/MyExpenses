@@ -18,8 +18,8 @@ public interface IHistoricalAdjustedPriceProvider
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>描述 provider 回傳的單一交易日還原價格。</summary>
-public sealed record HistoricalPricePoint(DateOnly TradingDate, decimal AdjustedClose);
+/// <summary>描述 provider 回傳的單一交易日還原與原始收盤價格。</summary>
+public sealed record HistoricalPricePoint(DateOnly TradingDate, decimal AdjustedClose, decimal Close);
 
 /// <summary>描述 provider 驗證後的行情結果與供應商身分。</summary>
 public sealed record HistoricalPriceProviderResult(
@@ -35,6 +35,14 @@ public sealed class HistoricalMarketDataOptions
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(15);
     public int MaxResponseBytes { get; set; } = 1_048_576;
     public int MaxRetries { get; set; } = 2;
+    public int HistoryMonths { get; set; } = 60;
+
+    /// <summary>驗證歷史行情期間維持在可控的 1 到 60 個月範圍。</summary>
+    public void Validate()
+    {
+        if (HistoryMonths is < 1 or > 60)
+            throw new ArgumentOutOfRangeException(nameof(HistoryMonths), "歷史行情期間必須介於 1 到 60 個月");
+    }
 }
 
 /// <summary>表示不宜將 provider 內部例外直接暴露給使用者的安全錯誤。</summary>
@@ -70,6 +78,7 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
     {
         _httpClient = httpClient;
         _options = options ?? new HistoricalMarketDataOptions();
+        _options.Validate();
         if (_options.Timeout <= TimeSpan.Zero)
             _options.Timeout = TimeSpan.FromSeconds(15);
         if (_options.MaxResponseBytes < 1024)
@@ -83,7 +92,7 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
                 new ProductInfoHeaderValue("MyExpenses", "1.0"));
     }
 
-    /// <summary>依交易市場映射 Yahoo suffix 並回傳已驗證的 adjclose 點。</summary>
+    /// <summary>依交易市場映射 Yahoo suffix 並回傳已驗證的雙價格點。</summary>
     public async Task<HistoricalPriceProviderResult> GetPricesAsync(
         StockMarket market,
         string symbol,
@@ -252,7 +261,7 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    /// <summary>驗證 Yahoo identity 與序列結構後解析正值 adjclose。</summary>
+    /// <summary>驗證 Yahoo identity 與雙價格序列後解析正值交易日點。</summary>
     private static HistoricalPriceProviderResult ParsePayload(
         string payload,
         string expectedSymbol,
@@ -298,12 +307,14 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
                 || timestamps.GetArrayLength() != close.GetArrayLength())
                 throw new HistoricalPriceProviderException("invalid_series", "歷史行情時間序列格式無效");
 
-            var points = new Dictionary<DateOnly, decimal>();
+            var points = new Dictionary<DateOnly, (decimal AdjustedClose, decimal Close)>();
             for (var index = 0; index < timestamps.GetArrayLength(); index++)
             {
                 if (!timestamps[index].TryGetInt64(out var unixSeconds)
                     || adjusted[index].ValueKind is JsonValueKind.Null
-                    || !TryGetPositiveDecimal(adjusted[index], out var adjustedClose))
+                    || !TryGetPositiveDecimal(adjusted[index], out var adjustedClose)
+                    || close[index].ValueKind is JsonValueKind.Null
+                    || !TryGetPositiveDecimal(close[index], out var rawClose))
                     continue;
 
                 DateTime localDateTime;
@@ -320,7 +331,7 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
                 var tradingDate = DateOnly.FromDateTime(localDateTime);
                 if (tradingDate < startDate || tradingDate > endDate)
                     continue;
-                points[tradingDate] = adjustedClose;
+                points[tradingDate] = (adjustedClose, rawClose);
             }
 
             if (points.Count == 0)
@@ -332,7 +343,10 @@ public sealed class YahooHistoricalAdjustedPriceProvider : IHistoricalAdjustedPr
                 exchangeName,
                 currency,
                 points.OrderBy(item => item.Key)
-                    .Select(item => new HistoricalPricePoint(item.Key, item.Value))
+                    .Select(item => new HistoricalPricePoint(
+                        item.Key,
+                        item.Value.AdjustedClose,
+                        item.Value.Close))
                     .ToList());
         }
         catch (HistoricalPriceProviderException)

@@ -85,6 +85,9 @@ public static class ReportEndpoints
         })
         .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
 
+        group.MapGet("/stock-performance", GetStockPerformanceHttpAsync)
+            .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
+
         group.MapGet("/stock-value-trend", async (int? months, AppDbContext db, TimeZoneService timeZoneService) =>
         {
             try
@@ -418,6 +421,68 @@ public static class ReportEndpoints
             selectedPeriod,
             calculationDate,
             syncStates);
+    }
+
+    /// <summary>只讀本機股票、Ledger 與 raw close 建立績效報表，不呼叫外部行情 provider。</summary>
+    public static async Task<StockPerformanceReport> GetStockPerformanceAsync(
+        DateOnly? dateStart,
+        DateOnly? dateEnd,
+        AppDbContext db,
+        TimeZoneService timeZoneService)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(timeZoneService);
+
+        var requestedEnd = dateEnd ?? timeZoneService.GetLocalDate();
+        var transactions = await db.StockTransactions
+            .AsNoTracking()
+            .OrderBy(transaction => transaction.TradeDate)
+            .ThenBy(transaction => transaction.Sequence)
+            .ThenBy(transaction => transaction.Id)
+            .ToListAsync();
+        var requestedStart = dateStart
+            ?? transactions.Select(transaction => (DateOnly?)transaction.TradeDate).Min()
+            ?? requestedEnd;
+        if (requestedEnd < requestedStart)
+            throw new ArgumentException("dateEnd 不可早於 dateStart", nameof(dateEnd));
+
+        var stocks = await db.Stocks
+            .AsNoTracking()
+            .OrderBy(stock => stock.Id)
+            .ToListAsync();
+        var prices = await db.HistoricalAdjustedPrices
+            .AsNoTracking()
+            .Where(price => price.TradingDate >= requestedStart && price.TradingDate <= requestedEnd)
+            .ToListAsync();
+
+        return StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            requestedStart,
+            requestedEnd,
+            stocks,
+            transactions,
+            prices,
+            timeZoneService.GetLocalDate()));
+    }
+
+    /// <summary>處理績效報表 HTTP request 並將日期錯誤轉成安全的 typed response。</summary>
+    private static async Task<IResult> GetStockPerformanceHttpAsync(
+        DateOnly? dateStart,
+        DateOnly? dateEnd,
+        AppDbContext db,
+        TimeZoneService timeZoneService)
+    {
+        try
+        {
+            return Results.Ok(await GetStockPerformanceAsync(dateStart, dateEnd, db, timeZoneService));
+        }
+        catch (ArgumentException exception)
+        {
+            return Results.BadRequest(new
+            {
+                Code = "InvalidDateRange",
+                Message = exception.Message,
+            });
+        }
     }
 
     /// <summary>依系統時區彙整指定月份數的全部持股實際快照價值。</summary>

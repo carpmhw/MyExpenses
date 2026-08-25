@@ -209,17 +209,19 @@ builder.Services.Configure<BootstrapOptions>(
 builder.Services.AddSingleton<TimeZoneService>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 builder.Services.AddScoped<InstallmentCommandService>();
+builder.Services.AddScoped<StockLedgerService>();
 builder.Services.AddScoped<ScheduledJobExecutionRepository>();
 builder.Services.AddScoped<ScheduledJobExecutionRecoveryService>();
 builder.Services.AddScoped<ScheduledJobRunner>();
 builder.Services.AddScoped<AutomaticSnapshotWorkflow>();
 builder.Services.AddScoped<HistoricalMarketDataSynchronizer>(services =>
-    new HistoricalMarketDataSynchronizer(
-        services.GetRequiredService<AppDbContext>(),
-        services.GetRequiredService<IHistoricalAdjustedPriceProvider>(),
-        services.GetRequiredService<ILogger<HistoricalMarketDataSynchronizer>>(),
-        services.GetRequiredService<TimeProvider>(),
-        services.GetRequiredService<IOfficialMarketCatalogService>()));
+         new HistoricalMarketDataSynchronizer(
+             services.GetRequiredService<AppDbContext>(),
+             services.GetRequiredService<IHistoricalAdjustedPriceProvider>(),
+             services.GetRequiredService<ILogger<HistoricalMarketDataSynchronizer>>(),
+             services.GetRequiredService<TimeProvider>(),
+             services.GetRequiredService<IOfficialMarketCatalogService>(),
+             services.GetRequiredService<HistoricalMarketDataOptions>()));
 builder.Services.AddHostedService<SnapshotBackgroundService>();
 builder.Services.AddHostedService<StockPriceUpdateService>();
 builder.Services.AddHostedService<HistoricalMarketDataSyncService>();
@@ -277,6 +279,7 @@ app.MapCreditCardEndpoints();
 app.MapCreditCardBillEndpoints();
 app.MapBankAccountEndpoints();
 app.MapStockEndpoints();
+app.MapStockTransactionEndpoints();
 app.MapWithdrawalEndpoints();
 app.MapPaymentMethodEndpoints();
 app.MapReportEndpoints();

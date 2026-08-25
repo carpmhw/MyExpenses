@@ -21,6 +21,10 @@ public static class YahooChartFixtures
     public static string MismatchedArrayResponse()
         => CreateResponse("2330.TW", "TAI", "TWD", new decimal?[] { 100m, 101m }, new decimal?[] { 99m });
 
+    /// <summary>建立 adjusted close 有值但 raw close 缺值的 response。</summary>
+    public static string MissingCloseResponse()
+        => CreateResponse("2330.TW", "TAI", "TWD", new decimal?[] { 100m, 101m }, new decimal?[] { null, null });
+
     /// <summary>建立指定回應大小的有效 JSON，供 bounded response 測試使用。</summary>
     public static string LargeResponse(int targetBytes)
     {

@@ -12,6 +12,7 @@ import { useTimeZone } from '../../composables/useTimeZone'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import StockStructureReport from '../../components/reports/StockStructureReport.vue'
 import StockMarketRiskReport from '../../components/reports/StockMarketRiskReport.vue'
+import StockPerformanceReport from '../../components/reports/StockPerformanceReport.vue'
 import StockPortfolioOverview from '../../components/reports/StockPortfolioOverview.vue'
 import { Bar, Line, Doughnut } from 'vue-chartjs'
 import {
@@ -40,7 +41,7 @@ function getDefaultEndDate(): string {
   return getCurrentYearRange(new Date(), timeZone.timeZoneId.value).end
 }
 
-const activeTab = ref<'trend' | 'category' | 'stockOverview' | 'stockStructure' | 'marketRisk' | 'networth' | 'forecast'>('trend')
+const activeTab = ref<'trend' | 'category' | 'stockOverview' | 'stockPerformance' | 'stockStructure' | 'marketRisk' | 'networth' | 'forecast'>('trend')
 const startDate = ref(getDefaultStartDate())
 const endDate = ref(getDefaultEndDate())
 const chartType = ref<'bar' | 'line'>('bar')
@@ -143,7 +144,7 @@ function loadActiveTab() {
 }
 
 // 接收總覽元件的導覽意圖並切換到對應詳細報表分頁。
-function handleOverviewNavigate(target: 'stockStructure' | 'marketRisk'): void {
+function handleOverviewNavigate(target: 'stockPerformance' | 'stockStructure' | 'marketRisk'): void {
   activeTab.value = target
 }
 
@@ -364,6 +365,7 @@ function selectCategory(item: CategoryDistribution) {
             { key: 'trend', label: '收支趨勢' },
             { key: 'category', label: '類別分布' },
             { key: 'stockOverview', label: '股票總覽' },
+            { key: 'stockPerformance', label: '投資績效' },
             { key: 'stockStructure', label: '持股結構' },
            { key: 'marketRisk', label: '市場風險' },
            { key: 'networth', label: '資產負債' },
@@ -371,6 +373,7 @@ function selectCategory(item: CategoryDistribution) {
         ] as const)"
         :key="tab.key"
         :id="`report-tab-${tab.key}`"
+        :data-testid="`report-tab-${tab.key}`"
         role="tab"
         :aria-selected="activeTab === tab.key"
         :aria-controls="`report-panel-${tab.key}`"
@@ -463,6 +466,11 @@ function selectCategory(item: CategoryDistribution) {
     <!-- 持股結構 -->
     <div v-else-if="activeTab === 'stockOverview'" id="report-panel-stockOverview" role="tabpanel" aria-labelledby="report-tab-stockOverview">
       <StockPortfolioOverview @navigate="handleOverviewNavigate" />
+    </div>
+
+    <!-- 投資績效 -->
+    <div v-else-if="activeTab === 'stockPerformance'" id="report-panel-stockPerformance" role="tabpanel" aria-labelledby="report-tab-stockPerformance">
+      <StockPerformanceReport />
     </div>
 
     <!-- 持股結構 -->

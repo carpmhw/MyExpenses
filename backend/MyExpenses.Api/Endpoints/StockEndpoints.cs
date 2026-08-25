@@ -28,8 +28,8 @@ public static class StockEndpoints
                 resolution.Code));
         });
 
-        group.MapGet("/", async (int page, int pageSize, string? symbol, string? broker, AppDbContext db) =>
-            Results.Ok(await ListStocksAsync(page, pageSize, db, symbol, broker)));
+        group.MapGet("/", async (int page, int pageSize, string? symbol, string? broker, bool? includeClosed, AppDbContext db) =>
+            Results.Ok(await ListStocksAsync(page, pageSize, db, symbol, broker, includeClosed ?? false)));
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
             await db.Stocks.FindAsync(id) is Stock s ? Results.Ok(s) : Results.NotFound());
@@ -52,6 +52,39 @@ public static class StockEndpoints
             var stock = await db.Stocks.FindAsync(id);
             if (stock is null) return Results.NotFound();
 
+            var hasLedgerHistory = await db.StockTransactions.AnyAsync(transaction => transaction.StockId == id);
+            if (hasLedgerHistory)
+            {
+                if (input.Symbol != stock.Symbol
+                    || input.Broker != stock.Broker
+                    || input.InstrumentType != stock.InstrumentType
+                    || input.Shares != stock.Shares
+                    || input.BuyPrice != stock.BuyPrice)
+                {
+                    return Results.Conflict(new StockLedgerErrorResponse(
+                        "LedgerManagedFieldsReadOnly",
+                        "已有 Ledger 的股票只能透過交易更新股數與均價，身分欄位不可直接修改",
+                        null));
+                }
+
+                if (input.Market != stock.Market
+                    && (stock.Market != StockMarket.Unknown
+                        || input.Market is not (StockMarket.Twse or StockMarket.Tpex)))
+                {
+                    return Results.Conflict(new StockLedgerErrorResponse(
+                        "LedgerManagedIdentityReadOnly",
+                        "已有 Ledger 的股票身分不可直接修改",
+                        null));
+                }
+
+                stock.Name = input.Name;
+                stock.Market = input.Market;
+                stock.CurrentPrice = input.CurrentPrice;
+                stock.LastPriceUpdate = input.LastPriceUpdate;
+                await db.SaveChangesAsync();
+                return Results.Ok(stock);
+            }
+
             stock.Name = input.Name;
             stock.Symbol = input.Symbol;
             stock.Market = input.Market;
@@ -72,6 +105,14 @@ public static class StockEndpoints
             var stock = await db.Stocks.FindAsync(id);
             if (stock is null) return Results.NotFound();
 
+            if (await db.StockTransactions.AnyAsync(transaction => transaction.StockId == id))
+            {
+                return Results.Conflict(new StockLedgerErrorResponse(
+                    "StockHasLedgerHistory",
+                    "已有 Ledger 歷史的股票不可刪除",
+                    null));
+            }
+
             db.Stocks.Remove(stock);
             await db.SaveChangesAsync();
             return Results.NoContent();
@@ -79,12 +120,22 @@ public static class StockEndpoints
     }
 
     /// <summary>Returns paginated stocks with filters and all-holding valuation totals calculated before pagination.</summary>
-    public static async Task<StockListResponse> ListStocksAsync(int page, int pageSize, AppDbContext db, string? symbol = null, string? broker = null)
+    public static async Task<StockListResponse> ListStocksAsync(
+        int page,
+        int pageSize,
+        AppDbContext db,
+        string? symbol = null,
+        string? broker = null,
+        bool includeClosed = false)
     {
         page = PaginationPolicy.NormalizePage(page);
         pageSize = PaginationPolicy.NormalizePageSize(pageSize);
 
         var query = db.Stocks.AsQueryable();
+        if (!includeClosed)
+        {
+            query = query.Where(stock => stock.Shares > 0m);
+        }
         var trimmedSymbol = symbol?.Trim();
         if (!string.IsNullOrEmpty(trimmedSymbol))
         {
@@ -99,7 +150,14 @@ public static class StockEndpoints
 
         var total = await query.CountAsync();
         var allStocks = await query.OrderBy(s => s.Id).ToListAsync();
-        var allItems = allStocks.Select(ToStockListItem).ToList();
+        var ledgerStockIds = await db.StockTransactions
+            .Where(transaction => allStocks.Select(stock => stock.Id).Contains(transaction.StockId))
+            .Select(transaction => transaction.StockId)
+            .Distinct()
+            .ToListAsync();
+        var allItems = allStocks
+            .Select(stock => ToStockListItem(stock, ledgerStockIds.Contains(stock.Id)))
+            .ToList();
         var items = allItems
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -115,7 +173,7 @@ public static class StockEndpoints
     }
 
     /// <summary>Maps a stock entity to an API row that includes estimated valuation fields.</summary>
-    private static StockListItem ToStockListItem(Stock stock)
+    private static StockListItem ToStockListItem(Stock stock, bool hasLedger)
     {
         var valuation = StockValuationCalculator.Calculate(stock);
         return new StockListItem(
@@ -134,7 +192,8 @@ public static class StockEndpoints
             valuation.SellCommission,
             valuation.SecuritiesTransactionTax,
             valuation.EstimatedNetSellValue,
-            valuation.EstimatedGainLoss);
+            valuation.EstimatedGainLoss,
+            hasLedger);
     }
 
     /// <summary>限制股票 API 只接受已定義的交易市場 enum。</summary>
@@ -174,4 +233,5 @@ public sealed record StockListItem(
     decimal SellCommission,
     decimal SecuritiesTransactionTax,
     decimal EstimatedNetSellValue,
-    decimal EstimatedGainLoss);
+    decimal EstimatedGainLoss,
+    bool HasLedger = false);

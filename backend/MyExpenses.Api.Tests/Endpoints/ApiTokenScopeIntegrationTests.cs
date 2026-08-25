@@ -70,6 +70,26 @@ public class ApiTokenScopeIntegrationTests
         await AssertStatusCodeAsync(HttpStatusCode.Forbidden, response);
     }
 
+    /// <summary>驗證沒有 reports:read 的 API token 不可讀取股票績效。</summary>
+    [Fact]
+    public async Task GetStockPerformance_RejectsApiTokenWithoutReportsReadScope()
+    {
+        await using var app = await CreateAppAsync(ApiTokenScopes.TransactionsRead);
+        var response = await CreateAuthorizedClient(app).GetAsync("/api/reports/stock-performance");
+
+        await AssertStatusCodeAsync(HttpStatusCode.Forbidden, response);
+    }
+
+    /// <summary>驗證既有 reports:read scope 可讀取股票績效 empty state。</summary>
+    [Fact]
+    public async Task GetStockPerformance_AllowsApiTokenWithReportsReadScope()
+    {
+        await using var app = await CreateAppAsync(ApiTokenScopes.ReportsRead);
+        var response = await CreateAuthorizedClient(app).GetAsync("/api/reports/stock-performance");
+
+        await AssertStatusCodeAsync(HttpStatusCode.OK, response);
+    }
+
     /// <summary>Verifies API tokens cannot manage API tokens even when they have MCP scopes.</summary>
     [Fact]
     public async Task AuthApiTokens_RejectsApiTokenEvenWithMcpScopes()
@@ -160,6 +180,7 @@ public class ApiTokenScopeIntegrationTests
         app.MapTransactionEndpoints();
         app.MapAuthEndpoints();
         app.MapStockEndpoints();
+        app.MapReportEndpoints();
 
         var tokenValue = "oc_" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
         var categoryId = await SeedAsync(app, tokenValue, scopes);

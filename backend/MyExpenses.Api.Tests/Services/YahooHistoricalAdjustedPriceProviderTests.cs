@@ -36,6 +36,7 @@ public sealed class YahooHistoricalAdjustedPriceProviderTests
         Assert.Equal("2330.TW", result.ResolvedSymbol);
         Assert.Equal("TWD", result.Currency);
         Assert.Equal(new[] { 100m, 105m }, result.Prices.Select(point => point.AdjustedClose));
+        Assert.Equal(new[] { 99m, 104m }, result.Prices.Select(point => point.Close));
         Assert.Equal(new DateOnly(2026, 8, 3), result.Prices[0].TradingDate);
         Assert.Contains("2330.TW", handler.RequestUris.Single());
         Assert.DoesNotContain("adjclose", handler.RequestUris.Single(), StringComparison.OrdinalIgnoreCase);
@@ -57,6 +58,7 @@ public sealed class YahooHistoricalAdjustedPriceProviderTests
 
         Assert.Equal("00679B.TWO", result.ResolvedSymbol);
         Assert.Equal(new[] { 50m, 25m, 26m }, result.Prices.Select(point => point.AdjustedClose));
+        Assert.Equal(new[] { 100m, 50m, 52m }, result.Prices.Select(point => point.Close));
         Assert.DoesNotContain(100m, result.Prices.Select(point => point.AdjustedClose));
         Assert.Contains("00679B.TWO", handler.RequestUris.Single());
     }
@@ -124,6 +126,26 @@ public sealed class YahooHistoricalAdjustedPriceProviderTests
             new DateOnly(2026, 8, 7)));
 
         Assert.Equal("invalid_response", exception.Code);
+    }
+
+    /// <summary>驗證必要 raw close 缺值時不會以 adjusted close 偽造成功價格點。</summary>
+    [Fact]
+    public async Task GetPricesAsync_RejectsMissingRawClosePoint()
+    {
+        var handler = new FixtureHttpHandler(_ => YahooChartFixtures.MissingCloseResponse());
+        using var client = CreateClient(handler);
+        var provider = new YahooHistoricalAdjustedPriceProvider(client, new HistoricalMarketDataOptions
+        {
+            MaxRetries = 0,
+        });
+
+        var exception = await Assert.ThrowsAsync<HistoricalPriceProviderException>(() => provider.GetPricesAsync(
+            StockMarket.Twse,
+            "2330",
+            new DateOnly(2026, 8, 1),
+            new DateOnly(2026, 8, 7)));
+
+        Assert.Equal("no_data", exception.Code);
     }
 
     /// <summary>驗證 HTTP 錯誤、timeout 與過大 response 都不會形成成功結果。</summary>

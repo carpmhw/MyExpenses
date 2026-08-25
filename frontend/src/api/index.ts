@@ -4,7 +4,9 @@ import type {
   StockInstrumentType, StockMarket,
   TransactionListResponse, InstallmentListResponse,
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary, DashboardSummary, NetWorthTrendPoint,
-  StockStructureReport, StockValueTrendPoint, StockMarketRiskReport,
+  StockStructureReport, StockValueTrendPoint, StockMarketRiskReport, StockPerformanceReport,
+  StockTransactionListResponse, StockTransactionListItem, StockLedgerTransactionRequest,
+  StockLedgerInitializationResponse, StockPositionRequest, StockPositionResponse,
   SnapshotBatch, SnapshotListResponse, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
   AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
   SystemTimeZoneSettings, InstallmentCommandResponse, InstallmentPurchaseRequest, InstallmentPurchaseResponse,
@@ -59,13 +61,14 @@ export function configureApiSession(config: Partial<ApiSessionConfig>): void {
 
 // Parses structured ProblemDetails fields into safe client-side error details.
 function parseProblemDetails(body: unknown): {
+  code: string | null
   title: string | null
   detail: string | null
   fieldErrors: ApiFieldErrors
   traceId: string | null
 } {
   if (!body || typeof body !== 'object') {
-    return { title: null, detail: null, fieldErrors: {}, traceId: null }
+    return { code: null, title: null, detail: null, fieldErrors: {}, traceId: null }
   }
   const record = body as Record<string, unknown>
   const errors = record.errors && typeof record.errors === 'object' ? record.errors as Record<string, unknown> : {}
@@ -76,8 +79,11 @@ function parseProblemDetails(body: unknown): {
     ]),
   )
   return {
+    code: typeof record.code === 'string' ? record.code : null,
     title: typeof record.title === 'string' ? record.title : null,
-    detail: typeof record.detail === 'string' ? record.detail : null,
+    detail: typeof record.detail === 'string'
+      ? record.detail
+      : typeof record.message === 'string' ? record.message : null,
     fieldErrors,
     traceId: typeof record.traceId === 'string' ? record.traceId : null,
   }
@@ -122,7 +128,7 @@ function isAbortError(error: unknown, signal?: AbortSignal | null): boolean {
 }
 
 // Performs one centrally controlled API request with cancellation and safe error semantics.
-export async function request<T>(url: string, options?: RequestInit): Promise<T> {
+export async function request<T>(url: string, options?: RequestInit, acceptedStatuses: number[] = []): Promise<T> {
   const token = apiSession.getToken()
   const headers = new Headers(options?.headers)
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
@@ -149,11 +155,12 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
   if (response.status === 401 && !isPublicAuthRequest(url)) {
     expireCurrentSession(token)
   }
-  if (!response.ok) {
+  if (!response.ok && !acceptedStatuses.includes(response.status)) {
     const body = await readResponseBody(response)
     const details = parseProblemDetails(body)
     throw new ApiError({
       status: response.status,
+      code: details.code,
       title: details.title,
       detail: details.detail,
       fieldErrors: details.fieldErrors,
@@ -197,7 +204,7 @@ export function buildSnapshotQuery(params?: { page?: number; pageSize?: number; 
 }
 
 // Builds stock list query strings, omitting blank optional filters.
-export function buildStocksQuery(params?: { page?: number; pageSize?: number; symbol?: string; broker?: string }) {
+export function buildStocksQuery(params?: { page?: number; pageSize?: number; symbol?: string; broker?: string; includeClosed?: boolean }) {
   const q = new URLSearchParams()
   if (params?.page) q.set('page', String(params.page))
   if (params?.pageSize) q.set('pageSize', String(params.pageSize))
@@ -205,6 +212,7 @@ export function buildStocksQuery(params?: { page?: number; pageSize?: number; sy
   const broker = params?.broker?.trim()
   if (symbol) q.set('symbol', symbol)
   if (broker) q.set('broker', broker)
+  if (params?.includeClosed) q.set('includeClosed', 'true')
   return q.toString()
 }
 
@@ -346,7 +354,7 @@ export const api = {
   },
 
   stocks: {
-    list: (params?: { page?: number; pageSize?: number; symbol?: string; broker?: string }, context?: ApiRequestContext) => {
+    list: (params?: { page?: number; pageSize?: number; symbol?: string; broker?: string; includeClosed?: boolean }, context?: ApiRequestContext) => {
       const q = buildStocksQuery(params)
       return request<StockListResponse>(`/stocks?${q}`, withRequestContext({}, context))
     },
@@ -359,6 +367,40 @@ export const api = {
       request<void>(`/stocks/${id}`, withRequestContext({ method: 'DELETE' }, context)),
     lookup: (symbol: string, context?: ApiRequestContext) =>
       request<StockLookupResponse>(`/stocks/lookup?symbol=${encodeURIComponent(symbol)}`, withRequestContext({}, context)),
+    ledger: {
+      // 依股票 Ledger filter、日期及分頁讀取固定排序的交易列表。
+      list: (params?: { stockId?: number; type?: string; dateStart?: string; dateEnd?: string; page?: number; pageSize?: number }, context?: ApiRequestContext) => {
+        const q = new URLSearchParams()
+        if (params?.stockId) q.set('stockId', String(params.stockId))
+        if (params?.type) q.set('type', params.type)
+        if (params?.dateStart) q.set('dateStart', params.dateStart)
+        if (params?.dateEnd) q.set('dateEnd', params.dateEnd)
+        if (params?.page) q.set('page', String(params.page))
+        if (params?.pageSize) q.set('pageSize', String(params.pageSize))
+        const qs = q.toString()
+        return request<StockTransactionListResponse>(`/stocks/ledger${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+      },
+      // 讀取單筆交易及其 replay 衍生欄位。
+      get: (id: number, context?: ApiRequestContext) =>
+        request<StockTransactionListItem>(`/stocks/ledger/${id}`, withRequestContext({}, context)),
+      // 建立 Buy、Sell 或 Dividend 交易。
+      create: (data: StockLedgerTransactionRequest, context?: ApiRequestContext) =>
+        request<StockTransactionListItem>('/stocks/ledger/transactions', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+      // 修改既有交易並由 backend 完整 replay。
+      update: (id: number, data: StockLedgerTransactionRequest, context?: ApiRequestContext) =>
+        request<StockTransactionListItem>(`/stocks/ledger/transactions/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
+      // 刪除交易並由 backend 驗證剩餘歷史。
+      delete: (id: number, context?: ApiRequestContext) =>
+        request<void>(`/stocks/ledger/transactions/${id}`, withRequestContext({ method: 'DELETE' }, context)),
+      // 以使用者選定的 baseline date 初始化既有持股。
+      initialize: (data: { baselineDate: string }, context?: ApiRequestContext) =>
+        request<StockLedgerInitializationResponse>('/stocks/ledger/initialize', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context), [422]),
+    },
+    positions: {
+      // 以單一 request 原子建立 Stock 與第一筆 Buy 或 OpeningBalance。
+      create: (data: StockPositionRequest, context?: ApiRequestContext) =>
+        request<StockPositionResponse>('/stocks/positions', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
+    },
   },
 
   withdrawals: {
@@ -460,6 +502,14 @@ export const api = {
       if (params?.periodMonths) q.set('periodMonths', String(params.periodMonths))
       const qs = q.toString()
       return request<StockMarketRiskReport>(`/reports/stock-market-risk${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
+    // 讀取本機 Ledger、目前估值與 raw Close 組合的股票投資績效。
+    stockPerformance: (params?: { dateStart?: string; dateEnd?: string }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.dateStart) q.set('dateStart', params.dateStart)
+      if (params?.dateEnd) q.set('dateEnd', params.dateEnd)
+      const qs = q.toString()
+      return request<StockPerformanceReport>(`/reports/stock-performance${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
     },
   },
 

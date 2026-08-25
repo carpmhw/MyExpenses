@@ -2,6 +2,7 @@ export type ApiFieldErrors = Record<string, string[]>
 
 export interface ApiErrorDetails {
   status: number | null
+  code?: string | null
   title: string | null
   detail: string | null
   fieldErrors?: ApiFieldErrors
@@ -11,6 +12,7 @@ export interface ApiErrorDetails {
 
 export class ApiError extends Error {
   readonly status: number | null
+  readonly code: string | null
   readonly title: string | null
   readonly detail: string | null
   readonly fieldErrors: ApiFieldErrors
@@ -23,6 +25,7 @@ export class ApiError extends Error {
     super(userMessage)
     this.name = 'ApiError'
     this.status = details.status
+    this.code = details.code ?? null
     this.title = details.title ?? null
     this.detail = details.detail ?? null
     this.fieldErrors = details.fieldErrors ?? {}

@@ -139,7 +139,7 @@ describe('report and snapshot query ownership', () => {
     expect(marketRisk).toHaveBeenCalledWith({ periodMonths: 12 }, expect.anything())
     expect(stockValueTrend).toHaveBeenCalledWith({ months: 12 }, expect.anything())
     expect(wrapper.find('[role="tablist"]').exists()).toBe(true)
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(7)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(8)
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('股票總覽')
     expect(wrapper.get('[role="tab"][aria-selected="true"]').attributes('aria-controls')).toBe('report-panel-stockOverview')
     expect(wrapper.get('#report-panel-stockOverview').attributes('role')).toBe('tabpanel')
