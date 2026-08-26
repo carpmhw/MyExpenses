@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
@@ -21,6 +22,7 @@ public static class StockTransactionEndpoints
         group.MapDelete("/{id:int}", DeleteAsync);
         group.MapDelete("/transactions/{id:int}", DeleteAsync);
         group.MapPost("/initialize", InitializeAsync);
+        group.MapPost("/estimate-costs", EstimateCostsAsync);
 
         app.MapPost("/api/stocks/positions", CreatePositionAsync);
         app.MapPost("/api/stocks/ledger/position", CreatePositionAsync);
@@ -213,6 +215,79 @@ public static class StockTransactionEndpoints
         }
     }
 
+    /// <summary>查詢股票主檔並回傳不寫入資料庫的交易費稅估算。</summary>
+    private static async Task<IResult> EstimateCostsAsync(
+        HttpRequest httpRequest,
+        AppDbContext db,
+        Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions,
+        CancellationToken cancellationToken)
+    {
+        StockTransactionCostEstimateRequest? request;
+        try
+        {
+            request = await JsonSerializer.DeserializeAsync<StockTransactionCostEstimateRequest>(
+                httpRequest.Body,
+                jsonOptions.Value.SerializerOptions,
+                cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return InvalidEstimateInput("InvalidRequestBody");
+        }
+        catch (OverflowException)
+        {
+            return InvalidEstimateInput("InvalidRequestBody");
+        }
+
+        if (request is null)
+            return InvalidEstimateInput("InvalidRequestBody");
+        if (request.StockId is null)
+            return InvalidEstimateInput("MissingStockId");
+        if (request.StockId <= 0)
+            return InvalidEstimateInput("InvalidStockId");
+        if (request.Type is null)
+            return InvalidEstimateInput("MissingTransactionType");
+
+        var stock = await db.Stocks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == request.StockId.Value, cancellationToken);
+        if (stock is null)
+            return Error("NotFound", "股票不存在", StatusCodes.Status404NotFound);
+
+        var result = StockTransactionCostEstimator.Estimate(
+            request.Type.Value,
+            request.Shares,
+            request.Price,
+            stock.Market,
+            stock.InstrumentType);
+
+        return result.Status switch
+        {
+            StockTransactionCostEstimationStatus.Success when result.Estimate is not null
+                => Results.Ok(result.Estimate),
+            StockTransactionCostEstimationStatus.InvalidInput
+                => InvalidEstimateInput(result.Reason ?? "InvalidInput"),
+            StockTransactionCostEstimationStatus.Unsupported
+                => Error(
+                    "TransactionCostEstimationUnsupported",
+                    "此股票交易不支援自動費稅估算",
+                    StatusCodes.Status422UnprocessableEntity,
+                    new { reason = result.Reason }),
+            _ => Error(
+                "InvalidTransactionCostEstimateInput",
+                "交易費稅估算輸入無效",
+                StatusCodes.Status400BadRequest),
+        };
+    }
+
+    /// <summary>建立交易費稅估算專用的 typed invalid input response。</summary>
+    private static IResult InvalidEstimateInput(string reason)
+        => Error(
+            "InvalidTransactionCostEstimateInput",
+            "交易費稅估算輸入無效",
+            StatusCodes.Status400BadRequest,
+            new { reason });
+
     /// <summary>套用交易 list 的所有篩選條件。</summary>
     private static IQueryable<StockTransaction> ApplyFilters(
         IQueryable<StockTransaction> query,
@@ -361,6 +436,13 @@ public sealed record UpdateStockTransactionRequest(
 
 /// <summary>描述 Ledger 初始化 HTTP request。</summary>
 public sealed record StockLedgerInitializationRequest(DateOnly BaselineDate);
+
+/// <summary>描述股票交易費稅估算 HTTP request。</summary>
+public sealed record StockTransactionCostEstimateRequest(
+    int? StockId,
+    StockTransactionType? Type,
+    decimal? Shares,
+    decimal? Price);
 
 /// <summary>描述單一交易及其 replay 衍生欄位。</summary>
 public sealed record StockTransactionListItem(

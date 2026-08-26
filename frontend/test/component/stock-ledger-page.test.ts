@@ -78,7 +78,230 @@ function createLedgerResponse() {
 }
 
 describe('StocksPage ledger contract', () => {
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  // 驗證持股頁的新 Sell 流程會透過 central API client 取得自動費稅。
+  it('estimates a new sell transaction from the stock page', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    vi.spyOn(api.stocks, 'options').mockResolvedValue([{
+      id: 1,
+      name: '台積電',
+      symbol: '2330',
+      broker: '甲券商',
+      shares: 10,
+      hasLedger: true,
+    }])
+    const estimate = vi.spyOn(api.stocks.ledger, 'estimateCosts').mockResolvedValue({
+      grossAmount: 1220,
+      fee: 20,
+      tax: 3,
+    })
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-sell-1"]').trigger('click')
+    await flushPromises()
+
+    const setInput = (testId: string, value: string): void => {
+      const input = document.body.querySelector<HTMLInputElement>(`[data-testid="${testId}"]`)
+      if (!input) throw new Error(`Missing ${testId}`)
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    setInput('transaction-shares', '2')
+    setInput('transaction-price', '610')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+
+    expect(estimate).toHaveBeenCalledWith(
+      { stockId: 1, type: 'Sell', shares: 2, price: 610 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect((document.body.querySelector<HTMLInputElement>('[data-testid="transaction-fee"]')!).value).toBe('20')
+    expect((document.body.querySelector<HTMLInputElement>('[data-testid="transaction-tax"]')!).value).toBe('3')
+    wrapper.unmount()
+  })
+
+  // 驗證自動估算失敗後切換 manual 仍可用實際費稅送出交易。
+  it('allows manual override after an estimate failure on the stock page', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    vi.spyOn(api.stocks, 'options').mockResolvedValue([{
+      id: 1,
+      name: '台積電',
+      symbol: '2330',
+      broker: '甲券商',
+      shares: 10,
+      hasLedger: true,
+    }])
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
+    const estimate = vi.spyOn(api.stocks.ledger, 'estimateCosts').mockRejectedValue(new ApiError({
+      status: 500,
+      userMessage: '估算服務暫時失敗',
+    }))
+    const create = vi.spyOn(api.stocks.ledger, 'create').mockResolvedValue(createLedgerResponse().items[0])
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-buy-1"]').trigger('click')
+    await flushPromises()
+    const setInput = (testId: string, value: string): void => {
+      const input = document.body.querySelector<HTMLInputElement>(`[data-testid="${testId}"]`)
+      if (!input) throw new Error(`Missing ${testId}`)
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    setInput('transaction-shares', '2')
+    setInput('transaction-price', '610')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(estimate).toHaveBeenCalledTimes(1)
+    expect(document.body.textContent).toContain('估算服務暫時失敗')
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="transaction-cost-manual"]')?.click()
+    setInput('transaction-fee', '18')
+    setInput('transaction-tax', '4')
+    document.body.querySelector<HTMLFormElement>('[data-testid="stock-transaction-form"]')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ fee: 18, tax: 4 }))
+    wrapper.unmount()
+  })
+
+  // 驗證 options 初次載入未完成時，交易 Modal 收到 loading freshness 狀態而不顯示暫時股數。
+  it('passes loading stock options status to the transaction modal', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const pendingOptions = deferred<Awaited<ReturnType<typeof api.stocks.options>>>()
+    vi.spyOn(api.stocks, 'options').mockReturnValue(pendingOptions.promise)
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('目前持股載入中')
+    expect(document.body.textContent).not.toContain('目前持有 10 股')
+    wrapper.unmount()
+  })
+
+  // 驗證 options 失敗狀態會傳入交易 Modal，而不使用失敗前保留的股數。
+  it('passes error stock options status to the transaction modal', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    vi.spyOn(api.stocks, 'options').mockRejectedValue(new Error('options unavailable'))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('目前持股暫時無法取得')
+    expect(document.body.textContent).not.toContain('目前持有 10 股')
+    wrapper.unmount()
+  })
+
+  // 驗證 options 失敗後切換持股分頁，新增交易仍保留目前 clicked stock 的 identity。
+  it('keeps the clicked stock identity after an options failure and page change', async () => {
+    const firstPage = { ...createStockListResponse(), total: 16 }
+    const secondPage = {
+      ...createStockListResponse(true, { id: 2, name: '聯發科', symbol: '2454' }),
+      page: 2,
+      total: 16,
+    }
+    vi.spyOn(api.stocks, 'list')
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage)
+    vi.spyOn(api.stocks, 'options').mockRejectedValue(new Error('options unavailable'))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-buy-1"]').trigger('click')
+    await flushPromises()
+
+    const cancelButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.trim() === '取消')
+    cancelButton?.click()
+    await flushPromises()
+
+    const nextButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.includes('下一頁'))
+    if (!nextButton) throw new Error('Missing next page button')
+    nextButton.click()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="stock-buy-2"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('聯發科')
+    wrapper.unmount()
+  })
+
+  // 驗證 ready options 缺少 clicked stock 時仍保留 identity，但不推測目前持股。
+  it('keeps identity without current shares when ready options omit the clicked stock', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    vi.spyOn(api.stocks, 'options').mockResolvedValue([])
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-buy-1"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('台積電')
+    expect(document.body.textContent).not.toContain('目前持有 10 股')
+    wrapper.unmount()
+  })
+
+  // 驗證 Ledger mutation 啟動 refresh 後，舊 options 在新 response 前不再具有 ready freshness。
+  it('invalidates ready stock options freshness during a ledger refresh', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
+    vi.spyOn(api.stocks.ledger, 'create').mockResolvedValue(createLedgerResponse().items[0])
+    const refreshedOptions = deferred<Awaited<ReturnType<typeof api.stocks.options>>>()
+    vi.spyOn(api.stocks, 'options')
+      .mockResolvedValueOnce([{ id: 1, name: '台積電', symbol: '2330', broker: '甲券商', shares: 10, hasLedger: true }])
+      .mockReturnValueOnce(refreshedOptions.promise)
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+    const cancelButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.trim() === '取消')
+    cancelButton?.click()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-new-transaction"]').trigger('click')
+    await flushPromises()
+    const form = document.body.querySelector<HTMLFormElement>('[data-testid="stock-transaction-form"]')
+    if (!form) throw new Error('Missing transaction form')
+    const setInput = (testId: string, value: string): void => {
+      const input = document.body.querySelector<HTMLInputElement>(`[data-testid="${testId}"]`)
+      if (!input) throw new Error(`Missing ${testId}`)
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    setInput('transaction-shares', '2')
+    setInput('transaction-price', '610')
+    document.body.querySelector<HTMLButtonElement>('[data-testid="transaction-cost-manual"]')?.click()
+    setInput('transaction-fee', '0')
+    setInput('transaction-tax', '0')
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    await wrapper.get('[data-testid="ledger-new-transaction"]').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('目前持股載入中')
+    expect(document.body.textContent).not.toContain('目前持有 10 股')
+    refreshedOptions.resolve([{ id: 1, name: '台積電', symbol: '2330', broker: '甲券商', shares: 8, hasLedger: true }])
+    await flushPromises()
+    wrapper.unmount()
+  })
 
   // 驗證股票頁預設顯示持股 tab，且 active/closed 查詢只改變 includeClosed。
   it('renders holdings and ledger tabs with an active/closed toggle', async () => {
@@ -305,6 +528,9 @@ describe('StocksPage ledger contract', () => {
     setInput('transaction-trade-date', '2026-08-01')
     setInput('transaction-shares', '5')
     setInput('transaction-price', '550')
+    document.body.querySelector<HTMLButtonElement>('[data-testid="transaction-cost-manual"]')?.click()
+    setInput('transaction-fee', '0')
+    setInput('transaction-tax', '0')
     const form = document.body.querySelector<HTMLFormElement>('[data-testid="stock-transaction-form"]')
     if (!form) throw new Error('Missing transaction form')
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -350,6 +576,9 @@ describe('StocksPage ledger contract', () => {
     }
     setInput('transaction-shares', '5')
     setInput('transaction-price', '550')
+    document.body.querySelector<HTMLButtonElement>('[data-testid="transaction-cost-manual"]')?.click()
+    setInput('transaction-fee', '0')
+    setInput('transaction-tax', '0')
     const form = document.body.querySelector<HTMLFormElement>('[data-testid="stock-transaction-form"]')
     if (!form) throw new Error('Missing transaction form')
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -433,6 +662,9 @@ describe('StocksPage ledger contract', () => {
     }
     setInput('transaction-shares', '2')
     setInput('transaction-price', '610')
+    document.body.querySelector<HTMLButtonElement>('[data-testid="transaction-cost-manual"]')?.click()
+    setInput('transaction-fee', '0')
+    setInput('transaction-tax', '0')
     document.body.querySelector<HTMLFormElement>('[data-testid="stock-transaction-form"]')
       ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await flushPromises()
