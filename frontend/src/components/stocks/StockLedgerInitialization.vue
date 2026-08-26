@@ -40,7 +40,7 @@ function formatBlockingReason(code: string): string {
 </script>
 
 <template>
-  <Card v-if="props.hasActiveHoldings" data-testid="ledger-initialization" class="border-color-info-border bg-color-info-bg">
+  <Card v-if="props.hasActiveHoldings" data-testid="ledger-initialization" class="mb-6 border-color-info-border bg-color-info-bg">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div class="max-w-2xl">
         <h2 class="text-base font-semibold text-text-primary">建立 Ledger 追蹤基準</h2>
