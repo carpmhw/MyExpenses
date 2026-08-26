@@ -118,6 +118,66 @@ public sealed class StockTransactionEndpointTests
         Assert.DoesNotContain("StackTrace", await oversellResponse.Content.ReadAsStringAsync());
     }
 
+    /// <summary>驗證 atomic position endpoint 同時建立股票、首筆交易與 Replay projection。</summary>
+    [Fact]
+    public async Task AtomicPositionApi_CreatesStockAndReplayProjection()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().PostAsJsonAsync(
+            "/api/stocks/positions",
+            new
+            {
+                name = "測試標的",
+                symbol = "2330",
+                market = "Twse",
+                instrumentType = "Stock",
+                shares = 10,
+                buyPrice = 100,
+                currentPrice = 110,
+                tradeDate = "2026-08-25",
+                initialTransactionType = "Buy",
+                broker = "元大證券",
+            },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal(10m, payload.GetProperty("stock").GetProperty("shares").GetDecimal());
+        Assert.Equal(100m, payload.GetProperty("stock").GetProperty("buyPrice").GetDecimal());
+        Assert.Equal(1, await db.Stocks.CountAsync());
+        Assert.Equal(1, await db.StockTransactions.CountAsync());
+    }
+
+    /// <summary>驗證 atomic position endpoint 拒絕未定義市場並回滾建立流程。</summary>
+    [Fact]
+    public async Task AtomicPositionApi_RejectsUndefinedMarketWithoutCreatingStock()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().PostAsJsonAsync(
+            "/api/stocks/positions",
+            new
+            {
+                name = "非法市場",
+                symbol = "9999",
+                market = 999,
+                instrumentType = "Stock",
+                shares = 10,
+                buyPrice = 100,
+                currentPrice = 110,
+                tradeDate = "2026-08-25",
+                initialTransactionType = "Buy",
+            },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(await db.Stocks.ToListAsync());
+        Assert.Empty(await db.StockTransactions.ToListAsync());
+    }
+
     /// <summary>驗證初始化 endpoint 回傳 blocking 與 initialized counts 並保持冪等。</summary>
     [Fact]
     public async Task LedgerInitializationApi_ReturnsCountsAndIsIdempotent()

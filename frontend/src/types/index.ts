@@ -187,6 +187,13 @@ export interface Stock {
   lastPriceUpdate: string | null
 }
 
+export interface StockMetadataUpdateRequest {
+  name: string
+  market: StockMarket
+  currentPrice: number
+  lastPriceUpdate: string | null
+}
+
 export interface StockListItem extends Stock {
   grossMarketValue: number
   buyCommission: number
@@ -197,12 +204,22 @@ export interface StockListItem extends Stock {
   hasLedger: boolean
 }
 
+export interface StockOption {
+  id: number
+  name: string
+  symbol: string
+  broker: string | null
+  shares: number
+  hasLedger: boolean
+}
+
 export interface StockListResponse extends PaginatedResponse<StockListItem> {
   totalEstimatedNetSellValue: number
   totalEstimatedGainLoss: number
 }
 
 export type StockTransactionType = 'OpeningBalance' | 'Buy' | 'Sell' | 'Dividend'
+export type EditableStockTransactionType = 'Buy' | 'Sell' | 'Dividend'
 
 export interface StockTransaction {
   id: number

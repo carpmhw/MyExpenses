@@ -14,6 +14,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   edit: [item: StockListItem]
+  buy: [item: StockListItem]
+  sell: [item: StockListItem]
   delete: [id: number]
 }>()
 
@@ -67,7 +69,30 @@ function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale
           <button type="button" class="cursor-pointer rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-bg-raised" @click="emit('edit', item)">
             <Icon name="pencil" :size="16" />
           </button>
-          <button type="button" class="cursor-pointer rounded-lg p-1.5 text-color-expense-text transition-colors hover:bg-bg-raised" @click="emit('delete', item.id)">
+          <button
+            :data-testid="`stock-buy-${item.id}`"
+            type="button"
+            class="cursor-pointer rounded-lg px-2 py-1 text-xs font-medium text-color-income-text transition-colors hover:bg-bg-raised"
+            @click="emit('buy', item)"
+          >
+            買入
+          </button>
+          <button
+            :data-testid="`stock-sell-${item.id}`"
+            type="button"
+            class="cursor-pointer rounded-lg px-2 py-1 text-xs font-medium text-color-expense-text transition-colors hover:bg-bg-raised"
+            @click="emit('sell', item)"
+          >
+            賣出
+          </button>
+          <button
+            :data-testid="`stock-delete-${item.id}`"
+            type="button"
+            :disabled="item.hasLedger"
+            :title="item.hasLedger ? '此股票已有交易紀錄，無法直接刪除' : '刪除股票'"
+            class="rounded-lg p-1.5 text-color-expense-text transition-colors hover:bg-bg-raised disabled:cursor-not-allowed disabled:opacity-40"
+            @click="emit('delete', item.id)"
+          >
             <Icon name="trash-2" :size="16" />
           </button>
         </div>

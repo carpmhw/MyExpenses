@@ -197,6 +197,9 @@ public static class StockTransactionEndpoints
         StockLedgerService service,
         CancellationToken cancellationToken)
     {
+        if (!IsSupportedMarket(command.Market))
+            return Error("InvalidMarket", "交易市場無效", StatusCodes.Status400BadRequest);
+
         try
         {
             var result = await service.CreatePositionAsync(command, cancellationToken);
@@ -314,6 +317,10 @@ public static class StockTransactionEndpoints
         int statusCode,
         object? details = null)
         => Results.Json(new StockLedgerErrorResponse(code, message, details), statusCode: statusCode);
+
+    /// <summary>限制 atomic position API 只接受已定義的交易市場 enum。</summary>
+    private static bool IsSupportedMarket(StockMarket market)
+        => market is StockMarket.Unknown or StockMarket.Twse or StockMarket.Tpex;
 }
 
 /// <summary>建立股票交易 endpoint 的 request contract。</summary>

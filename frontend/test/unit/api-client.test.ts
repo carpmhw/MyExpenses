@@ -237,4 +237,38 @@ describe('central API client', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({ baselineDate: '2026-01-01' })
     expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toMatchObject({ initialTransactionType: 'Buy' })
   })
+
+  // 驗證交易 selector 使用不受 holdings 分頁限制的完整 Stock Options API。
+  it('serializes stock options queries with includeClosed', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse([]))
+    type StockOptionsApi = {
+      options: (params?: { includeClosed?: boolean }) => Promise<unknown>
+    }
+
+    await (api.stocks as unknown as StockOptionsApi).options({ includeClosed: true })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/stocks/options?includeClosed=true', expect.anything())
+  })
+
+  // 驗證股票更新 client 只傳送 metadata contract 欄位。
+  it('serializes restricted stock metadata updates', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse({ id: 3 }))
+
+    await api.stocks.update(3, {
+      name: '台積電',
+      market: 'Twse',
+      currentPrice: 650,
+      lastPriceUpdate: '2026-08-25T00:00:00Z',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/stocks/3', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        name: '台積電',
+        market: 'Twse',
+        currentPrice: 650,
+        lastPriceUpdate: '2026-08-25T00:00:00Z',
+      }),
+    }))
+  })
 })

@@ -2,11 +2,13 @@ import type {
   Category, Transaction, Installment, CreditCard, CreditCardBill,
   BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, WithdrawalListResponse, PaymentMethod, PaginatedResponse,
   StockInstrumentType, StockMarket,
+  StockMetadataUpdateRequest,
   TransactionListResponse, InstallmentListResponse,
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary, DashboardSummary, NetWorthTrendPoint,
   StockStructureReport, StockValueTrendPoint, StockMarketRiskReport, StockPerformanceReport,
   StockTransactionListResponse, StockTransactionListItem, StockLedgerTransactionRequest,
   StockLedgerInitializationResponse, StockPositionRequest, StockPositionResponse,
+  StockOption,
   SnapshotBatch, SnapshotListResponse, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
   AuthResponse, TwoFactorSetupResponse, User, ApiToken, ExchangeRateResponse,
   SystemTimeZoneSettings, InstallmentCommandResponse, InstallmentPurchaseRequest, InstallmentPurchaseResponse,
@@ -358,10 +360,15 @@ export const api = {
       const q = buildStocksQuery(params)
       return request<StockListResponse>(`/stocks?${q}`, withRequestContext({}, context))
     },
+    // 讀取不受持股分頁限制的完整交易股票 options。
+    options: (params?: { includeClosed?: boolean }, context?: ApiRequestContext) => {
+      const q = new URLSearchParams()
+      if (params?.includeClosed) q.set('includeClosed', 'true')
+      const qs = q.toString()
+      return request<StockOption[]>(`/stocks/options${qs ? `?${qs}` : ''}`, withRequestContext({}, context))
+    },
     get: (id: number, context?: ApiRequestContext) => request<Stock>(`/stocks/${id}`, withRequestContext({}, context)),
-    create: (data: Omit<Stock, 'id'>, context?: ApiRequestContext) =>
-      request<Stock>('/stocks', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
-    update: (id: number, data: Partial<Stock>, context?: ApiRequestContext) =>
+    update: (id: number, data: StockMetadataUpdateRequest, context?: ApiRequestContext) =>
       request<Stock>(`/stocks/${id}`, withRequestContext({ method: 'PUT', body: JSON.stringify(data) }, context)),
     delete: (id: number, context?: ApiRequestContext) =>
       request<void>(`/stocks/${id}`, withRequestContext({ method: 'DELETE' }, context)),

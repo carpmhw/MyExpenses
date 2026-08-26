@@ -1,4 +1,4 @@
-import type { StockInstrumentType, StockMarket } from '../types'
+import type { StockInstrumentType, StockListItem, StockMarket, StockOption } from '../types'
 
 export const STOCK_INSTRUMENT_TYPE_OPTIONS: { value: StockInstrumentType; label: string }[] = [
   { value: 'Stock', label: '股票' },
@@ -20,4 +20,10 @@ export function formatStockInstrumentType(value: StockInstrumentType | undefined
 // 將交易市場 enum 轉成股票管理頁使用的中文標籤。
 export function formatStockMarket(value: StockMarket | undefined | null): string {
   return STOCK_MARKET_OPTIONS.find((option) => option.value === value)?.label ?? '待辨識'
+}
+
+/** 格式化交易 selector 使用的股票、名稱與券商辨識文字。 */
+export function formatStockOption(stock: Pick<StockOption | StockListItem, 'symbol' | 'name' | 'broker'>): string {
+  const broker = stock.broker?.trim() || '未設定券商'
+  return `${stock.symbol} ${stock.name}｜${broker}`
 }

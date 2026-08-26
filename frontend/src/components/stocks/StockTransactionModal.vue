@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { StockLedgerTransactionRequest, StockListItem, StockTransactionListItem } from '../../types'
+import type { EditableStockTransactionType, StockLedgerTransactionRequest, StockOption, StockTransactionListItem } from '../../types'
 import Modal from '../ui/Modal.vue'
 import Button from '../ui/Button.vue'
 import Input from '../ui/Input.vue'
 import { useTimeZone } from '../../composables/useTimeZone'
-
-type EditableTransactionType = 'Buy' | 'Sell' | 'Dividend'
+import { formatStockOption } from '../../utils/stock'
 
 interface TransactionFormState {
   stockId: number | null
-  type: EditableTransactionType
+  type: EditableStockTransactionType
   tradeDate: string
   shares: string
   price: string
@@ -22,9 +21,10 @@ interface TransactionFormState {
 
 const props = defineProps<{
   open: boolean
-  stocks: StockListItem[]
+  stocks: StockOption[]
   stockId: number | null
   transaction: StockTransactionListItem | null
+  initialType?: EditableStockTransactionType
   loading: boolean
   errorMessage?: string
 }>()
@@ -37,10 +37,11 @@ const emit = defineEmits<{
 const timeZone = useTimeZone()
 
 // 建立空白交易表單，所有數值先保留字串以避免原生 input 的空值被轉成零。
-function createEmptyForm(stockId: number | null): TransactionFormState {
+// 建立新增交易的初始表單，保留快捷入口指定的交易型別。
+function createEmptyForm(stockId: number | null, initialType: EditableStockTransactionType = 'Buy'): TransactionFormState {
   return {
     stockId,
-    type: 'Buy',
+    type: initialType,
     tradeDate: timeZone.getToday(),
     shares: '',
     price: '',
@@ -51,7 +52,10 @@ function createEmptyForm(stockId: number | null): TransactionFormState {
   }
 }
 
-const form = ref<TransactionFormState>(createEmptyForm(props.stockId ?? props.stocks[0]?.id ?? null))
+const form = ref<TransactionFormState>(createEmptyForm(
+  props.stockId ?? props.stocks[0]?.id ?? null,
+  props.initialType,
+))
 
 const errors = computed(() => {
   const result: Record<string, string> = {}
@@ -62,21 +66,35 @@ const errors = computed(() => {
   } else {
     if (!(Number(form.value.shares) > 0)) result.shares = '股數必須大於零'
     if (!(Number(form.value.price) > 0)) result.price = '成交價格必須大於零'
-    const selectedStock = props.stocks.find(stock => stock.id === form.value.stockId)
-    if (form.value.type === 'Sell' && selectedStock && Number(form.value.shares) > selectedStock.shares) {
-      result.shares = `可用股數不足，目前最多可賣 ${selectedStock.shares}`
-    }
   }
   if (Number(form.value.fee) < 0) result.fee = '手續費不可為負數'
   if (Number(form.value.tax) < 0) result.tax = '交易稅不可為負數'
   return result
 })
 
+const selectedStock = computed<StockOption | null>(() => {
+  const selected = props.stocks.find(stock => stock.id === form.value.stockId)
+  if (selected) return selected
+  const transaction = props.transaction
+  if (!transaction || transaction.stockId !== form.value.stockId) return null
+  return {
+    id: transaction.stockId,
+    name: transaction.stockName,
+    symbol: transaction.symbol,
+    broker: transaction.broker,
+    shares: transaction.remainingShares,
+    hasLedger: true,
+  }
+})
+
 // 將既有 transaction 映射回可編輯欄位，或重設為新增交易預設值。
 function resetForm(): void {
   const transaction = props.transaction
   if (!transaction) {
-    form.value = createEmptyForm(props.stockId ?? props.stocks[0]?.id ?? null)
+    form.value = createEmptyForm(
+      props.stockId ?? props.stocks[0]?.id ?? null,
+      props.initialType,
+    )
     return
   }
 
@@ -94,7 +112,7 @@ function resetForm(): void {
 }
 
 watch(
-  () => [props.open, props.stockId, props.transaction?.id] as const,
+  () => [props.open, props.stockId, props.transaction?.id, props.initialType] as const,
   () => resetForm(),
   { immediate: true },
 )
@@ -141,9 +159,15 @@ function submit(): void {
           class="min-h-11 w-full rounded-lg border border-border-strong bg-bg-card px-3 py-2 text-sm text-text-primary focus:border-accent-primary focus:outline-none focus:ring-2 focus:ring-focus-ring"
         >
           <option :value="null">請選擇股票</option>
-          <option v-for="stock in props.stocks" :key="stock.id" :value="stock.id">{{ stock.symbol }} {{ stock.name }}</option>
+          <option v-if="selectedStock && !props.stocks.some(stock => stock.id === selectedStock?.id)" :value="selectedStock.id">
+            {{ formatStockOption(selectedStock) }}
+          </option>
+          <option v-for="stock in props.stocks" :key="stock.id" :value="stock.id">{{ formatStockOption(stock) }}</option>
         </select>
         <p v-if="errors.stockId" class="mt-1 text-xs text-color-expense-text">{{ errors.stockId }}</p>
+        <p v-if="selectedStock" data-testid="transaction-stock-summary" class="mt-1 text-xs text-text-secondary">
+          {{ formatStockOption(selectedStock) }} · 目前持有 {{ selectedStock.shares }} 股
+        </p>
       </div>
 
       <div>

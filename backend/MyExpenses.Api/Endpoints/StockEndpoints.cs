@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
@@ -8,6 +10,15 @@ namespace MyExpenses.Api.Endpoints;
 
 public static class StockEndpoints
 {
+    private static readonly HashSet<string> ProtectedStockUpdateFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Symbol",
+        "Broker",
+        "InstrumentType",
+        "Shares",
+        "BuyPrice",
+    };
+
     public static void MapStockEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/stocks");
@@ -31,20 +42,13 @@ public static class StockEndpoints
         group.MapGet("/", async (int page, int pageSize, string? symbol, string? broker, bool? includeClosed, AppDbContext db) =>
             Results.Ok(await ListStocksAsync(page, pageSize, db, symbol, broker, includeClosed ?? false)));
 
+        group.MapGet("/options", async (bool? includeClosed, AppDbContext db, CancellationToken cancellationToken) =>
+            Results.Ok(await ListStockOptionsAsync(includeClosed ?? false, db, cancellationToken)));
+
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
             await db.Stocks.FindAsync(id) is Stock s ? Results.Ok(s) : Results.NotFound());
 
-        group.MapPost("/", async (Stock stock, AppDbContext db) =>
-        {
-            if (!IsSupportedMarket(stock.Market))
-                return Results.BadRequest("交易市場無效");
-
-            db.Stocks.Add(stock);
-            await db.SaveChangesAsync();
-            return Results.Created($"/api/stocks/{stock.Id}", stock);
-        });
-
-        group.MapPut("/{id:int}", async (int id, Stock input, AppDbContext db) =>
+        group.MapPut("/{id:int}", async (int id, UpdateStockMetadataRequest input, AppDbContext db) =>
         {
             if (!IsSupportedMarket(input.Market))
                 return Results.BadRequest("交易市場無效");
@@ -55,15 +59,11 @@ public static class StockEndpoints
             var hasLedgerHistory = await db.StockTransactions.AnyAsync(transaction => transaction.StockId == id);
             if (hasLedgerHistory)
             {
-                if (input.Symbol != stock.Symbol
-                    || input.Broker != stock.Broker
-                    || input.InstrumentType != stock.InstrumentType
-                    || input.Shares != stock.Shares
-                    || input.BuyPrice != stock.BuyPrice)
+                if (input.ExtraProperties?.Keys.Any(ProtectedStockUpdateFields.Contains) == true)
                 {
                     return Results.Conflict(new StockLedgerErrorResponse(
                         "LedgerManagedFieldsReadOnly",
-                        "已有 Ledger 的股票只能透過交易更新股數與均價，身分欄位不可直接修改",
+                        "已有 Ledger 的股票不可直接修改身份與部位欄位",
                         null));
                 }
 
@@ -86,15 +86,9 @@ public static class StockEndpoints
             }
 
             stock.Name = input.Name;
-            stock.Symbol = input.Symbol;
             stock.Market = input.Market;
-            stock.InstrumentType = input.InstrumentType;
-            stock.Shares = input.Shares;
-            stock.BuyPrice = input.BuyPrice;
             stock.CurrentPrice = input.CurrentPrice;
-            stock.Broker = input.Broker;
-            if (input.LastPriceUpdate.HasValue)
-                stock.LastPriceUpdate = input.LastPriceUpdate;
+            stock.LastPriceUpdate = input.LastPriceUpdate;
 
             await db.SaveChangesAsync();
             return Results.Ok(stock);
@@ -172,6 +166,44 @@ public static class StockEndpoints
             allItems.Sum(s => s.EstimatedGainLoss));
     }
 
+    /// <summary>回傳不受持股列表分頁限制的輕量交易股票 options。</summary>
+    public static async Task<IReadOnlyList<StockOptionResponse>> ListStockOptionsAsync(
+        bool includeClosed,
+        AppDbContext db,
+        CancellationToken cancellationToken = default)
+    {
+        var query = db.Stocks.AsNoTracking();
+        if (!includeClosed)
+            query = query.Where(stock => stock.Shares > 0m);
+
+        var stocks = await query
+            .OrderBy(stock => stock.Symbol)
+            .ThenBy(stock => stock.Broker ?? string.Empty)
+            .ThenBy(stock => stock.Name)
+            .ThenBy(stock => stock.Id)
+            .ToListAsync(cancellationToken);
+        var stockIds = stocks.Select(stock => stock.Id).ToArray();
+        var ledgerStockIds = stockIds.Length == 0
+            ? []
+            : await db.StockTransactions
+                .AsNoTracking()
+                .Where(transaction => stockIds.Contains(transaction.StockId))
+                .Select(transaction => transaction.StockId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+        var ledgerIdSet = ledgerStockIds.ToHashSet();
+
+        return stocks
+            .Select(stock => new StockOptionResponse(
+                stock.Id,
+                stock.Name,
+                stock.Symbol,
+                stock.Broker,
+                stock.Shares,
+                ledgerIdSet.Contains(stock.Id)))
+            .ToList();
+    }
+
     /// <summary>Maps a stock entity to an API row that includes estimated valuation fields.</summary>
     private static StockListItem ToStockListItem(Stock stock, bool hasLedger)
     {
@@ -217,6 +249,18 @@ public sealed record StockLookupResponse(
     StockMarket Market,
     string ResultCode);
 
+/// <summary>描述股票 metadata 更新可公開接受的欄位。</summary>
+public sealed record UpdateStockMetadataRequest(
+    string Name,
+    decimal CurrentPrice,
+    DateTime? LastPriceUpdate,
+    StockMarket Market)
+{
+    /// <summary>保留未屬於公開 contract 的欄位，讓 Ledger guard 能回傳 typed conflict。</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtraProperties { get; init; }
+}
+
 public sealed record StockListItem(
     int Id,
     string Name,
@@ -235,3 +279,12 @@ public sealed record StockListItem(
     decimal EstimatedNetSellValue,
     decimal EstimatedGainLoss,
     bool HasLedger = false);
+
+/// <summary>描述交易 selector 所需的輕量股票識別與目前部位資訊。</summary>
+public sealed record StockOptionResponse(
+    int Id,
+    string Name,
+    string Symbol,
+    string? Broker,
+    decimal Shares,
+    bool HasLedger);
