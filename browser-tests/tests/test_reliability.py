@@ -248,6 +248,7 @@ def test_stock_market_risk_market_edit_period_and_mobile_matrix(mocked_page: Pag
             "currentPrice": 600,
             "broker": "測試券商",
             "lastPriceUpdate": None,
+            "hasLedger": False,
             "grossMarketValue": 60000,
             "buyCommission": 0,
             "sellCommission": 0,
@@ -449,6 +450,16 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
         path = urlparse(route.request.url).path
         if path == "/api/stocks" and route.request.method == "GET":
             route_json(route, stock_list)
+            return
+        if path == "/api/stocks/options" and route.request.method == "GET":
+            route_json(route, [{
+                "id": stock["id"],
+                "name": stock["name"],
+                "symbol": stock["symbol"],
+                "broker": stock["broker"],
+                "shares": stock["shares"],
+                "hasLedger": True,
+            }])
             return
         if path.endswith("/initialize"):
             route_json(route, {"initializedCount": 1, "skippedCount": 0, "blockingCount": 0, "totalCount": 1, "blockingStocks": []})

@@ -118,81 +118,26 @@ public class StockEndpointsTests
         Assert.Equal(55943m, result.TotalEstimatedGainLoss);
     }
 
-    /// <summary>Verifies stock creation trims text fields before saving.</summary>
+    /// <summary>驗證 legacy direct stock creation route 已停止提供。</summary>
     [Fact]
-    public async Task CreateStock_TrimsTextFieldsBeforeSaving()
-    {
-        await using var db = await CreateDbContextAsync();
-        await using var app = await CreateStockAppAsync((SqliteConnection)db.Database.GetDbConnection());
-
-        var response = await app.GetTestClient().PostAsJsonAsync("/api/stocks", new Stock
-        {
-            Name = " 新股票 ",
-            Symbol = " 9999 ",
-            InstrumentType = StockInstrumentType.Stock,
-            Shares = 100m,
-            BuyPrice = 10m,
-            CurrentPrice = 11m,
-            Broker = " 凱基證券 ",
-        }, CreateJsonOptions());
-
-        response.EnsureSuccessStatusCode();
-        var stock = await db.Stocks.SingleAsync(s => s.Symbol.Trim() == "9999");
-        Assert.Equal("新股票", stock.Name);
-        Assert.Equal("9999", stock.Symbol);
-        Assert.Equal("凱基證券", stock.Broker);
-    }
-
-    /// <summary>驗證建立持股未提供市場時會保存 Unknown。</summary>
-    [Fact]
-    public async Task CreateStock_UsesUnknownMarketWhenMarketIsOmitted()
+    public async Task LegacyStockCreateEndpoint_IsUnavailable()
     {
         await using var db = await CreateDbContextAsync();
         await using var app = await CreateStockAppAsync((SqliteConnection)db.Database.GetDbConnection());
 
         var response = await app.GetTestClient().PostAsJsonAsync("/api/stocks", new
         {
-            name = "待辨識標的",
-            symbol = "7000",
+            name = "不應建立",
+            symbol = "9999",
+            market = "Twse",
             instrumentType = "Stock",
             shares = 10,
-            buyPrice = 10,
-            currentPrice = 11,
-            broker = (string?)null,
+            buyPrice = 100,
+            currentPrice = 110,
         }, CreateJsonOptions());
 
-        response.EnsureSuccessStatusCode();
-        var created = await response.Content.ReadFromJsonAsync<Stock>(CreateJsonOptions());
-
-        Assert.NotNull(created);
-        Assert.Equal(StockMarket.Unknown, created!.Market);
-    }
-
-    /// <summary>驗證建立與查詢持股時會往返保存指定交易市場。</summary>
-    [Fact]
-    public async Task StockApi_PersistsSelectedMarketAndReturnsItInList()
-    {
-        await using var db = await CreateDbContextAsync();
-        await using var app = await CreateStockAppAsync((SqliteConnection)db.Database.GetDbConnection());
-
-        var createResponse = await app.GetTestClient().PostAsJsonAsync("/api/stocks", new Stock
-        {
-            Name = "上櫃標的",
-            Symbol = "00679B",
-            Market = StockMarket.Tpex,
-            InstrumentType = StockInstrumentType.BondEtf,
-            Shares = 10,
-            BuyPrice = 20,
-            CurrentPrice = 21,
-        }, CreateJsonOptions());
-        createResponse.EnsureSuccessStatusCode();
-        var created = await createResponse.Content.ReadFromJsonAsync<Stock>(CreateJsonOptions());
-
-        var list = await app.GetTestClient().GetFromJsonAsync<StockListResponse>(
-            "/api/stocks?page=1&pageSize=20", CreateJsonOptions());
-
-        Assert.Equal(StockMarket.Tpex, created!.Market);
-        Assert.Equal(StockMarket.Tpex, Assert.Single(list!.Items, item => item.Symbol == "00679B").Market);
+        Assert.True(response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed);
+        Assert.Empty(await db.Stocks.Where(stock => stock.Symbol == "9999").ToListAsync());
     }
 
     /// <summary>驗證更新持股時可由使用者修正交易市場。</summary>
@@ -204,17 +149,12 @@ public class StockEndpointsTests
         var stock = await db.Stocks.SingleAsync(s => s.Symbol == "2330");
         var grossValue = stock.Shares * stock.CurrentPrice;
 
-        var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new Stock
+        var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new
         {
-            Name = stock.Name,
-            Symbol = stock.Symbol,
-            Market = StockMarket.Twse,
-            InstrumentType = stock.InstrumentType,
-            Shares = stock.Shares,
-            BuyPrice = stock.BuyPrice,
-            CurrentPrice = stock.CurrentPrice,
-            Broker = stock.Broker,
-            LastPriceUpdate = stock.LastPriceUpdate,
+            name = stock.Name,
+            market = "Twse",
+            currentPrice = stock.CurrentPrice,
+            lastPriceUpdate = stock.LastPriceUpdate,
         }, CreateJsonOptions());
 
         response.EnsureSuccessStatusCode();
@@ -224,54 +164,27 @@ public class StockEndpointsTests
         Assert.Equal(grossValue, stock.Shares * stock.CurrentPrice);
     }
 
-    /// <summary>驗證股票 API 拒絕未定義的交易市場 enum 整數值。</summary>
+    /// <summary>驗證股票更新只修改允許的 metadata 欄位。</summary>
     [Fact]
-    public async Task CreateStock_RejectsUndefinedMarketEnum()
-    {
-        await using var db = await CreateDbContextAsync();
-        await using var app = await CreateStockAppAsync((SqliteConnection)db.Database.GetDbConnection());
-
-        var response = await app.GetTestClient().PostAsJsonAsync("/api/stocks", new
-        {
-            name = "非法市場",
-            symbol = "7777",
-            market = 999,
-            instrumentType = "Stock",
-            shares = 10,
-            buyPrice = 10,
-            currentPrice = 10,
-        }, CreateJsonOptions());
-
-        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.DoesNotContain("7777", await db.Stocks.Select(stock => stock.Symbol).ToListAsync());
-    }
-
-    /// <summary>Verifies stock updates trim text fields and normalize blank broker to null.</summary>
-    [Fact]
-    public async Task UpdateStock_TrimsTextFieldsAndNormalizesBlankBroker()
+    public async Task UpdateStock_UpdatesAllowedMetadata()
     {
         await using var db = await CreateDbContextAsync();
         await using var app = await CreateStockAppAsync((SqliteConnection)db.Database.GetDbConnection());
         var stock = await db.Stocks.SingleAsync(s => s.Symbol == "2330");
 
-        var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new Stock
+        var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new
         {
-            Name = " 台積電更新 ",
-            Symbol = " 2330 ",
-            InstrumentType = StockInstrumentType.BondEtf,
-            Shares = stock.Shares,
-            BuyPrice = stock.BuyPrice,
-            CurrentPrice = stock.CurrentPrice,
-            Broker = "   ",
-            LastPriceUpdate = stock.LastPriceUpdate,
+            name = " 台積電更新 ",
+            market = "Twse",
+            currentPrice = stock.CurrentPrice,
+            lastPriceUpdate = stock.LastPriceUpdate,
         }, CreateJsonOptions());
 
         response.EnsureSuccessStatusCode();
         await db.Entry(stock).ReloadAsync();
         Assert.Equal("台積電更新", stock.Name);
         Assert.Equal("2330", stock.Symbol);
-        Assert.Null(stock.Broker);
-        Assert.Equal(StockInstrumentType.BondEtf, stock.InstrumentType);
+        Assert.Equal(StockInstrumentType.Stock, stock.InstrumentType);
     }
 
     /// <summary>Verifies lookup cache refresh does not update stored holding prices.</summary>

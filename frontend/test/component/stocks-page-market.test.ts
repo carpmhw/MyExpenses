@@ -205,13 +205,8 @@ describe('StocksPage market contract', () => {
     expect.soft(update).toHaveBeenCalledTimes(1)
     expect.soft(update).toHaveBeenCalledWith(1, {
       name: '台積電',
-      symbol: '2330',
       market: 'Twse',
-      instrumentType: 'Stock',
-      shares: 10,
-      buyPrice: 500,
       currentPrice: 650,
-      broker: 'A 券商',
       lastPriceUpdate: expect.any(String),
     })
   })
@@ -285,13 +280,8 @@ describe('StocksPage market contract', () => {
     expect.soft(update).toHaveBeenCalledTimes(1)
     expect.soft(update).toHaveBeenCalledWith(1, {
       name: '台積電',
-      symbol: '2330',
       market: 'Twse',
-      instrumentType: 'Stock',
-      shares: 10,
-      buyPrice: 500,
       currentPrice: 650,
-      broker: 'A 券商',
       lastPriceUpdate: expect.any(String),
     })
   })

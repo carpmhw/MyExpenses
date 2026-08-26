@@ -33,27 +33,10 @@ public sealed class StockLedgerStockEndpointTests
         await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
         var client = app.GetTestClient();
 
-        var protectedResponse = await client.PutAsJsonAsync($"/api/stocks/{stock.Id}", new
-        {
-            name = "修改名稱",
-            symbol = "9999",
-            market = "Twse",
-            instrumentType = "Stock",
-            shares = 10,
-            buyPrice = 100,
-            currentPrice = 120,
-        }, JsonOptions());
-        Assert.Equal(HttpStatusCode.Conflict, protectedResponse.StatusCode);
-        Assert.Equal("LedgerManagedFieldsReadOnly", (await protectedResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
-
         var allowedResponse = await client.PutAsJsonAsync($"/api/stocks/{stock.Id}", new
         {
             name = "修改名稱",
-            symbol = "2330",
             market = "Twse",
-            instrumentType = "Stock",
-            shares = 10,
-            buyPrice = 100,
             currentPrice = 120,
             lastPriceUpdate = "2026-08-25T00:00:00Z",
         }, JsonOptions());
@@ -80,17 +63,104 @@ public sealed class StockLedgerStockEndpointTests
         var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new
         {
             name = "上櫃標的",
-            symbol = "00679B",
             market = "Tpex",
-            instrumentType = "Stock",
-            shares = 10,
-            buyPrice = 100,
             currentPrice = 120,
         }, JsonOptions());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         await db.Entry(stock).ReloadAsync();
         Assert.Equal(StockMarket.Tpex, (await db.Stocks.SingleAsync(item => item.Id == stock.Id)).Market);
+    }
+
+    /// <summary>驗證已有明確市場的 Ledger 股票不可切換至另一個市場。</summary>
+    [Fact]
+    public async Task StockApi_RejectsKnownMarketChange()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, "2330", StockMarket.Twse);
+        var service = new StockLedgerService(db);
+        await service.CreateTransactionAsync(stock.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Buy,
+            new DateOnly(2026, 8, 25),
+            Shares: 10m,
+            Price: 100m));
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new
+        {
+            name = "上櫃標的",
+            market = "Tpex",
+            currentPrice = 120,
+        }, JsonOptions());
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("LedgerManagedIdentityReadOnly", error.GetProperty("code").GetString());
+    }
+
+    /// <summary>驗證股票更新只接受 metadata contract，且不會覆寫 Ledger projection 與 identity。</summary>
+    [Fact]
+    public async Task StockApi_AcceptsRestrictedMetadataUpdateContract()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, "2330", StockMarket.Twse);
+        var service = new StockLedgerService(db);
+        await service.CreateTransactionAsync(stock.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Buy,
+            new DateOnly(2026, 8, 25),
+            Shares: 10m,
+            Price: 100m));
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new
+        {
+            name = " 更新名稱 ",
+            market = "Twse",
+            currentPrice = 120,
+            lastPriceUpdate = "2026-08-25T00:00:00Z",
+        }, JsonOptions());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await db.Stocks.AsNoTracking().SingleAsync(item => item.Id == stock.Id);
+        Assert.Equal("更新名稱", updated.Name);
+        Assert.Equal("2330", updated.Symbol);
+        Assert.Equal(StockInstrumentType.Stock, updated.InstrumentType);
+        Assert.Null(updated.Broker);
+        Assert.Equal(10m, updated.Shares);
+        Assert.Equal(100m, updated.BuyPrice);
+        Assert.Equal(120m, updated.CurrentPrice);
+    }
+
+    /// <summary>驗證 Ledger 股票遭竄改受保護欄位時回傳 typed conflict。</summary>
+    [Fact]
+    public async Task StockApi_RejectsTamperedProtectedFieldsWithTypedConflict()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, "2330", StockMarket.Twse);
+        var service = new StockLedgerService(db);
+        await service.CreateTransactionAsync(stock.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Buy,
+            new DateOnly(2026, 8, 25),
+            Shares: 10m,
+            Price: 100m));
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().PutAsJsonAsync($"/api/stocks/{stock.Id}", new
+        {
+            name = "更新名稱",
+            market = "Twse",
+            currentPrice = 120,
+            lastPriceUpdate = "2026-08-25T00:00:00Z",
+            symbol = "6488",
+            broker = "竄改券商",
+            instrumentType = "BondEtf",
+            shares = 999,
+            buyPrice = 1,
+        }, JsonOptions());
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("LedgerManagedFieldsReadOnly", error.GetProperty("code").GetString());
     }
 
     /// <summary>驗證預設股票列表隱藏已結清標的，includeClosed=true 會保留歷史主檔。</summary>
@@ -126,6 +196,70 @@ public sealed class StockLedgerStockEndpointTests
 
         Assert.DoesNotContain(active!.Items, item => item.Symbol == "2330");
         Assert.Contains(all!.Items, item => item.Symbol == "2330");
+    }
+
+    /// <summary>驗證 options 不受持股分頁限制，且同代號券商與排序資訊完整保留。</summary>
+    [Fact]
+    public async Task StockOptions_ReturnsAllStocksWithBrokerAwareDeterministicOrdering()
+    {
+        await using var db = await CreateDbContextAsync();
+        for (var index = 0; index < 40; index++)
+        {
+            db.Stocks.Add(new Stock
+            {
+                Name = $"標的 {index:00}",
+                Symbol = $"{index + 1000:0000}",
+                Market = StockMarket.Twse,
+                Shares = 10m,
+                BuyPrice = 100m,
+                CurrentPrice = 110m,
+                Broker = "一般券商",
+            });
+        }
+        db.Stocks.AddRange(
+            new Stock { Name = "台積電", Symbol = "2330", Market = StockMarket.Twse, Shares = 10m, BuyPrice = 500m, CurrentPrice = 600m, Broker = "元大證券" },
+            new Stock { Name = "台積電", Symbol = "2330", Market = StockMarket.Twse, Shares = 10m, BuyPrice = 500m, CurrentPrice = 600m, Broker = "富邦證券" });
+        await db.SaveChangesAsync();
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().GetAsync("/api/stocks/options");
+        response.EnsureSuccessStatusCode();
+        var options = await response.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions());
+
+        Assert.NotNull(options);
+        Assert.Equal(42, options!.Length);
+        var brokerOptions = options.Where(item => item.GetProperty("symbol").GetString() == "2330").ToArray();
+        Assert.Equal(["元大證券", "富邦證券"], brokerOptions.Select(item => item.GetProperty("broker").GetString() ?? string.Empty).ToArray());
+        Assert.All(options, item => Assert.True(item.TryGetProperty("hasLedger", out _)));
+    }
+
+    /// <summary>驗證 options 預設隱藏已結清持股，includeClosed=true 可回傳其 Ledger identity。</summary>
+    [Fact]
+    public async Task StockOptions_IncludesClosedHoldingsWhenRequested()
+    {
+        await using var db = await CreateDbContextAsync();
+        var closed = await AddStockAsync(db, "2330", StockMarket.Twse);
+        var service = new StockLedgerService(db);
+        await service.CreateTransactionAsync(closed.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Buy,
+            new DateOnly(2026, 8, 1),
+            Shares: 10m,
+            Price: 100m));
+        await service.CreateTransactionAsync(closed.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Sell,
+            new DateOnly(2026, 8, 2),
+            Shares: 10m,
+            Price: 110m));
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+
+        var active = await client.GetFromJsonAsync<JsonElement[]>("/api/stocks/options", JsonOptions());
+        var all = await client.GetFromJsonAsync<JsonElement[]>("/api/stocks/options?includeClosed=true", JsonOptions());
+
+        Assert.Empty(active!);
+        var closedOption = Assert.Single(all!);
+        Assert.Equal(0m, closedOption.GetProperty("shares").GetDecimal());
+        Assert.True(closedOption.GetProperty("hasLedger").GetBoolean());
     }
 
     /// <summary>建立使用 SQLite connection 的股票 endpoint 測試應用程式。</summary>
