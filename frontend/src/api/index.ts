@@ -7,6 +7,7 @@ import type {
   MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, MonthlySummary, DashboardSummary, NetWorthTrendPoint,
   StockStructureReport, StockValueTrendPoint, StockMarketRiskReport, StockPerformanceReport,
   StockTransactionListResponse, StockTransactionListItem, StockLedgerTransactionRequest,
+  StockTransactionCostEstimateRequest, StockTransactionCostEstimateResponse,
   StockLedgerInitializationResponse, StockPositionRequest, StockPositionResponse,
   StockOption,
   SnapshotBatch, SnapshotListResponse, TrendPoint, SnapshotCompareResult, AutoSnapshotConfig,
@@ -18,6 +19,7 @@ import type {
 import {
   ApiError,
   type ApiFieldErrors,
+  type ApiTypedErrorDetails,
   RequestCancelledError,
   safeStatusMessage,
 } from './errors.ts'
@@ -68,9 +70,10 @@ function parseProblemDetails(body: unknown): {
   detail: string | null
   fieldErrors: ApiFieldErrors
   traceId: string | null
+  details: ApiTypedErrorDetails | null
 } {
   if (!body || typeof body !== 'object') {
-    return { code: null, title: null, detail: null, fieldErrors: {}, traceId: null }
+    return { code: null, title: null, detail: null, fieldErrors: {}, traceId: null, details: null }
   }
   const record = body as Record<string, unknown>
   const errors = record.errors && typeof record.errors === 'object' ? record.errors as Record<string, unknown> : {}
@@ -80,6 +83,21 @@ function parseProblemDetails(body: unknown): {
       Array.isArray(value) ? value.filter(item => typeof item === 'string') as string[] : [String(value)],
     ]),
   )
+  const rawDetails = record.details && typeof record.details === 'object' && !Array.isArray(record.details)
+    ? record.details as Record<string, unknown>
+    : null
+  const typedDetails: ApiTypedErrorDetails | null = rawDetails
+    ? {
+        ...(typeof rawDetails.reason === 'string' ? { reason: rawDetails.reason } : {}),
+        ...(typeof rawDetails.availableShares === 'number' && Number.isFinite(rawDetails.availableShares)
+          ? { availableShares: rawDetails.availableShares }
+          : {}),
+        ...(typeof rawDetails.requestedShares === 'number' && Number.isFinite(rawDetails.requestedShares)
+          ? { requestedShares: rawDetails.requestedShares }
+          : {}),
+        ...(typeof rawDetails.tradeDate === 'string' ? { tradeDate: rawDetails.tradeDate } : {}),
+      }
+    : null
   return {
     code: typeof record.code === 'string' ? record.code : null,
     title: typeof record.title === 'string' ? record.title : null,
@@ -88,6 +106,7 @@ function parseProblemDetails(body: unknown): {
       : typeof record.message === 'string' ? record.message : null,
     fieldErrors,
     traceId: typeof record.traceId === 'string' ? record.traceId : null,
+    details: typedDetails && Object.keys(typedDetails).length > 0 ? typedDetails : null,
   }
 }
 
@@ -167,6 +186,7 @@ export async function request<T>(url: string, options?: RequestInit, acceptedSta
       detail: details.detail,
       fieldErrors: details.fieldErrors,
       traceId: details.traceId,
+      details: details.details,
       userMessage: details.detail ?? details.title ?? safeStatusMessage(response.status),
     })
   }
@@ -399,6 +419,12 @@ export const api = {
       // 刪除交易並由 backend 驗證剩餘歷史。
       delete: (id: number, context?: ApiRequestContext) =>
         request<void>(`/stocks/ledger/transactions/${id}`, withRequestContext({ method: 'DELETE' }, context)),
+      // 透過 backend 既有估值規則讀取單筆買賣交易的預估費稅。
+      estimateCosts: (data: StockTransactionCostEstimateRequest, context?: ApiRequestContext) =>
+        request<StockTransactionCostEstimateResponse>('/stocks/ledger/estimate-costs', withRequestContext({
+          method: 'POST',
+          body: JSON.stringify(data),
+        }, context)),
       // 以使用者選定的 baseline date 初始化既有持股。
       initialize: (data: { baselineDate: string }, context?: ApiRequestContext) =>
         request<StockLedgerInitializationResponse>('/stocks/ledger/initialize', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context), [422]),

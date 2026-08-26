@@ -1,5 +1,12 @@
 export type ApiFieldErrors = Record<string, string[]>
 
+export interface ApiTypedErrorDetails {
+  reason?: string
+  availableShares?: number
+  requestedShares?: number
+  tradeDate?: string
+}
+
 export interface ApiErrorDetails {
   status: number | null
   code?: string | null
@@ -7,6 +14,7 @@ export interface ApiErrorDetails {
   detail: string | null
   fieldErrors?: ApiFieldErrors
   traceId?: string | null
+  details?: ApiTypedErrorDetails | null
   userMessage?: string
 }
 
@@ -17,6 +25,7 @@ export class ApiError extends Error {
   readonly detail: string | null
   readonly fieldErrors: ApiFieldErrors
   readonly traceId: string | null
+  readonly details: ApiTypedErrorDetails | null
   readonly userMessage: string
 
   // Creates a safe structured API error without exposing raw response content.
@@ -30,6 +39,7 @@ export class ApiError extends Error {
     this.detail = details.detail ?? null
     this.fieldErrors = details.fieldErrors ?? {}
     this.traceId = details.traceId ?? null
+    this.details = details.details ?? null
     this.userMessage = userMessage
   }
 }

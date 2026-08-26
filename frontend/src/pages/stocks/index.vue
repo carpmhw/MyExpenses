@@ -7,6 +7,7 @@ import type {
   StockLedgerTransactionRequest,
   StockListItem,
   StockOption,
+  StockOptionsStatus,
   StockTransactionListItem,
   StockTransactionType,
 } from '../../types'
@@ -39,6 +40,7 @@ const stocks = ref<StockListItem[]>([])
 const stockOptions = ref<StockOption[]>([])
 const stockOptionsLoaded = ref(false)
 const stockOptionsLoading = ref(false)
+const stockOptionsStatus = ref<StockOptionsStatus>('idle')
 let stockOptionsRequestId = 0
 let stockOptionsRequest: Promise<void> | null = null
 const loading = ref(false)
@@ -96,6 +98,27 @@ const transactionError = ref('')
 const initializationLoading = ref(false)
 const initializationResponse = ref<Awaited<ReturnType<typeof api.stocks.ledger.initialize>> | null>(null)
 
+const transactionStockIdentity = computed<Pick<StockOption, 'id' | 'name' | 'symbol' | 'broker'> | null>(() => {
+  const stock = stocks.value.find(item => item.id === transactionStockId.value)
+  if (stock) {
+    return {
+      id: stock.id,
+      name: stock.name,
+      symbol: stock.symbol,
+      broker: stock.broker,
+    }
+  }
+  const transaction = transactionEditing.value
+  return transaction && transaction.stockId === transactionStockId.value
+    ? {
+        id: transaction.stockId,
+        name: transaction.stockName,
+        symbol: transaction.symbol,
+        broker: transaction.broker,
+      }
+    : null
+})
+
 const editingLedgerManaged = computed(() => editingItem.value?.hasLedger === true)
 const ledgerMarketLocked = computed(() => editingLedgerManaged.value && editingItem.value?.market !== 'Unknown')
 const hasUninitializedActiveHoldings = computed(() => stocks.value.some(stock => stock.shares > 0 && stock.hasLedger !== true))
@@ -149,7 +172,7 @@ async function fetchStocks() {
       includeClosed: includeClosed.value,
     })
     stocks.value = result.items
-    if (!stockOptionsLoaded.value)
+    if (!stockOptionsLoaded.value && stockOptionsStatus.value !== 'loading')
       stockOptions.value = result.items.map(toStockOption)
     pagination.total.value = result.total
     totalEstimatedNetSellValue.value = result.totalEstimatedNetSellValue
@@ -170,15 +193,18 @@ async function loadStockOptions(): Promise<void> {
 async function requestStockOptions(errorMessage: string): Promise<void> {
   const requestId = ++stockOptionsRequestId
   stockOptionsLoading.value = true
+  stockOptionsStatus.value = 'loading'
   const request = (async () => {
     try {
       const options = await api.stocks.options({ includeClosed: true })
       if (requestId !== stockOptionsRequestId) return
       stockOptions.value = options
       stockOptionsLoaded.value = true
+      stockOptionsStatus.value = 'ready'
     } catch (error) {
       if (requestId !== stockOptionsRequestId) return
       stockOptionsLoaded.value = false
+      stockOptionsStatus.value = 'error'
       stockOptions.value = stocks.value.map(toStockOption)
       toast.error(error instanceof Error ? error.message : errorMessage)
     } finally {
@@ -197,6 +223,7 @@ async function requestStockOptions(errorMessage: string): Promise<void> {
 
 // Ledger 或 Stock mutation 後強制重新讀取 options，確保快取不會保留刪除或舊部位。
 async function refreshStockOptions(): Promise<void> {
+  invalidateStockOptions()
   return requestStockOptions('交易已儲存，但更新交易股票清單失敗')
 }
 
@@ -205,6 +232,7 @@ function invalidateStockOptions(): void {
   stockOptionsRequestId += 1
   stockOptionsRequest = null
   stockOptionsLoading.value = false
+  stockOptionsStatus.value = 'idle'
   stockOptionsLoaded.value = false
   stockOptions.value = stocks.value.map(toStockOption)
 }
@@ -891,6 +919,8 @@ onMounted(fetchStocks)
       :stock-id="transactionStockId"
       :transaction="transactionEditing"
       :initial-type="transactionInitialType"
+      :stock-options-status="stockOptionsStatus"
+      :stock-identity-fallback="transactionStockIdentity"
       :loading="transactionSaving"
       :error-message="transactionError"
       @update:open="transactionModalOpen = $event"

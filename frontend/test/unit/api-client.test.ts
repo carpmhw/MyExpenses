@@ -250,6 +250,58 @@ describe('central API client', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/stocks/options?includeClosed=true', expect.anything())
   })
 
+  // 驗證交易費稅估算使用 central client、camelCase payload、typed response 與 AbortSignal。
+  it('requests typed stock transaction cost estimates with an abort signal', async () => {
+    const fetchMock = createFetchMock(() => jsonResponse({ grossAmount: 1000, fee: 20, tax: 0 }))
+    const controller = new AbortController()
+
+    const result = await api.stocks.ledger.estimateCosts(
+      { stockId: 3, type: 'Buy', shares: 10, price: 100 },
+      { signal: controller.signal },
+    )
+
+    expect(result).toEqual({ grossAmount: 1000, fee: 20, tax: 0 })
+    expect(fetchMock).toHaveBeenCalledWith('/api/stocks/ledger/estimate-costs', expect.objectContaining({
+      method: 'POST',
+      signal: controller.signal,
+      body: JSON.stringify({ stockId: 3, type: 'Buy', shares: 10, price: 100 }),
+    }))
+  })
+
+  // 驗證估算 endpoint 的 ProblemDetails 會保留 typed code 與 unsupported reason。
+  it('parses typed stock transaction cost errors', async () => {
+    createFetchMock(() => jsonResponse({
+      code: 'TransactionCostEstimationUnsupported',
+      message: '此股票交易不支援自動費稅估算',
+      details: {
+        reason: 'UnsupportedMarket',
+        availableShares: 10,
+        tradeDate: '2026-01-01',
+        internalMessage: 'do not expose',
+        requestedShares: '10',
+      },
+    }, 422))
+
+    const error = await api.stocks.ledger.estimateCosts({
+      stockId: 3,
+      type: 'Sell',
+      shares: 10,
+      price: 100,
+    }).catch(value => value)
+
+    expect(error).toMatchObject({
+      status: 422,
+      code: 'TransactionCostEstimationUnsupported',
+      detail: '此股票交易不支援自動費稅估算',
+      userMessage: '此股票交易不支援自動費稅估算',
+    })
+    expect(error.details).toEqual({
+      reason: 'UnsupportedMarket',
+      availableShares: 10,
+      tradeDate: '2026-01-01',
+    })
+  })
+
   // 驗證股票更新 client 只傳送 metadata contract 欄位。
   it('serializes restricted stock metadata updates', async () => {
     const fetchMock = createFetchMock(() => jsonResponse({ id: 3 }))

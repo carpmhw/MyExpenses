@@ -1,13 +1,20 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Encodings.Web;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Endpoints;
 using MyExpenses.Api.Models;
@@ -18,6 +25,182 @@ namespace MyExpenses.Api.Tests.Endpoints;
 
 public sealed class StockTransactionEndpointTests
 {
+    /// <summary>驗證費稅估算 endpoint 回傳 Buy 與 Sell 的 gross、佣金及交易稅。</summary>
+    [Fact]
+    public async Task EstimateCostsApi_ReturnsBuyAndSellEstimatesWithoutMutation()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, shares: 100m, buyPrice: 100m, currentPrice: 105m);
+        var originalShares = stock.Shares;
+        var originalBuyPrice = stock.BuyPrice;
+        var originalTransactionCount = await db.StockTransactions.CountAsync();
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+
+        var buyResponse = await client.PostAsJsonAsync(
+            "/api/stocks/ledger/estimate-costs",
+            new { stockId = stock.Id, type = "Buy", shares = 100, price = 105 },
+            JsonOptions());
+        var sellResponse = await client.PostAsJsonAsync(
+            "/api/stocks/ledger/estimate-costs",
+            new { stockId = stock.Id, type = "Sell", shares = 100, price = 105 },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.OK, buyResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, sellResponse.StatusCode);
+        var buy = await buyResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        var sell = await sellResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal(10500m, buy.GetProperty("grossAmount").GetDecimal());
+        Assert.Equal(20m, buy.GetProperty("fee").GetDecimal());
+        Assert.Equal(0m, buy.GetProperty("tax").GetDecimal());
+        Assert.Equal(31m, sell.GetProperty("tax").GetDecimal());
+        Assert.Equal(originalShares, (await db.Stocks.SingleAsync(item => item.Id == stock.Id)).Shares);
+        Assert.Equal(originalBuyPrice, (await db.Stocks.SingleAsync(item => item.Id == stock.Id)).BuyPrice);
+        Assert.Equal(originalTransactionCount, await db.StockTransactions.CountAsync());
+    }
+
+    /// <summary>驗證不存在股票回傳 stable NotFound error contract。</summary>
+    [Fact]
+    public async Task EstimateCostsApi_ReturnsNotFoundForMissingStock()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().PostAsJsonAsync(
+            "/api/stocks/ledger/estimate-costs",
+            new { stockId = 999, type = "Buy", shares = 1, price = 100 },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal("NotFound", error.GetProperty("code").GetString());
+    }
+
+    /// <summary>驗證無效股數回傳 400 invalid error 且不產生零費稅成功結果。</summary>
+    [Fact]
+    public async Task EstimateCostsApi_ReturnsInvalidInputForNonPositiveShares()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, shares: 100m, buyPrice: 100m, currentPrice: 105m);
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().PostAsJsonAsync(
+            "/api/stocks/ledger/estimate-costs",
+            new { stockId = stock.Id, type = "Buy", shares = 0, price = 100 },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal("InvalidTransactionCostEstimateInput", error.GetProperty("code").GetString());
+        Assert.Equal("NonPositiveShares", error.GetProperty("details").GetProperty("reason").GetString());
+        Assert.Equal(0, await db.StockTransactions.CountAsync());
+    }
+
+    /// <summary>驗證無法解析或超出 decimal 範圍的 body 仍回傳 typed invalid error。</summary>
+    [Fact]
+    public async Task EstimateCostsApi_ReturnsTypedInvalidErrorForMalformedDecimal()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, shares: 100m, buyPrice: 100m, currentPrice: 105m);
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        using var content = new StringContent(
+            $"{{\"stockId\":{stock.Id},\"type\":\"Buy\",\"shares\":1e999,\"price\":100}}",
+            Encoding.UTF8,
+            "application/json");
+        var response = await app.GetTestClient().PostAsync(
+            "/api/stocks/ledger/estimate-costs",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal("InvalidTransactionCostEstimateInput", error.GetProperty("code").GetString());
+        Assert.Equal("InvalidRequestBody", error.GetProperty("details").GetProperty("reason").GetString());
+        Assert.Equal(0, await db.StockTransactions.CountAsync());
+    }
+
+    /// <summary>驗證空 body 與缺少必要欄位都回傳估算 endpoint 的 typed invalid error。</summary>
+    [Theory]
+    [InlineData("", "InvalidRequestBody")]
+    [InlineData("{\"stockId\":1,\"type\":\"Buy\",\"price\":100}", "MissingShares")]
+    [InlineData("{\"stockId\":1,\"shares\":1,\"price\":100}", "MissingTransactionType")]
+    public async Task EstimateCostsApi_ReturnsTypedInvalidErrorForMissingRequestData(
+        string body,
+        string reason)
+    {
+        await using var db = await CreateDbContextAsync();
+        await AddStockAsync(db, shares: 100m, buyPrice: 100m, currentPrice: 105m);
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        var response = await app.GetTestClient().PostAsync(
+            "/api/stocks/ledger/estimate-costs",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal("InvalidTransactionCostEstimateInput", error.GetProperty("code").GetString());
+        Assert.Equal(reason, error.GetProperty("details").GetProperty("reason").GetString());
+    }
+
+    /// <summary>驗證未知市場與不支援交易類型回傳 422 及穩定 unsupported reason。</summary>
+    [Fact]
+    public async Task EstimateCostsApi_ReturnsUnsupportedReasons()
+    {
+        await using var db = await CreateDbContextAsync();
+        var unknownMarket = await AddStockAsync(
+            db,
+            shares: 100m,
+            buyPrice: 100m,
+            currentPrice: 105m,
+            symbol: "UNKNOWN",
+            market: StockMarket.Unknown);
+        var supportedMarket = await AddStockAsync(
+            db,
+            shares: 100m,
+            buyPrice: 100m,
+            currentPrice: 105m,
+            symbol: "DIVIDEND");
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+
+        var marketResponse = await client.PostAsJsonAsync(
+            "/api/stocks/ledger/estimate-costs",
+            new { stockId = unknownMarket.Id, type = "Buy", shares = 1, price = 100 },
+            JsonOptions());
+        var typeResponse = await client.PostAsJsonAsync(
+            "/api/stocks/ledger/estimate-costs",
+            new { stockId = supportedMarket.Id, type = "Dividend", shares = 1, price = 100 },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, marketResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, typeResponse.StatusCode);
+        var marketError = await marketResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        var typeError = await typeResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal("TransactionCostEstimationUnsupported", marketError.GetProperty("code").GetString());
+        Assert.Equal("UnsupportedMarket", marketError.GetProperty("details").GetProperty("reason").GetString());
+        Assert.Equal("UnsupportedTransactionType", typeError.GetProperty("details").GetProperty("reason").GetString());
+        Assert.Equal(0, await db.StockTransactions.CountAsync());
+    }
+
+    /// <summary>驗證費稅估算 endpoint 沿用 global fallback policy 拒絕匿名呼叫。</summary>
+    [Fact]
+    public async Task EstimateCostsApi_RejectsAnonymousCaller()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, shares: 100m, buyPrice: 100m, currentPrice: 105m);
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Add("X-Test-Anonymous", "true");
+
+        var response = await client.PostAsJsonAsync(
+            "/api/stocks/ledger/estimate-costs",
+            new { stockId = stock.Id, type = "Buy", shares = 1, price = 100 },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     /// <summary>驗證交易 endpoint 可建立、列出、取得、修改與刪除並回傳 replay 衍生欄位。</summary>
     [Fact]
     public async Task LedgerApi_SupportsCrudAndDerivedFields()
@@ -215,13 +398,49 @@ public sealed class StockTransactionEndpointTests
         builder.WebHost.UseTestServer();
         builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
         builder.Services.AddScoped<StockLedgerService>();
+        builder.Services.AddAuthentication(TestAuthHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
+        builder.Services.AddAuthorization(options =>
+        {
+            options.FallbackPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build();
+        });
         builder.Services.ConfigureHttpJsonOptions(options =>
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
         var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.MapStockEndpoints();
         app.MapStockTransactionEndpoints();
         await app.StartAsync();
         return app;
+    }
+
+    /// <summary>提供可由 request header 切換匿名狀態的測試 authentication handler。</summary>
+    private sealed class TestAuthHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder)
+        : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        /// <summary>取得測試 authentication scheme name。</summary>
+        public const string SchemeName = "StockTest";
+
+        /// <summary>依測試 request header 建立 authenticated principal 或匿名結果。</summary>
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (Request.Headers.TryGetValue("X-Test-Anonymous", out var anonymous)
+                && string.Equals(anonymous.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(AuthenticateResult.NoResult());
+
+            var identity = new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, "stock-test-user")],
+                Scheme.Name);
+            var principal = new ClaimsPrincipal(identity);
+            var ticket = new AuthenticationTicket(principal, Scheme.Name);
+            return Task.FromResult(AuthenticateResult.Success(ticket));
+        }
     }
 
     /// <summary>建立開啟中的 SQLite 記憶體連線與完整 schema。</summary>
@@ -241,13 +460,16 @@ public sealed class StockTransactionEndpointTests
         decimal shares,
         decimal buyPrice,
         decimal currentPrice,
-        string symbol = "2330")
+        string symbol = "2330",
+        StockMarket market = StockMarket.Twse,
+        StockInstrumentType instrumentType = StockInstrumentType.Stock)
     {
         var stock = new Stock
         {
             Name = "測試標的",
             Symbol = symbol,
-            Market = StockMarket.Twse,
+            Market = market,
+            InstrumentType = instrumentType,
             Shares = shares,
             BuyPrice = buyPrice,
             CurrentPrice = currentPrice,

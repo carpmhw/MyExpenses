@@ -213,6 +213,8 @@ export interface StockOption {
   hasLedger: boolean
 }
 
+export type StockOptionsStatus = 'idle' | 'loading' | 'ready' | 'error'
+
 export interface StockListResponse extends PaginatedResponse<StockListItem> {
   totalEstimatedNetSellValue: number
   totalEstimatedGainLoss: number
@@ -283,6 +285,19 @@ export interface StockLedgerTransactionRequest {
   cashAmount?: number | null
   openingMarketValue?: number | null
   notes?: string | null
+}
+
+export interface StockTransactionCostEstimateRequest {
+  stockId: number
+  type: 'Buy' | 'Sell'
+  shares: number
+  price: number
+}
+
+export interface StockTransactionCostEstimateResponse {
+  grossAmount: number
+  fee: number
+  tax: number
 }
 
 export interface StockLedgerBlockingStock {
