@@ -103,7 +103,7 @@ const trend: StockValueTrendPoint[] = [
   { month: '2026/08', snapshotDate: '2026-08-01T00:00:00Z', name: '八月快照', totalStockValue: 209500, basis: 'AssetsOnly' },
 ]
 
-function createPerformanceReport(): StockPerformanceReport {
+function createPerformanceReport(overrides: Partial<StockPerformanceReport> = {}): StockPerformanceReport {
   return {
     dateStart: '2026-01-01',
     dateEnd: '2026-08-07',
@@ -117,11 +117,13 @@ function createPerformanceReport(): StockPerformanceReport {
     monthlyPoints: [{ month: '2026-08', endingMarketValue: 209500, netContribution: 0, realizedGainLoss: 1000, dividendIncome: 500, cumulativeTwr: 0.12 }],
     instrumentBreakdown: [{ stockId: 1, name: '台積電', symbol: '2330', market: 'Twse', broker: '甲券商', currentShares: 1000, grossMarketValue: 209500, remainingCostBasis: 180000, realizedGainLoss: 1000, unrealizedGainLoss: 28500, dividendIncome: 500, totalGainLoss: 30000, isClosed: false }],
     dataQuality: { activeInstrumentCount: 1, ledgerManagedInstrumentCount: 1, priceObservationCount: 10, priceCoverage: 1, trackingStartReason: 'None', hasIncompleteLedgerCoverage: false },
+    ...overrides,
   }
 }
 
 describe('StockPortfolioOverview', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -158,9 +160,66 @@ describe('StockPortfolioOverview', () => {
     const wrapper = mountWithAppProviders(StockPortfolioOverview)
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="overview-performance-summary"]').text()).toContain('12.0%')
+    expect(wrapper.get('[data-testid="overview-performance-summary"]').text()).toContain('12.00%')
     await wrapper.get('[data-testid="navigate-stock-performance"]').trigger('click')
     expect(wrapper.emitted('navigate')).toContainEqual(['stockPerformance'])
+  })
+
+  // 驗證總覽績效 request 使用系統時區今天，而不是完整年度最後一天。
+  it('queries the performance summary through the system-local today', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-28T12:00:00.000Z'))
+    vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createStructureReport())
+    vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue(createRiskReport())
+    vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue(trend)
+    const query = vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createPerformanceReport())
+
+    mountWithAppProviders(StockPortfolioOverview)
+    await flushPromises()
+
+    expect(query).toHaveBeenCalledWith(
+      { dateStart: '2026-01-01', dateEnd: '2026-08-28' },
+      expect.anything(),
+    )
+  })
+
+  // 驗證總覽顯示兩位小數、兩種報酬方法短說明與共同提示。
+  it('renders precise return metrics and method guidance', async () => {
+    vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createStructureReport())
+    vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue(createRiskReport())
+    vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue(trend)
+    vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createPerformanceReport())
+
+    const wrapper = mountWithAppProviders(StockPortfolioOverview)
+    await flushPromises()
+
+    const summary = wrapper.get('[data-testid="overview-performance-summary"]')
+    expect(summary.text()).toContain('12.00%')
+    expect(summary.text()).toContain('18.00%')
+    expect(summary.text()).toContain('排除資金進出時點影響')
+    expect(summary.text()).toContain('考慮投入金額與時間')
+    expect(wrapper.get('[data-testid="overview-return-method-note"]').text()).toBe(
+      'TWR 與 XIRR 採用不同計算觀點，數值不同屬正常現象。',
+    )
+  })
+
+  // 驗證總覽績效不可用時保留 typed reason，且不以零值取代。
+  it('preserves unavailable return reasons without formatting zero percentages', async () => {
+    vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(createStructureReport())
+    vi.spyOn(api.reports, 'stockMarketRisk').mockResolvedValue(createRiskReport())
+    vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue(trend)
+    vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createPerformanceReport({
+      twr: { value: null, unavailableReason: 'NoLedgerHistory' },
+      xirr: { value: null, unavailableReason: 'InsufficientCashFlows' },
+    }))
+
+    const wrapper = mountWithAppProviders(StockPortfolioOverview)
+    await flushPromises()
+
+    const summary = wrapper.get('[data-testid="overview-performance-summary"]')
+    expect(summary.text()).toContain('不可用：尚無 Ledger 歷史')
+    expect(summary.text()).toContain('不可用：現金流不足')
+    expect(summary.text()).not.toContain('0.00%')
   })
 
   // 驗證績效摘要失敗時只影響自己的 QueryState，既有結構與風險仍可用。

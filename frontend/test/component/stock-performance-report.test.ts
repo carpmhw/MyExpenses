@@ -95,6 +95,22 @@ describe('StockPerformanceReport', () => {
     expect(query).toHaveBeenLastCalledWith({ dateStart: undefined, dateEnd: today }, expect.anything())
   })
 
+  // 驗證投資績效 KPI 顯示兩位小數、完整方法簡述與共同提示。
+  it('renders precise return metrics and complete method descriptions', async () => {
+    vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createReport())
+    const wrapper = mount(StockPerformanceReport, { global: { stubs: { Line: true } } })
+    await flushPromises()
+
+    const kpis = wrapper.get('[data-testid="performance-kpis"]')
+    expect(kpis.text()).toContain('12.00%')
+    expect(kpis.text()).toContain('18.00%')
+    expect(kpis.text()).toContain('排除資金進出時點影響，反映投資組合本身表現。')
+    expect(kpis.text()).toContain('依實際資金投入與取回日期計算的年化報酬。')
+    expect(wrapper.get('[data-testid="performance-return-method-note"]').text()).toBe(
+      'TWR 與 XIRR 採用不同計算觀點，數值不同屬正常現象。',
+    )
+  })
+
   // 驗證 null metric 顯示不可用與 typed reason，且資料品質警告不被吞掉。
   it('renders partial metric availability and data-quality warnings', async () => {
     vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createReport({
@@ -118,6 +134,23 @@ describe('StockPerformanceReport', () => {
     expect(wrapper.text()).toContain('2330')
     expect(wrapper.text()).toContain('已實現')
     expect(wrapper.find('table.min-w-\\[940px\\]').exists()).toBe(true)
+  })
+
+  // 驗證 TWR 與 XIRR 同時不可用時仍顯示各自原因，不會退化為零百分比。
+  it('keeps unavailable return reasons without formatting zero percentages', async () => {
+    vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createReport({
+      twr: { value: null, unavailableReason: 'NoLedgerHistory' },
+      xirr: { value: null, unavailableReason: 'NoConvergence' },
+    }))
+    const wrapper = mount(StockPerformanceReport, { global: { stubs: { Line: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('不可用')
+    expect(wrapper.text()).toContain('尚無 Ledger 歷史')
+    expect(wrapper.text()).toContain('計算未收斂')
+    const returnKpis = wrapper.get('[data-testid="performance-kpis"]').findAll('.bg-bg-raised').slice(-2)
+    expect(returnKpis.every(kpi => !kpi.text().includes('0.00%'))).toBe(true)
+    expect(wrapper.get('[data-testid="performance-return-method-note"]').exists()).toBe(true)
   })
 
   // 驗證舊 request 即使晚回來，也不能覆蓋較新期間的績效結果。
