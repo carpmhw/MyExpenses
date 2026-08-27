@@ -410,7 +410,7 @@ export const api = {
       // 讀取單筆交易及其 replay 衍生欄位。
       get: (id: number, context?: ApiRequestContext) =>
         request<StockTransactionListItem>(`/stocks/ledger/${id}`, withRequestContext({}, context)),
-      // 建立 Buy、Sell 或 Dividend 交易。
+      // 建立 Buy、Sell、Dividend 或 StockDividend 交易。
       create: (data: StockLedgerTransactionRequest, context?: ApiRequestContext) =>
         request<StockTransactionListItem>('/stocks/ledger/transactions', withRequestContext({ method: 'POST', body: JSON.stringify(data) }, context)),
       // 修改既有交易並由 backend 完整 replay。

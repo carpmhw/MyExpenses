@@ -285,6 +285,8 @@ public static class StockPerformanceCalculator
                         withdrawals += transaction.CashAmount!.Value
                             - transaction.Fee - transaction.Tax;
                         break;
+                    case StockTransactionType.StockDividend:
+                        break;
                 }
             }
 
@@ -395,6 +397,7 @@ public static class StockPerformanceCalculator
                     - transaction.Fee - transaction.Tax,
                 StockTransactionType.Dividend => transaction.CashAmount!.Value
                     - transaction.Fee - transaction.Tax,
+                StockTransactionType.StockDividend => 0m,
                 _ => 0m,
             };
             flows.Add(new StockPerformanceCashFlow(transaction.TradeDate, amount));
@@ -437,7 +440,8 @@ public static class StockPerformanceCalculator
                     StockPerformanceUnavailableReason.MissingTerminalValue);
             }
 
-            value += stock.Shares * price.Close.Value;
+            var shares = ReplaySharesAtDate(stock.Id, input.DateEnd, input.Transactions);
+            value += shares * price.Close.Value;
         }
 
         return new StockPerformanceTerminalValue(
@@ -529,16 +533,23 @@ public static class StockPerformanceCalculator
                     - transaction.Fee - transaction.Tax,
                 StockTransactionType.Dividend => transaction.CashAmount!.Value
                     - transaction.Fee - transaction.Tax,
+                StockTransactionType.StockDividend => 0m,
                 _ => 0m,
             });
             var realized = monthTransactions
                 .Where(transaction => replayByStock.ContainsKey(transaction.StockId))
-                .Sum(transaction => transaction.Type == StockTransactionType.Sell
-                    ? FindEntryResult(replayByStock[transaction.StockId], transaction.Id).RealizedGainLoss
-                    : 0m);
-            var dividend = monthTransactions.Sum(transaction => transaction.Type == StockTransactionType.Dividend
-                ? transaction.CashAmount!.Value - transaction.Fee - transaction.Tax
-                : 0m);
+                .Sum(transaction => transaction.Type switch
+                {
+                    StockTransactionType.Sell => FindEntryResult(replayByStock[transaction.StockId], transaction.Id).RealizedGainLoss,
+                    StockTransactionType.StockDividend => 0m,
+                    _ => 0m,
+                });
+            var dividend = monthTransactions.Sum(transaction => transaction.Type switch
+            {
+                StockTransactionType.Dividend => transaction.CashAmount!.Value - transaction.Fee - transaction.Tax,
+                StockTransactionType.StockDividend => 0m,
+                _ => 0m,
+            });
             return new StockPerformanceMonthlyPoint(
                 $"{month.Year:D4}/{month.Month:D2}",
                 point?.EndingValue ?? breakdown.Sum(item => item.GrossMarketValue),

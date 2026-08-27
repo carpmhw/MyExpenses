@@ -777,7 +777,8 @@ onMounted(fetchStocks)
               <option value="OpeningBalance">期初部位</option>
               <option value="Buy">買入</option>
               <option value="Sell">賣出</option>
-              <option value="Dividend">股息</option>
+              <option value="Dividend">現金股利</option>
+              <option value="StockDividend">股票股利／配股</option>
             </select>
           </div>
           <div>

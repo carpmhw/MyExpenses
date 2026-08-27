@@ -100,7 +100,7 @@ public static class StockTransactionEndpoints
         return Results.Ok(row);
     }
 
-    /// <summary>建立 Buy、Sell 或 Dividend，並拒絕一般 endpoint 直接建立 OpeningBalance。</summary>
+    /// <summary>建立 Buy、Sell、Dividend 或 StockDividend，並拒絕一般 endpoint 直接建立 OpeningBalance。</summary>
     private static async Task<IResult> CreateAsync(
         CreateStockTransactionRequest request,
         StockLedgerService service,

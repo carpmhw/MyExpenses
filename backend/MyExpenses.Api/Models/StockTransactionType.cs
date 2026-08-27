@@ -7,4 +7,5 @@ public enum StockTransactionType
     Buy,
     Sell,
     Dividend,
+    StockDividend,
 }

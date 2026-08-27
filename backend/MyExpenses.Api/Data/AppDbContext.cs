@@ -235,9 +235,10 @@ public class AppDbContext : DbContext
                     "Fee >= 0 AND Tax >= 0");
                 table.HasCheckConstraint(
                     "CK_StockTransactions_TypeFields",
-                    "(Type = 'OpeningBalance' AND Shares > 0 AND Price > 0 AND OpeningMarketValue > 0 AND CashAmount IS NULL) "
-                    + "OR (Type IN ('Buy', 'Sell') AND Shares > 0 AND Price > 0 AND OpeningMarketValue IS NULL AND CashAmount IS NULL) "
-                    + "OR (Type = 'Dividend' AND CashAmount > 0 AND Shares IS NULL AND Price IS NULL AND OpeningMarketValue IS NULL)");
+                     "(Type = 'OpeningBalance' AND Shares > 0 AND Price > 0 AND OpeningMarketValue > 0 AND CashAmount IS NULL) "
+                     + "OR (Type IN ('Buy', 'Sell') AND Shares > 0 AND Price > 0 AND OpeningMarketValue IS NULL AND CashAmount IS NULL) "
+                     + "OR (Type = 'Dividend' AND CashAmount > 0 AND Shares IS NULL AND Price IS NULL AND OpeningMarketValue IS NULL) "
+                     + "OR (Type = 'StockDividend' AND Shares IS NOT NULL AND Shares > 0 AND Price IS NULL AND CashAmount IS NULL AND OpeningMarketValue IS NULL AND Fee = 0 AND Tax = 0)");
             });
             e.Property(t => t.Type)
                 .HasConversion<string>()

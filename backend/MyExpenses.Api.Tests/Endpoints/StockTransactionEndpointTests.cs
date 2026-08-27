@@ -260,6 +260,110 @@ public sealed class StockTransactionEndpointTests
         Assert.Empty(await db.StockTransactions.ToListAsync());
     }
 
+    /// <summary>驗證 API 可建立股票股利並回傳零現金流與完整 replay 欄位，也可用 type filter 查詢。</summary>
+    [Fact]
+    public async Task LedgerApi_CreatesAndFiltersStockDividend()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, shares: 0m, buyPrice: 0m, currentPrice: 100m);
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+
+        var buyResponse = await client.PostAsJsonAsync(
+            "/api/stocks/ledger/transactions",
+            new
+            {
+                stockId = stock.Id,
+                type = "Buy",
+                tradeDate = "2026-01-01",
+                shares = 1000m,
+                price = 100m,
+                fee = 0m,
+                tax = 0m,
+            },
+            JsonOptions());
+        Assert.Equal(HttpStatusCode.Created, buyResponse.StatusCode);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/stocks/ledger/transactions",
+            new
+            {
+                stockId = stock.Id,
+                type = "StockDividend",
+                tradeDate = "2026-02-01",
+                shares = 100m,
+                price = (decimal?)null,
+                fee = 0m,
+                tax = 0m,
+                cashAmount = (decimal?)null,
+                openingMarketValue = (decimal?)null,
+            },
+            JsonOptions());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+        Assert.Equal("StockDividend", payload.GetProperty("type").GetString());
+        Assert.Equal(100m, payload.GetProperty("shares").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("price").ValueKind);
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("cashAmount").ValueKind);
+        Assert.Equal(0m, payload.GetProperty("fee").GetDecimal());
+        Assert.Equal(0m, payload.GetProperty("tax").GetDecimal());
+        Assert.Equal(0m, payload.GetProperty("grossAmount").GetDecimal());
+        Assert.Equal(0m, payload.GetProperty("netCashFlow").GetDecimal());
+        Assert.Equal(1100m, payload.GetProperty("remainingShares").GetDecimal());
+        Assert.Equal(100000m, payload.GetProperty("remainingCostBasis").GetDecimal());
+
+        var list = await client.GetFromJsonAsync<StockTransactionListResponse>(
+            $"/api/stocks/ledger?stockId={stock.Id}&type=StockDividend",
+            JsonOptions());
+        var item = Assert.Single(list!.Items);
+        Assert.Equal("StockDividend", item.Type.ToString());
+        Assert.Equal(100m, item.Shares);
+    }
+
+    /// <summary>驗證股票股利帶入價格、現金、期初市值或非零費稅時回傳 typed InvalidTransaction。</summary>
+    [Fact]
+    public async Task LedgerApi_RejectsInvalidStockDividendFields()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, shares: 0m, buyPrice: 0m, currentPrice: 100m);
+        await using var app = await CreateAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var client = app.GetTestClient();
+        var requests = new[]
+        {
+            new { price = (decimal?)100m, cashAmount = (decimal?)null, openingMarketValue = (decimal?)null, fee = 0m, tax = 0m },
+            new { price = (decimal?)null, cashAmount = (decimal?)100m, openingMarketValue = (decimal?)null, fee = 0m, tax = 0m },
+            new { price = (decimal?)null, cashAmount = (decimal?)null, openingMarketValue = (decimal?)100m, fee = 0m, tax = 0m },
+            new { price = (decimal?)null, cashAmount = (decimal?)null, openingMarketValue = (decimal?)null, fee = 1m, tax = 0m },
+            new { price = (decimal?)null, cashAmount = (decimal?)null, openingMarketValue = (decimal?)null, fee = 0m, tax = 1m },
+        };
+
+        foreach (var request in requests)
+        {
+            var response = await client.PostAsJsonAsync(
+                "/api/stocks/ledger/transactions",
+                new
+                {
+                    stockId = stock.Id,
+                    type = "StockDividend",
+                    tradeDate = "2026-02-01",
+                    shares = 1m,
+                    request.price,
+                    request.fee,
+                    request.tax,
+                    request.cashAmount,
+                    request.openingMarketValue,
+                },
+                JsonOptions());
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var error = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions());
+            Assert.Equal("InvalidTransaction", error.GetProperty("code").GetString());
+        }
+
+        Assert.Empty(await db.StockTransactions.ToListAsync());
+    }
+
     /// <summary>驗證一般交易建立不允許任意 OpeningBalance 且 oversell 回傳安全 typed error。</summary>
     [Fact]
     public async Task LedgerApi_RejectsOpeningCreateAndOversellSafely()

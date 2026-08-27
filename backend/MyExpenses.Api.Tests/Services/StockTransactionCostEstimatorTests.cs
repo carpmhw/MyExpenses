@@ -138,6 +138,21 @@ public sealed class StockTransactionCostEstimatorTests
         AssertUnsupported(undefinedInstrument, "UnsupportedInstrumentType");
     }
 
+    /// <summary>驗證 StockDividend 明確回傳 unsupported 且不產生零費稅估算。</summary>
+    [Fact]
+    public void Estimate_StockDividend_ReturnsUnsupportedWithoutEstimate()
+    {
+        var result = StockTransactionCostEstimator.Estimate(
+            StockTransactionType.StockDividend,
+            100m,
+            100m,
+            StockMarket.Twse,
+            StockInstrumentType.Stock);
+
+        AssertUnsupported(result, "UnsupportedTransactionType");
+        Assert.False(result.IsSuccess);
+    }
+
     /// <summary>驗證 gross amount decimal overflow 會回傳 invalid result 而不產生零費稅。</summary>
     [Fact]
     public void Estimate_RejectsDecimalOverflow()

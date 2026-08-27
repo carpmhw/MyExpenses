@@ -33,7 +33,8 @@ function formatTransactionType(type: StockTransactionListItem['type']): string {
     OpeningBalance: '期初部位',
     Buy: '買入',
     Sell: '賣出',
-    Dividend: '股息',
+    Dividend: '現金股利',
+    StockDividend: '股票股利',
   }[type]
 }
 </script>
@@ -69,9 +70,9 @@ function formatTransactionType(type: StockTransactionListItem['type']): string {
             <td class="whitespace-nowrap px-4 py-3 text-text-secondary">{{ item.tradeDate }}</td>
             <td class="px-4 py-3 font-medium text-text-primary">{{ item.stockName }} <span class="text-text-tertiary">({{ item.symbol }})</span></td>
             <td class="whitespace-nowrap px-4 py-3 text-text-secondary">{{ formatTransactionType(item.type) }}</td>
-            <td class="px-4 py-3 text-right text-text-primary">{{ item.shares ?? item.cashAmount ?? 0 }}</td>
-            <td class="px-4 py-3 text-right" :class="item.netCashFlow >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatMoney(item.netCashFlow) }}</td>
-            <td class="px-4 py-3 text-right" :class="item.realizedGainLoss >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatMoney(item.realizedGainLoss) }}</td>
+            <td class="px-4 py-3 text-right text-text-primary">{{ item.type === 'StockDividend' ? formatShares(item.shares ?? 0) : item.shares ?? item.cashAmount ?? 0 }}</td>
+            <td class="px-4 py-3 text-right" :class="item.netCashFlow >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ item.type === 'StockDividend' ? '－' : formatMoney(item.netCashFlow) }}</td>
+            <td class="px-4 py-3 text-right" :class="item.realizedGainLoss >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ item.type === 'StockDividend' ? '－' : formatMoney(item.realizedGainLoss) }}</td>
                 <td class="px-4 py-3 text-right text-text-primary">{{ formatShares(item.remainingShares) }}</td>
                 <td class="px-4 py-3 text-text-secondary">{{ item.notes || '－' }}</td>
                 <td class="px-4 py-3">

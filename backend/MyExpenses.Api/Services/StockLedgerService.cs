@@ -102,6 +102,14 @@ public sealed class StockLedgerService
         var stock = await _db.Stocks.SingleOrDefaultAsync(item => item.Id == stockId, cancellationToken)
             ?? throw new StockLedgerNotFoundException("股票不存在");
 
+        if (command.Type == StockTransactionType.StockDividend
+            && !await _db.StockTransactions.AnyAsync(item => item.StockId == stockId, cancellationToken))
+        {
+            throw new StockLedgerException(
+                StockLedgerFailureCode.InvalidTransaction,
+                "股票股利必須先有 Ledger 初始部位");
+        }
+
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
         {

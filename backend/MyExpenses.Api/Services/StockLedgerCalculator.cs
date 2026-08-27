@@ -206,6 +206,9 @@ public static class StockLedgerCalculator
                         netCashFlow = entryNetDividend;
                         netDividendIncome += entryNetDividend;
                         break;
+                    case StockTransactionType.StockDividend:
+                        remainingShares += entry.Shares!.Value;
+                        break;
                     default:
                         throw CreateInvalidTransactionException(entry, "交易類型無效");
                 }
@@ -287,6 +290,14 @@ public static class StockLedgerCalculator
                 RequirePositive(entry.CashAmount, entry, "股息金額無效");
                 if (entry.Shares.HasValue || entry.Price.HasValue || entry.OpeningMarketValue.HasValue)
                     throw CreateInvalidTransactionException(entry, "股息交易包含禁止欄位");
+                break;
+            case StockTransactionType.StockDividend:
+                RequirePositive(entry.Shares, entry, "配股股數無效");
+                if (entry.Price.HasValue || entry.CashAmount.HasValue || entry.OpeningMarketValue.HasValue
+                    || entry.Fee != 0m || entry.Tax != 0m)
+                {
+                    throw CreateInvalidTransactionException(entry, "股票股利包含禁止欄位或非零費稅");
+                }
                 break;
             default:
                 throw CreateInvalidTransactionException(entry, "交易類型無效");
