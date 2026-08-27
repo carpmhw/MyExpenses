@@ -63,6 +63,8 @@ type ModalTestProps = {
   errorMessage: string
 }
 
+const stockDividendType: ModalTestProps['initialType'] = 'StockDividend'
+
 // 建立交易 Modal 測試 wrapper，集中套用既有 Modal stub 與新增交易預設值。
 function mountTransactionModal(overrides: Partial<ModalTestProps> = {}) {
   return mount(StockTransactionModal, {
@@ -403,6 +405,104 @@ describe('StockTransactionModal', () => {
     expect((wrapper.get('[data-testid="transaction-tax"]').element as HTMLInputElement).value).toBe('')
     await wrapper.get('[data-testid="transaction-cash-amount"]').setValue('100')
     expect(estimate).not.toHaveBeenCalled()
+  })
+
+  // 驗證交易選單區分現金股利與股票股利，且股票股利只顯示股數欄位。
+  it('renders stock dividend as a share-only no-cost mode', () => {
+    const wrapper = mountTransactionModal({ initialType: stockDividendType })
+
+    expect(wrapper.get('[data-testid="transaction-type"]').text()).toContain('現金股利')
+    expect(wrapper.get('[data-testid="transaction-type"]').text()).toContain('股票股利')
+    expect(wrapper.find('[data-testid="transaction-shares"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="transaction-price"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="transaction-cash-amount"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="transaction-cost-mode-controls"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="transaction-fee"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="transaction-tax"]').exists()).toBe(false)
+  })
+
+  // 驗證尚未初始化 Ledger 的 legacy 持股不可選擇股票股利。
+  it('disables stock dividend for an uninitialized stock', () => {
+    const wrapper = mountTransactionModal({
+      stocks: [{ ...stocks[0], hasLedger: false }],
+      initialType: 'Buy',
+    })
+
+    expect(wrapper.get('option[value="StockDividend"]').attributes('disabled')).toBeDefined()
+  })
+
+  // 驗證切換交易型別後 request 只保留股票股利允許欄位，不殘留價格或現金股利。
+  it('normalizes a stock dividend request without stale buy or cash fields', async () => {
+    const wrapper = mountTransactionModal({ initialType: 'Buy' })
+
+    await wrapper.get('[data-testid="transaction-cost-manual"]').trigger('click')
+    await wrapper.get('[data-testid="transaction-shares"]').setValue('10')
+    await wrapper.get('[data-testid="transaction-price"]').setValue('500')
+    await wrapper.get('[data-testid="transaction-fee"]').setValue('2')
+    await wrapper.get('[data-testid="transaction-tax"]').setValue('1')
+    await wrapper.get('[data-testid="transaction-type"]').setValue('Dividend')
+    await wrapper.get('[data-testid="transaction-cash-amount"]').setValue('100')
+    await wrapper.get('[data-testid="transaction-fee"]').setValue('0')
+    await wrapper.get('[data-testid="transaction-tax"]').setValue('0')
+    await wrapper.get('[data-testid="transaction-type"]').setValue('StockDividend')
+    await wrapper.get('[data-testid="transaction-shares"]').setValue('20')
+    await wrapper.get('[data-testid="stock-transaction-form"]').trigger('submit')
+
+    expect(wrapper.emitted('save')?.[0]?.[0]).toEqual(expect.objectContaining({
+      type: 'StockDividend',
+      shares: 20,
+      price: null,
+      cashAmount: null,
+      fee: 0,
+      tax: 0,
+    }))
+  })
+
+  // 驗證切換至股票股利會取消既有估算，晚到的 Buy response 不得重新寫入隱藏費稅。
+  it('cancels a pending estimate when switching to a stock dividend', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<Awaited<ReturnType<typeof api.stocks.ledger.estimateCosts>>>()
+    const estimate = vi.spyOn(api.stocks.ledger, 'estimateCosts').mockReturnValue(pending.promise)
+    const wrapper = mountTransactionModal({ initialType: 'Buy' })
+
+    await wrapper.get('[data-testid="transaction-shares"]').setValue('10')
+    await wrapper.get('[data-testid="transaction-price"]').setValue('500')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(estimate).toHaveBeenCalledTimes(1)
+
+    await wrapper.get('[data-testid="transaction-type"]').setValue('StockDividend')
+    await flushPromises()
+    pending.resolve({ grossAmount: 5000, fee: 20, tax: 3 })
+    await flushPromises()
+
+    expect(estimate).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="transaction-cost-mode-controls"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="transaction-fee"]').exists()).toBe(false)
+  })
+
+  // 驗證既有股票股利可編輯日期、股數與備註，且不重新引入買賣或費稅欄位。
+  it('edits an existing stock dividend with only date, shares, and notes', async () => {
+    const transaction = {
+      ...existingBuyTransaction,
+      type: stockDividendType as StockTransactionListItem['type'],
+      tradeDate: '2026-03-01',
+      shares: 100,
+      price: null,
+      fee: 0,
+      tax: 0,
+      cashAmount: null,
+      openingMarketValue: null,
+      notes: '原配股',
+    }
+    const wrapper = mountTransactionModal({ transaction })
+
+    expect((wrapper.get('[data-testid="transaction-trade-date"]').element as HTMLInputElement).value).toBe('2026-03-01')
+    expect((wrapper.get('[data-testid="transaction-shares"]').element as HTMLInputElement).value).toBe('100')
+    expect((wrapper.get('[data-testid="transaction-notes"]').element as HTMLInputElement).value).toBe('原配股')
+    expect(wrapper.find('[data-testid="transaction-price"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="transaction-cash-amount"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="transaction-cost-mode-controls"]').exists()).toBe(false)
   })
 
   // 驗證編輯既有交易一律 manual 並保留已保存的 Fee／Tax，不在開啟時自動重算。

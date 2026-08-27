@@ -6,6 +6,8 @@ namespace MyExpenses.Api.Tests.Services;
 
 public sealed class StockLedgerCalculatorTests
 {
+    private const StockTransactionType StockDividendType = (StockTransactionType)4;
+
     /// <summary>驗證期初市值只作為報酬追蹤基準，不會混入實際成本基礎。</summary>
     [Fact]
     public void Replay_OpeningBalance_SeparatesMarketValueFromCostBasis()
@@ -96,6 +98,57 @@ public sealed class StockLedgerCalculatorTests
         Assert.Equal(10m, result.RemainingShares);
         Assert.Equal(1000m, result.RemainingCostBasis);
         Assert.Equal(95m, result.Entries[1].NetDividend);
+    }
+
+    /// <summary>驗證股票股利只增加股數，不增加成本、現金流、已實現損益或股息收入。</summary>
+    [Fact]
+    public void Replay_StockDividend_AddsSharesWithoutCostOrCashFlow()
+    {
+        var result = StockLedgerCalculator.Replay(new StockLedgerInput(
+        [
+            new StockLedgerEntry(1, StockTransactionType.Buy, new DateOnly(2026, 1, 1), 1, 1000m, 100m, 0m, 0m),
+            new StockLedgerEntry(2, StockDividendType, new DateOnly(2026, 2, 1), 1, 100m, null, 0m, 0m),
+            new StockLedgerEntry(3, StockTransactionType.Sell, new DateOnly(2026, 3, 1), 1, 1050m, 110m, 0m, 0m),
+        ]));
+
+        var stockDividend = result.Entries[1];
+        var averageExecutionPrice = 100000m / 1100m;
+        Assert.Equal(0m, stockDividend.GrossAmount);
+        Assert.Equal(0m, stockDividend.NetCashFlow);
+        Assert.Null(stockDividend.AllocatedCostBasis);
+        Assert.Equal(0m, stockDividend.RealizedGainLoss);
+        Assert.Equal(0m, stockDividend.NetDividend);
+        Assert.Equal(1100m, stockDividend.RemainingShares);
+        Assert.Equal(100000m, stockDividend.RemainingCostBasis);
+        Assert.Equal(averageExecutionPrice, stockDividend.ExecutionAveragePrice);
+        Assert.Equal(result.Entries[2].RealizedGainLoss, result.RealizedGainLoss);
+        Assert.Equal(0m, result.NetDividendIncome);
+        Assert.Equal(50m, result.RemainingShares);
+        Assert.Equal(averageExecutionPrice * 50m, result.RemainingCostBasis, 20);
+        Assert.Equal(averageExecutionPrice, result.ExecutionAveragePrice, 20);
+    }
+
+    /// <summary>驗證股票股利缺少正數股數或帶入禁止欄位時回傳 InvalidTransaction。</summary>
+    [Fact]
+    public void Validate_StockDividend_RejectsInvalidTypeFields()
+    {
+        var invalidEntries = new StockLedgerEntry[]
+        {
+            new(1, StockDividendType, new DateOnly(2026, 1, 1), 1, null, null, 0m, 0m),
+            new(2, StockDividendType, new DateOnly(2026, 1, 1), 1, 0m, null, 0m, 0m),
+            new(3, StockDividendType, new DateOnly(2026, 1, 1), 1, -1m, null, 0m, 0m),
+            new(4, StockDividendType, new DateOnly(2026, 1, 1), 1, 1m, 100m, 0m, 0m),
+            new(5, StockDividendType, new DateOnly(2026, 1, 1), 1, 1m, null, 0m, 0m, CashAmount: 100m),
+            new(6, StockDividendType, new DateOnly(2026, 1, 1), 1, 1m, null, 0m, 0m, OpeningMarketValue: 100m),
+            new(7, StockDividendType, new DateOnly(2026, 1, 1), 1, 1m, null, 1m, 0m),
+            new(8, StockDividendType, new DateOnly(2026, 1, 1), 1, 1m, null, 0m, 1m),
+        };
+
+        foreach (var entry in invalidEntries)
+        {
+            var exception = Assert.Throws<StockLedgerException>(() => StockLedgerCalculator.Validate(entry));
+            Assert.Equal(StockLedgerFailureCode.InvalidTransaction, exception.FailureCode);
+        }
     }
 
     /// <summary>驗證 replay 會按 TradeDate、Sequence、Id 排序而不依賴輸入列舉順序。</summary>

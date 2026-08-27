@@ -459,6 +459,66 @@ public sealed class StockPerformanceCalculatorTests
         Assert.False(breakdown.IsClosed);
     }
 
+    /// <summary>驗證股票股利不形成 XIRR 現金流，且 TWR 與月度外部流量欄位保持零。</summary>
+    [Fact]
+    public void Calculate_StockDividend_UsesZeroExternalCashFlowSemantics()
+    {
+        var input = CreateStockDividendPerformanceInput();
+        var report = StockPerformanceCalculator.Calculate(input);
+        var twr = StockPerformanceCalculator.CalculateTwr(input);
+        var stockDividendDate = new DateOnly(2026, 6, 1);
+        var stockDividendPoint = Assert.Single(twr.Points, point => point.Date == stockDividendDate);
+        var june = Assert.Single(report.MonthlyPoints, point => point.Month == "2026/06");
+
+        Assert.InRange(report.Xirr.Value!.Value, 0.099d, 0.101d);
+        Assert.Equal(0m, stockDividendPoint.Contributions);
+        Assert.Equal(0m, stockDividendPoint.Withdrawals);
+        Assert.InRange(stockDividendPoint.EndingValue, 1099.99m, 1100.01m);
+        Assert.Equal(0m, june.NetContribution);
+        Assert.Equal(0m, june.RealizedGainLoss);
+        Assert.Equal(0m, june.DividendIncome);
+        Assert.InRange(june.CumulativeTwr!.Value, 0.099d, 0.101d);
+    }
+
+    /// <summary>驗證股票股利透過 Ledger replay 增加估值股數，但不改變成本、損益或股息收入。</summary>
+    [Fact]
+    public void Calculate_StockDividend_UsesReplaySharesAndPreservesCostAndIncome()
+    {
+        var report = StockPerformanceCalculator.Calculate(CreateStockDividendPerformanceInput());
+        var breakdown = Assert.Single(report.InstrumentBreakdown);
+
+        Assert.Equal(110m, breakdown.CurrentShares);
+        Assert.Equal(1100m, breakdown.GrossMarketValue);
+        Assert.Equal(1000m, breakdown.RemainingCostBasis);
+        Assert.Equal(0m, breakdown.RealizedGainLoss);
+        Assert.Equal(100m, breakdown.UnrealizedGainLoss);
+        Assert.Equal(0m, breakdown.DividendIncome);
+        Assert.Equal(100m, breakdown.TotalGainLoss);
+        Assert.Equal(1000m, report.Summary.RemainingCostBasis);
+        Assert.Equal(0m, report.Summary.NetDividendIncome);
+    }
+
+    /// <summary>驗證歷史期間結束於股票股利前時，terminal value 只使用當日 replay 股數。</summary>
+    [Fact]
+    public void Calculate_HistoricalTerminalValue_ExcludesFutureStockDividendShares()
+    {
+        var stock = CreateStock(1, shares: 110m, buyPrice: 10m, currentPrice: 12m);
+        var dateEnd = new DateOnly(2026, 1, 31);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            new DateOnly(2026, 1, 1),
+            dateEnd,
+            [stock],
+            [
+                Buy(1, 1, new DateOnly(2026, 1, 1), 100m, 10m),
+                StockDividend(2, 1, new DateOnly(2026, 2, 1), 10m),
+            ],
+            [Price(1, "2330", dateEnd, 10m, 10m)],
+            AsOfDate: new DateOnly(2026, 2, 2)));
+
+        Assert.Equal("HistoricalRawClose", report.TerminalValuationSource);
+        Assert.InRange(report.Xirr.Value!.Value, -0.000001d, 0.000001d);
+    }
+
     /// <summary>驗證交易與價格輸入順序變更不會改變績效結果。</summary>
     [Fact]
     public void Calculate_IsIndependentOfInputOrder()
@@ -578,6 +638,42 @@ public sealed class StockPerformanceCalculatorTests
             Fee = fee,
             Tax = tax,
         };
+
+    /// <summary>建立股票股利交易 fixture，固定為正股數與零費稅。</summary>
+    private static StockTransaction StockDividend(int id, int stockId, DateOnly date, decimal shares)
+        => new()
+        {
+            Id = id,
+            StockId = stockId,
+            Type = StockTransactionType.StockDividend,
+            TradeDate = date,
+            Sequence = id,
+            Shares = shares,
+            Fee = 0m,
+            Tax = 0m,
+        };
+
+    /// <summary>建立涵蓋 XIRR、TWR、月度點與 instrument breakdown 的股票股利績效 fixture。</summary>
+    private static StockPerformanceInput CreateStockDividendPerformanceInput()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var stockDividendDate = new DateOnly(2026, 6, 1);
+        var end = new DateOnly(2026, 12, 31);
+        return new StockPerformanceInput(
+            start,
+            end,
+            [CreateStock(1, shares: 110m, buyPrice: 10m, currentPrice: 10m)],
+            [
+                Buy(1, 1, start, 100m, 10m),
+                StockDividend(2, 1, stockDividendDate, 10m),
+            ],
+            [
+                Price(1, "2330", start, 10m, 10m),
+                Price(1, "2330", stockDividendDate, 10m, 10m),
+                Price(1, "2330", end, 10m, 10m),
+            ],
+            AsOfDate: end);
+    }
 
     /// <summary>建立同時含 adjusted 與 raw close 的歷史價格 fixture。</summary>
     private static HistoricalAdjustedPrice Price(int stockId, string symbol, DateOnly date, decimal adjustedClose, decimal close)

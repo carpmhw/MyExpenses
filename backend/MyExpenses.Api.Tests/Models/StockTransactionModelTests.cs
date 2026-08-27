@@ -8,12 +8,12 @@ namespace MyExpenses.Api.Tests.Models;
 
 public sealed class StockTransactionModelTests
 {
-    /// <summary>驗證股票交易型別只包含規格定義的四種穩定字串值。</summary>
+    /// <summary>驗證股票交易型別包含規格定義的五種穩定字串值。</summary>
     [Fact]
-    public void StockTransactionType_ContainsTheFourLedgerKinds()
+    public void StockTransactionType_ContainsTheFiveLedgerKinds()
     {
         Assert.Equal(
-            ["OpeningBalance", "Buy", "Sell", "Dividend"],
+            ["OpeningBalance", "Buy", "Sell", "Dividend", "StockDividend"],
             Enum.GetNames<StockTransactionType>());
     }
 

@@ -31,6 +31,7 @@ interface TransactionFormState {
 type StockIdentity = Pick<StockOption, 'id' | 'name' | 'symbol' | 'broker'>
 type CostMode = 'auto' | 'manual'
 type EstimateStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unsupported'
+type TransactionFieldMode = 'trade' | 'cash-dividend' | 'stock-dividend'
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -75,7 +76,14 @@ const form = ref<TransactionFormState>(createEmptyForm(
   props.initialType,
 ))
 
-const costMode = ref<CostMode>(form.value.type === 'Dividend' ? 'manual' : 'auto')
+// 依交易型別集中決定表單欄位模式，避免各 watcher 分別判斷造成漏清理。
+const fieldMode = computed<TransactionFieldMode>(() => {
+  if (form.value.type === 'Dividend') return 'cash-dividend'
+  if (form.value.type === 'StockDividend') return 'stock-dividend'
+  return 'trade'
+})
+
+const costMode = ref<CostMode>(fieldMode.value === 'trade' ? 'auto' : 'manual')
 const estimateStatus = ref<EstimateStatus>('idle')
 const estimateResult = ref<StockTransactionCostEstimateResponse | null>(null)
 const estimateRequestKey = ref<string | null>(null)
@@ -107,7 +115,8 @@ function manualCostError(value: string, label: string): string {
 
 // 依目前表單輸入建立 backend 估算所需的 typed payload。
 function getEstimatePayload(): StockTransactionCostEstimateRequest | null {
-  if (form.value.type === 'Dividend' || !form.value.stockId) return null
+  if (fieldMode.value !== 'trade' || !form.value.stockId) return null
+  if (form.value.type !== 'Buy' && form.value.type !== 'Sell') return null
   const shares = parsePositive(form.value.shares)
   const price = parsePositive(form.value.price)
   if (shares === null || price === null) return null
@@ -127,6 +136,7 @@ function getEstimateInputKey(payload: StockTransactionCostEstimateRequest): stri
 // 判斷估算 request 是否仍屬於目前 Modal 與目前表單。
 function isCurrentEstimate(generation: number, inputKey: string): boolean {
   return props.open
+    && fieldMode.value === 'trade'
     && costMode.value === 'auto'
     && estimateGeneration === generation
     && getEstimatePayload() !== null
@@ -191,7 +201,7 @@ async function requestEstimate(
 // 只對有效的 Buy／Sell inputs 排程估算，並在新輸入出現時失效舊結果。
 function scheduleEstimate(): void {
   invalidateEstimate()
-  if (!props.open || costMode.value !== 'auto') return
+  if (!props.open || fieldMode.value !== 'trade' || costMode.value !== 'auto') return
   const payload = getEstimatePayload()
   if (!payload) return
   const inputKey = getEstimateInputKey(payload)
@@ -204,7 +214,7 @@ function scheduleEstimate(): void {
 
 // 依使用者選擇切換費稅來源，保留 ready estimate 切 manual 時的起始值。
 function selectCostMode(mode: CostMode): void {
-  if (mode === 'auto' && form.value.type === 'Dividend') return
+  if (mode === 'auto' && fieldMode.value !== 'trade') return
   if (costMode.value === mode) return
   if (mode === 'manual') {
     const currentPayload = getEstimatePayload()
@@ -228,13 +238,13 @@ const errors = computed(() => {
   const result: Record<string, string> = {}
   if (!form.value.stockId) result.stockId = '請選擇股票'
   if (!form.value.tradeDate) result.tradeDate = '請選擇交易日期'
-  if (form.value.type === 'Dividend') {
+  if (fieldMode.value === 'cash-dividend') {
     if (parsePositive(form.value.cashAmount) === null) result.cashAmount = '股息金額必須大於零'
-  } else {
+  } else if (fieldMode.value === 'trade' || fieldMode.value === 'stock-dividend') {
     if (parsePositive(form.value.shares) === null) result.shares = '股數必須大於零'
-    if (parsePositive(form.value.price) === null) result.price = '成交價格必須大於零'
+    if (fieldMode.value === 'trade' && parsePositive(form.value.price) === null) result.price = '成交價格必須大於零'
   }
-  if (costMode.value === 'manual' || form.value.type === 'Dividend') {
+  if (fieldMode.value !== 'stock-dividend' && (costMode.value === 'manual' || fieldMode.value === 'cash-dividend')) {
     if (parseManualCost(form.value.fee) === null) result.fee = manualCostError(form.value.fee, '手續費')
     if (parseManualCost(form.value.tax) === null) result.tax = manualCostError(form.value.tax, '交易稅')
   }
@@ -270,6 +280,12 @@ const currentHoldingShares = computed<number | null>(() => {
   return props.stocks.find(stock => stock.id === form.value.stockId)?.shares ?? null
 })
 
+// 新增交易時回傳目前標的是否已有 Ledger，避免 legacy projection 被股票股利覆寫。
+const selectedStockHasLedger = computed<boolean | null>(() => {
+  if (props.transaction) return true
+  return props.stocks.find(stock => stock.id === form.value.stockId)?.hasLedger ?? null
+})
+
 const historicalRemainingShares = computed<number | null>(() => props.transaction?.remainingShares ?? null)
 
 // 將既有 transaction 映射回可編輯欄位，或重設為新增交易預設值。
@@ -281,7 +297,7 @@ function resetForm(): void {
       props.stockId ?? props.stocks[0]?.id ?? null,
       props.initialType,
     )
-    costMode.value = form.value.type === 'Dividend' ? 'manual' : 'auto'
+    costMode.value = fieldMode.value === 'trade' ? 'auto' : 'manual'
     return
   }
 
@@ -309,11 +325,11 @@ watch(
   () => [form.value.stockId, form.value.type, form.value.shares, form.value.price] as const,
   () => {
     if (!props.open) return
-    if (!props.transaction && form.value.type === 'Dividend') {
+    if (!props.transaction && fieldMode.value === 'cash-dividend') {
       if (costMode.value !== 'manual') selectCostMode('manual')
       return
     }
-    if (costMode.value === 'auto') scheduleEstimate()
+    if (fieldMode.value === 'trade' && costMode.value === 'auto') scheduleEstimate()
   },
 )
 
@@ -321,7 +337,12 @@ watch(
   () => form.value.type,
   type => {
     if (props.transaction) return
-    selectCostMode(type === 'Dividend' ? 'manual' : 'auto')
+    if (type === 'Dividend' || type === 'StockDividend') {
+      costMode.value = 'manual'
+      invalidateEstimate()
+      return
+    }
+    selectCostMode('auto')
   },
 )
 
@@ -336,22 +357,24 @@ onBeforeUnmount(() => invalidateEstimate())
 
 // 將已驗證的費稅與表單值轉成 backend 交易 contract。
 function buildRequest(costs: { fee: number; tax: number }): StockLedgerTransactionRequest {
-  const isDividend = form.value.type === 'Dividend'
+  const isCashDividend = fieldMode.value === 'cash-dividend'
+  const isStockDividend = fieldMode.value === 'stock-dividend'
   return {
     stockId: form.value.stockId!,
     type: form.value.type,
     tradeDate: form.value.tradeDate,
-    shares: isDividend ? null : parsePositive(form.value.shares),
-    price: isDividend ? null : parsePositive(form.value.price),
-    fee: costs.fee,
-    tax: costs.tax,
-    cashAmount: isDividend ? parsePositive(form.value.cashAmount) : null,
+    shares: isCashDividend ? null : parsePositive(form.value.shares),
+    price: isCashDividend || isStockDividend ? null : parsePositive(form.value.price),
+    fee: isStockDividend ? 0 : costs.fee,
+    tax: isStockDividend ? 0 : costs.tax,
+    cashAmount: isCashDividend ? parsePositive(form.value.cashAmount) : null,
     notes: form.value.notes.trim() || null,
   }
 }
 
 // 只允許目前 inputs 的 ready estimate 或合法 manual 費稅進入 request。
 function resolveCosts(): { fee: number; tax: number } | null {
+  if (fieldMode.value === 'stock-dividend') return { fee: 0, tax: 0 }
   if (costMode.value === 'auto') {
     const payload = getEstimatePayload()
     const inputKey = payload ? getEstimateInputKey(payload) : null
@@ -420,7 +443,8 @@ function submit(): void {
         >
           <option value="Buy">買入</option>
           <option value="Sell">賣出</option>
-          <option value="Dividend">股息</option>
+          <option value="Dividend">現金股利</option>
+          <option value="StockDividend" :disabled="!props.transaction && selectedStockHasLedger === false">股票股利／配股</option>
         </select>
       </div>
 
@@ -429,23 +453,23 @@ function submit(): void {
         <Input id="transaction-trade-date" v-model="form.tradeDate" data-testid="transaction-trade-date" type="date" :disabled="props.loading" :error="errors.tradeDate" />
       </div>
 
-      <div v-if="form.type !== 'Dividend'" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div v-if="fieldMode === 'trade' || fieldMode === 'stock-dividend'" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label class="mb-1 block text-sm font-medium text-text-primary">股數</label>
           <Input v-model="form.shares" data-testid="transaction-shares" type="number" :min="0" step="0.0001" :disabled="props.loading" :error="errors.shares" />
         </div>
-        <div>
+        <div v-if="fieldMode === 'trade'">
           <label class="mb-1 block text-sm font-medium text-text-primary">成交價格</label>
           <Input v-model="form.price" data-testid="transaction-price" type="number" :min="0" step="0.01" :disabled="props.loading" :error="errors.price" />
         </div>
       </div>
 
-      <div v-else>
+      <div v-else-if="fieldMode === 'cash-dividend'">
         <label class="mb-1 block text-sm font-medium text-text-primary">股息金額</label>
         <Input v-model="form.cashAmount" data-testid="transaction-cash-amount" type="number" :min="0" step="0.01" :disabled="props.loading" :error="errors.cashAmount" />
       </div>
 
-      <div data-testid="transaction-cost-mode-controls" class="space-y-2">
+      <div v-if="fieldMode !== 'stock-dividend'" data-testid="transaction-cost-mode-controls" class="space-y-2">
         <div class="flex items-center justify-between gap-3">
           <span class="text-sm font-medium text-text-primary">費稅輸入方式</span>
           <div class="flex rounded-lg border border-border-default p-0.5">
@@ -453,7 +477,7 @@ function submit(): void {
               data-testid="transaction-cost-auto"
               type="button"
               :aria-pressed="costMode === 'auto'"
-              :disabled="props.loading || form.type === 'Dividend'"
+              :disabled="props.loading || fieldMode !== 'trade'"
               class="rounded-md px-3 py-1.5 text-xs transition-colors"
               :class="costMode === 'auto' ? 'bg-bg-active text-text-primary' : 'text-text-secondary hover:bg-bg-raised'"
               @click="selectCostMode('auto')"
@@ -479,7 +503,7 @@ function submit(): void {
         <p v-else-if="costMode === 'auto' && estimateStatus === 'unsupported'" data-testid="transaction-estimate-unsupported" role="alert" class="text-xs text-color-warning-text">此標的無法自動估算，請改用手動輸入。</p>
       </div>
 
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div v-if="fieldMode !== 'stock-dividend'" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label class="mb-1 block text-sm font-medium text-text-primary">手續費</label>
           <Input v-model="form.fee" data-testid="transaction-fee" type="number" :min="0" step="0.01" :disabled="props.loading" :readonly="costMode === 'auto'" :error="errors.fee" />

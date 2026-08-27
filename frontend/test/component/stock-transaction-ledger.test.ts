@@ -29,6 +29,33 @@ const item = {
   executionAveragePrice: 500,
 }
 
+const stockDividendItem = {
+  ...item,
+  id: 2,
+  type: 'StockDividend' as const,
+  shares: 100,
+  price: null,
+  cashAmount: null,
+  notes: null,
+  grossAmount: 0,
+  netCashFlow: 0,
+  allocatedCostBasis: null,
+  realizedGainLoss: 0,
+  remainingShares: 110,
+  remainingCostBasis: 5000,
+  executionAveragePrice: 45.45,
+}
+
+const cashDividendItem = {
+  ...item,
+  id: 3,
+  type: 'Dividend' as const,
+  shares: null,
+  price: null,
+  cashAmount: 500,
+  notes: null,
+}
+
 describe('StockTransactionLedger', () => {
   // 驗證交易列提供 edit/delete mutation 入口，並保留穩定 transaction id。
   it('emits edit and delete actions for a transaction', async () => {
@@ -64,5 +91,18 @@ describe('StockTransactionLedger', () => {
 
     expect(wrapper.text()).toContain('尚無交易紀錄')
     expect(wrapper.find('.overflow-x-auto').exists()).toBe(false)
+  })
+
+  // 驗證現金股利與股票股利使用不同標籤，股票股利不顯示無意義的零元金額。
+  it('renders distinct dividend labels and omits stock dividend money values', () => {
+    const wrapper = mount(StockTransactionLedger, {
+      props: { items: [cashDividendItem, stockDividendItem], loading: false, total: 2, hasStocks: true, page: 1, pageSize: 20 },
+    })
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[0]?.text()).toContain('現金股利')
+    expect(rows[1]?.text()).toContain('股票股利')
+    expect(rows[1]?.text()).toContain('100')
+    expect(rows[1]?.text()).not.toContain('NT$ 0')
   })
 })

@@ -360,6 +360,24 @@ describe('StocksPage ledger contract', () => {
     }))
   })
 
+  // 驗證股票股利出現在 Ledger filter，且選取後會傳送正確型別給 API。
+  it('passes the stock dividend ledger filter', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
+
+    const wrapper = mountWithAppProviders(StocksPage)
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+
+    const filter = wrapper.get('[data-testid="ledger-type-filter"]')
+    expect(filter.text()).toContain('股票股利')
+    await filter.setValue('StockDividend')
+    await flushPromises()
+
+    expect(ledger).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'StockDividend', page: 1 }))
+  })
+
   // 驗證 Ledger-managed 的股數與買入均價在股票編輯表單中不可直接修改。
   it('locks ledger-managed shares and buy price in the edit form', async () => {
     vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())

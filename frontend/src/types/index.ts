@@ -220,8 +220,8 @@ export interface StockListResponse extends PaginatedResponse<StockListItem> {
   totalEstimatedGainLoss: number
 }
 
-export type StockTransactionType = 'OpeningBalance' | 'Buy' | 'Sell' | 'Dividend'
-export type EditableStockTransactionType = 'Buy' | 'Sell' | 'Dividend'
+export type StockTransactionType = 'OpeningBalance' | 'Buy' | 'Sell' | 'Dividend' | 'StockDividend'
+export type EditableStockTransactionType = 'Buy' | 'Sell' | 'Dividend' | 'StockDividend'
 
 export interface StockTransaction {
   id: number

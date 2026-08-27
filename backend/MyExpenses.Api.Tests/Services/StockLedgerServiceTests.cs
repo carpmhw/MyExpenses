@@ -87,6 +87,152 @@ public sealed class StockLedgerServiceTests
         Assert.Equal(opening.Transaction.Id, (await db.StockTransactions.SingleAsync()).Id);
     }
 
+    /// <summary>驗證股票股利的建立、修改與合法刪除都會透過完整 replay 更新 Stock projection。</summary>
+    [Fact]
+    public async Task StockDividend_MutationsReplayAndProjectStock()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = await CreateDbContextAsync(connection);
+        var stock = await AddStockAsync(db, shares: 0m, buyPrice: 0m, currentPrice: 100m);
+        var service = new StockLedgerService(db);
+        await service.CreateTransactionAsync(stock.Id, Buy(new DateOnly(2026, 1, 1), 1000m, 100m));
+
+        var dividend = await service.CreateTransactionAsync(
+            stock.Id,
+            StockDividend(new DateOnly(2026, 2, 1), 100m));
+
+        Assert.Equal(1100m, dividend.Replay.RemainingShares);
+        Assert.Equal(100000m, dividend.Replay.RemainingCostBasis);
+        Assert.Equal(1100m, stock.Shares);
+
+        var updated = await service.UpdateTransactionAsync(
+            dividend.Transaction.Id,
+            stock.Id,
+            StockDividend(new DateOnly(2026, 2, 1), 125m));
+
+        Assert.Equal(1125m, updated.Replay.RemainingShares);
+        Assert.Equal(100000m, updated.Replay.RemainingCostBasis);
+        Assert.Equal(1125m, stock.Shares);
+
+        await service.DeleteTransactionAsync(dividend.Transaction.Id);
+        await db.Entry(stock).ReloadAsync();
+        Assert.Equal(1000m, stock.Shares);
+        Assert.Equal(100m, stock.BuyPrice);
+        Assert.Single(await db.StockTransactions.ToListAsync());
+    }
+
+    /// <summary>驗證修改股票股利導致後續超賣時會保留原交易與 Stock projection。</summary>
+    [Fact]
+    public async Task UpdateStockDividend_InvalidatesLaterSell_RollsBackHistory()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = await CreateDbContextAsync(connection);
+        var stock = await AddStockAsync(db, shares: 0m, buyPrice: 0m, currentPrice: 100m);
+        var service = new StockLedgerService(db);
+        await service.CreateTransactionAsync(stock.Id, Buy(new DateOnly(2026, 1, 1), 1000m, 100m));
+        var dividend = await service.CreateTransactionAsync(stock.Id, StockDividend(new DateOnly(2026, 2, 1), 100m));
+        await service.CreateTransactionAsync(stock.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Sell,
+            new DateOnly(2026, 3, 1),
+            Shares: 1080m,
+            Price: 110m));
+
+        var exception = await Assert.ThrowsAsync<InsufficientSharesException>(() =>
+            service.UpdateTransactionAsync(
+                dividend.Transaction.Id,
+                stock.Id,
+                StockDividend(new DateOnly(2026, 2, 1), 50m)));
+
+        Assert.Equal("InsufficientShares", exception.Code);
+        var storedDividend = await db.StockTransactions.SingleAsync(transaction => transaction.Id == dividend.Transaction.Id);
+        Assert.Equal(100m, storedDividend.Shares);
+        var storedStock = await db.Stocks.SingleAsync(item => item.Id == stock.Id);
+        Assert.Equal(20m, storedStock.Shares);
+    }
+
+    /// <summary>驗證刪除股票股利導致後續超賣時會 rollback delete 與 projection。</summary>
+    [Fact]
+    public async Task DeleteStockDividend_InvalidatesLaterSell_RollsBackHistory()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = await CreateDbContextAsync(connection);
+        var stock = await AddStockAsync(db, shares: 0m, buyPrice: 0m, currentPrice: 100m);
+        var service = new StockLedgerService(db);
+        await service.CreateTransactionAsync(stock.Id, Buy(new DateOnly(2026, 1, 1), 1000m, 100m));
+        var dividend = await service.CreateTransactionAsync(stock.Id, StockDividend(new DateOnly(2026, 2, 1), 100m));
+        await service.CreateTransactionAsync(stock.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Sell,
+            new DateOnly(2026, 3, 1),
+            Shares: 1050m,
+            Price: 110m));
+
+        var exception = await Assert.ThrowsAsync<InsufficientSharesException>(() =>
+            service.DeleteTransactionAsync(dividend.Transaction.Id));
+
+        Assert.Equal("InsufficientShares", exception.Code);
+        Assert.True(await db.StockTransactions.AnyAsync(transaction => transaction.Id == dividend.Transaction.Id));
+        var storedStock = await db.Stocks.SingleAsync(item => item.Id == stock.Id);
+        Assert.Equal(50m, storedStock.Shares);
+    }
+
+    /// <summary>依驗收順序驗證買入、股票股利、現金股利與賣出後的持股、成本及刪除保護。</summary>
+    [Fact]
+    public async Task AcceptanceSequence_StockDividendKeepsCostAndProtectsLaterSell()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = await CreateDbContextAsync(connection);
+        var stock = await AddStockAsync(db, shares: 0m, buyPrice: 0m, currentPrice: 110m);
+        var service = new StockLedgerService(db);
+
+        await service.CreateTransactionAsync(stock.Id, Buy(new DateOnly(2026, 1, 1), 1000m, 100m));
+        var stockDividend = await service.CreateTransactionAsync(
+            stock.Id,
+            StockDividend(new DateOnly(2026, 2, 1), 100m));
+        var cashDividend = await service.CreateTransactionAsync(stock.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Dividend,
+            new DateOnly(2026, 3, 1),
+            CashAmount: 5000m));
+        var sell = await service.CreateTransactionAsync(stock.Id, new StockLedgerTransactionCommand(
+            StockTransactionType.Sell,
+            new DateOnly(2026, 4, 1),
+            Shares: 1050m,
+            Price: 110m));
+
+        Assert.Equal(1100m, stockDividend.Replay.RemainingShares);
+        Assert.Equal(100000m, stockDividend.Replay.RemainingCostBasis);
+        Assert.Equal(0m, stockDividend.Replay.NetDividendIncome);
+        Assert.Equal(5000m, cashDividend.Replay.NetDividendIncome);
+        Assert.Equal(50m, sell.Replay.RemainingShares);
+        Assert.InRange(sell.Replay.RemainingCostBasis, 4545.45m, 4545.46m);
+
+        await Assert.ThrowsAsync<InsufficientSharesException>(() =>
+            service.DeleteTransactionAsync(stockDividend.Transaction.Id));
+
+        await db.Entry(stock).ReloadAsync();
+        Assert.Equal(50m, stock.Shares);
+        Assert.True(await db.StockTransactions.AnyAsync(transaction => transaction.Id == stockDividend.Transaction.Id));
+    }
+
+    /// <summary>驗證未初始化的 legacy 持股不可直接建立股票股利並覆寫原 projection。</summary>
+    [Fact]
+    public async Task CreateStockDividend_RejectsUninitializedLegacyStock()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var db = await CreateDbContextAsync(connection);
+        var stock = await AddStockAsync(db, shares: 10m, buyPrice: 500m, currentPrice: 600m);
+        var service = new StockLedgerService(db);
+
+        var exception = await Assert.ThrowsAsync<StockLedgerException>(() =>
+            service.CreateTransactionAsync(stock.Id, StockDividend(new DateOnly(2026, 2, 1), 1m)));
+
+        Assert.Equal(StockLedgerFailureCode.InvalidTransaction, exception.FailureCode);
+        Assert.Equal("InvalidTransaction", exception.Code);
+        Assert.Empty(await db.StockTransactions.ToListAsync());
+        await db.Entry(stock).ReloadAsync();
+        Assert.Equal(10m, stock.Shares);
+        Assert.Equal(500m, stock.BuyPrice);
+    }
+
     /// <summary>驗證修改歷史交易造成後續 oversell 時，原交易與 projection 都維持不變。</summary>
     [Fact]
     public async Task UpdateHistoricalTransaction_InvalidatesLaterSell_RollsBackHistory()
@@ -300,6 +446,10 @@ public sealed class StockLedgerServiceTests
     /// <summary>建立測試用買入命令以保持 service 測試輸入一致。</summary>
     private static StockLedgerTransactionCommand Buy(DateOnly date, decimal shares, decimal price)
         => new(StockTransactionType.Buy, date, Shares: shares, Price: price);
+
+    /// <summary>建立測試用股票股利命令，明確固定所有禁止費稅與欄位為空。</summary>
+    private static StockLedgerTransactionCommand StockDividend(DateOnly date, decimal shares)
+        => new(StockTransactionType.StockDividend, date, Shares: shares, Fee: 0m, Tax: 0m);
 
     /// <summary>建立開啟中的 SQLite 記憶體連線。</summary>
     private static async Task<SqliteConnection> OpenConnectionAsync()
