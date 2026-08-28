@@ -26,6 +26,8 @@ describe('ReportsPage investment performance tab', () => {
       summary: { currentGrossMarketValue: 0, remainingCostBasis: 0, realizedGainLoss: 0, unrealizedGainLoss: 0, netDividendIncome: 0, totalGainLoss: 0 },
       twr: { value: null, unavailableReason: 'NoHoldings' },
       xirr: { value: null, unavailableReason: 'NoHoldings' },
+      xirrOpeningValue: 0,
+      xirrOpeningValuationSource: 'None',
       monthlyPoints: [],
       instrumentBreakdown: [],
       dataQuality: { activeInstrumentCount: 0, ledgerManagedInstrumentCount: 0, priceObservationCount: 0, priceCoverage: 0, trackingStartReason: 'NoHoldings', hasIncompleteLedgerCoverage: false },

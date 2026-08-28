@@ -44,6 +44,109 @@ public sealed class StockPerformanceEndpointTests
         Assert.NotNull(report.LedgerCoverage.Value);
     }
 
+    /// <summary>驗證績效 endpoint 載入 requestedStart 前 lookback 內的 raw close 供 XIRR 使用。</summary>
+    [Fact]
+    public async Task GetStockPerformance_LoadsPreStartRawCloseForOpeningXirr()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, 5m, 100m, 120m);
+        await AddTransactionAsync(db, stock.Id, StockTransactionType.Buy, new DateOnly(2025, 12, 1), 5m, 100m);
+        await AddPriceAsync(db, "2330", new DateOnly(2025, 12, 15), 105m, 100m);
+        await AddPriceAsync(db, "2330", new DateOnly(2026, 1, 31), 125m, 120m);
+
+        var report = await ReportEndpoints.GetStockPerformanceAsync(
+            new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 1, 31),
+            db,
+            CreateTimeZoneService());
+
+        Assert.NotNull(report.Xirr.Value);
+    }
+
+    /// <summary>驗證 endpoint 的 lookback 價格不會進入 TWR 期間內觀測或改變其結果。</summary>
+    [Fact]
+    public async Task GetStockPerformance_LookbackPriceDoesNotChangeTwrPeriodObservations()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, 5m, 100m, 120m);
+        await AddTransactionAsync(db, stock.Id, StockTransactionType.Buy, new DateOnly(2025, 12, 1), 5m, 100m);
+        await AddPriceAsync(db, "2330", new DateOnly(2025, 12, 15), 105m, 100m);
+        await AddPriceAsync(db, "2330", new DateOnly(2026, 1, 1), 105m, 100m);
+        await AddPriceAsync(db, "2330", new DateOnly(2026, 1, 31), 125m, 120m);
+
+        var report = await ReportEndpoints.GetStockPerformanceAsync(
+            new DateOnly(2026, 1, 1),
+            new DateOnly(2026, 1, 31),
+            db,
+            CreateTimeZoneService());
+
+        Assert.Equal(2, report.DataQuality.PriceObservationCount);
+        Assert.InRange(report.Twr.Value!.Value, 0.199999d, 0.200001d);
+    }
+
+    /// <summary>驗證 requestedStart 前第 31 日的 raw close 仍納入 opening lookback。</summary>
+    [Fact]
+    public async Task GetStockPerformance_IncludesExactThirtyOneDayLookback()
+    {
+        await using var db = await CreateDbContextAsync();
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2026, 1, 31);
+        var stock = await AddStockAsync(db, 5m, 100m, 120m);
+        await AddTransactionAsync(db, stock.Id, StockTransactionType.Buy, start.AddDays(-40), 5m, 100m);
+        await AddPriceAsync(db, "2330", start.AddDays(-31), 105m, 100m);
+        await AddPriceAsync(db, "2330", end, 125m, 120m);
+
+        var report = await ReportEndpoints.GetStockPerformanceAsync(
+            start,
+            end,
+            db,
+            CreateTimeZoneService());
+
+        Assert.NotNull(report.Xirr.Value);
+    }
+
+    /// <summary>驗證 requestedStart 前第 32 日的 raw close 不會繞過 31 日 lookback 限制。</summary>
+    [Fact]
+    public async Task GetStockPerformance_ExcludesThirtyTwoDayLookback()
+    {
+        await using var db = await CreateDbContextAsync();
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2026, 1, 31);
+        var stock = await AddStockAsync(db, 5m, 100m, 120m);
+        await AddTransactionAsync(db, stock.Id, StockTransactionType.Buy, start.AddDays(-40), 5m, 100m);
+        await AddPriceAsync(db, "2330", start.AddDays(-32), 105m, 100m);
+        await AddPriceAsync(db, "2330", end, 125m, 120m);
+
+        var report = await ReportEndpoints.GetStockPerformanceAsync(
+            start,
+            end,
+            db,
+            CreateTimeZoneService());
+
+        Assert.Null(report.Xirr.Value);
+        Assert.Equal(StockPerformanceUnavailableReason.MissingOpeningValue, report.Xirr.UnavailableReason);
+    }
+
+    /// <summary>驗證期初缺價時 endpoint 仍回傳報表並保留 MissingOpeningValue reason。</summary>
+    [Fact]
+    public async Task GetStockPerformance_MissingPreStartRawClose_ReturnsOkWithTypedReason()
+    {
+        await using var db = await CreateDbContextAsync();
+        var stock = await AddStockAsync(db, 5m, 100m, 120m);
+        await AddTransactionAsync(db, stock.Id, StockTransactionType.Buy, new DateOnly(2025, 12, 1), 5m, 100m);
+        await AddPriceAsync(db, "2330", new DateOnly(2026, 1, 31), 125m, 120m);
+        await using var app = await CreateReportAppAsync((SqliteConnection)db.Database.GetDbConnection());
+
+        var response = await app.GetTestClient().GetAsync(
+            "/api/reports/stock-performance?dateStart=2026-01-01&dateEnd=2026-01-31");
+
+        response.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var xirr = json.RootElement.GetProperty("xirr");
+        Assert.Equal(JsonValueKind.Null, xirr.GetProperty("value").ValueKind);
+        Assert.Equal("MissingOpeningValue", xirr.GetProperty("unavailableReason").GetString());
+    }
+
     /// <summary>驗證 HTTP response 包含績效報表的所有頂層 JSON contract 欄位。</summary>
     [Fact]
     public async Task GetStockPerformance_ReturnsCompleteJsonContract()
@@ -69,6 +172,8 @@ public sealed class StockPerformanceEndpointTests
         Assert.True(root.TryGetProperty("summary", out _));
         Assert.True(root.TryGetProperty("twr", out _));
         Assert.True(root.TryGetProperty("xirr", out _));
+        Assert.True(root.TryGetProperty("xirrOpeningValue", out _));
+        Assert.True(root.TryGetProperty("xirrOpeningValuationSource", out _));
         Assert.True(root.TryGetProperty("monthlyPoints", out _));
         Assert.True(root.TryGetProperty("instrumentBreakdown", out _));
         Assert.True(root.TryGetProperty("dataQuality", out _));

@@ -114,6 +114,8 @@ function createPerformanceReport(overrides: Partial<StockPerformanceReport> = {}
     summary: { currentGrossMarketValue: 209500, remainingCostBasis: 180000, realizedGainLoss: 1000, unrealizedGainLoss: 28500, netDividendIncome: 500, totalGainLoss: 30000 },
     twr: { value: 0.12, unavailableReason: 'None' },
     xirr: { value: 0.18, unavailableReason: 'None' },
+    xirrOpeningValue: 5000,
+    xirrOpeningValuationSource: 'HistoricalRawClose',
     monthlyPoints: [{ month: '2026-08', endingMarketValue: 209500, netContribution: 0, realizedGainLoss: 1000, dividendIncome: 500, cumulativeTwr: 0.12 }],
     instrumentBreakdown: [{ stockId: 1, name: '台積電', symbol: '2330', market: 'Twse', broker: '甲券商', currentShares: 1000, grossMarketValue: 209500, remainingCostBasis: 180000, realizedGainLoss: 1000, unrealizedGainLoss: 28500, dividendIncome: 500, totalGainLoss: 30000, isClosed: false }],
     dataQuality: { activeInstrumentCount: 1, ledgerManagedInstrumentCount: 1, priceObservationCount: 10, priceCoverage: 1, trackingStartReason: 'None', hasIncompleteLedgerCoverage: false },

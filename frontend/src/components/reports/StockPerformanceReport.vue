@@ -61,6 +61,7 @@ function formatUnavailableReason(reason: string): string {
     InsufficientCashFlows: '現金流不足',
     NoCashFlowSignChange: '現金流沒有正負變化',
     MissingTerminalValue: '缺少期末價值',
+    MissingOpeningValue: '缺少期初估值',
     NoConvergence: '計算未收斂',
     NonFiniteResult: '結果不是有限數值',
     InsufficientHistoricalPrices: '歷史價格不足',
@@ -80,6 +81,15 @@ function metricReason(metric: StockPerformanceMetric): string {
   return metric.value === null ? formatUnavailableReason(metric.unavailableReason) : ''
 }
 
+// 將 XIRR 期初估值來源轉成追蹤狀態可讀文字。
+function formatOpeningValuationSource(source: StockPerformanceReportData['xirrOpeningValuationSource']): string {
+  return {
+    None: '無需期初估值',
+    HistoricalRawClose: '歷史 raw Close',
+    Unavailable: '不可用',
+  }[source]
+}
+
 const kpis = computed(() => {
   const value = report.value
   if (!value) return []
@@ -91,7 +101,7 @@ const kpis = computed(() => {
     { key: 'netDividendIncome', label: '淨股息收入', value: formatMoney(value.summary.netDividendIncome), description: '', reason: '' },
     { key: 'totalGainLoss', label: '總損益', value: formatMoney(value.summary.totalGainLoss), description: '', reason: '' },
     { key: 'twr', label: 'TWR', value: formatMetric(value.twr, true), description: '排除資金進出時點影響，反映投資組合本身表現。', reason: metricReason(value.twr) },
-    { key: 'xirr', label: 'XIRR', value: formatMetric(value.xirr, true), description: '依實際資金投入與取回日期計算的年化報酬。', reason: metricReason(value.xirr) },
+    { key: 'xirr', label: 'XIRR', value: formatMetric(value.xirr, true), description: '以期初投資組合價值、期間資金流與期末市值計算的年化報酬。', reason: metricReason(value.xirr) },
   ]
 })
 
@@ -158,11 +168,12 @@ const monthlyChartOptions = computed(() => ({
           </div>
           <p data-testid="performance-return-method-note" class="text-xs text-text-tertiary">TWR 與 XIRR 採用不同計算觀點，數值不同屬正常現象。</p>
 
-          <div v-if="report.hasSyntheticOpeningBalances || report.dataQuality.hasIncompleteLedgerCoverage || report.dataQuality.priceCoverage < 1" data-testid="performance-data-quality" class="space-y-2 rounded-xl border border-color-warning-border bg-color-warning-bg p-4 text-sm text-color-warning-text">
+          <div v-if="report.hasSyntheticOpeningBalances || report.dataQuality.hasIncompleteLedgerCoverage || report.dataQuality.priceCoverage < 1 || report.xirr.unavailableReason === 'MissingOpeningValue'" data-testid="performance-data-quality" class="space-y-2 rounded-xl border border-color-warning-border bg-color-warning-bg p-4 text-sm text-color-warning-text">
             <p class="font-medium">資料品質與追蹤邊界</p>
             <p v-if="report.hasSyntheticOpeningBalances">包含 synthetic opening；報酬只從 baseline date 開始，系統不推測 acquisition date。</p>
             <p v-if="report.dataQuality.hasIncompleteLedgerCoverage">{{ formatUnavailableReason(report.dataQuality.trackingStartReason) }}</p>
             <p v-if="report.dataQuality.priceCoverage < 1">raw Close 價格覆蓋率：{{ (report.dataQuality.priceCoverage * 100).toFixed(1) }}%</p>
+            <p v-if="report.xirr.unavailableReason === 'MissingOpeningValue'">缺少績效期間開始前完整 raw Close，因此無法可靠計算 XIRR。</p>
           </div>
 
           <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
@@ -186,6 +197,8 @@ const monthlyChartOptions = computed(() => ({
                 <div class="flex justify-between gap-3"><dt class="text-text-secondary">Ledger 覆蓋率</dt><dd class="text-right text-text-primary">{{ formatMetric(report.ledgerCoverage, true) }}</dd></div>
                 <div class="flex justify-between gap-3"><dt class="text-text-secondary">價格觀測數</dt><dd class="text-right text-text-primary">{{ report.dataQuality.priceObservationCount }}</dd></div>
                 <div class="flex justify-between gap-3"><dt class="text-text-secondary">Ledger 管理標的</dt><dd class="text-right text-text-primary">{{ report.dataQuality.ledgerManagedInstrumentCount }}</dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-text-secondary">XIRR 期初估值</dt><dd class="text-right text-text-primary">{{ report.xirrOpeningValue === null ? '不可用' : formatMoney(report.xirrOpeningValue) }}</dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-text-secondary">期初估值來源</dt><dd class="text-right text-text-primary">{{ formatOpeningValuationSource(report.xirrOpeningValuationSource) }}</dd></div>
               </dl>
             </Card>
           </div>
