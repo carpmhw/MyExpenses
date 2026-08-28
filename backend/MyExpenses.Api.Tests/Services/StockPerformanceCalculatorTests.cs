@@ -227,6 +227,300 @@ public sealed class StockPerformanceCalculatorTests
         Assert.True(double.IsFinite(report.Xirr.Value!.Value));
     }
 
+    /// <summary>驗證期間前持股且期間無交易時，XIRR 會納入期初市場價值。</summary>
+    [Fact]
+    public void Calculate_PrePeriodHoldingWithoutPeriodTrades_IncludesOpeningValueInXirr()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 10m, buyPrice: 100m, currentPrice: 110m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start.AddDays(-30), 10m, 100m)],
+            [Price(1, "2330", start.AddDays(-1), 100m, 100m)],
+            AsOfDate: end));
+
+        Assert.NotNull(report.Xirr.Value);
+        Assert.InRange(report.Xirr.Value!.Value, 0.099d, 0.101d);
+        Assert.Equal(1000m, report.XirrOpeningValue);
+        Assert.Equal("HistoricalRawClose", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證期間前持股再小額加碼時，XIRR 同時納入期初值與期間買入。</summary>
+    [Fact]
+    public void Calculate_PrePeriodHoldingWithSmallPeriodBuy_IncludesBothCashFlows()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 11m, buyPrice: 100m, currentPrice: 110m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [
+                Buy(1, 1, start.AddDays(-30), 10m, 100m),
+                Buy(2, 1, new DateOnly(2026, 7, 1), 1m, 100m),
+            ],
+            [Price(1, "2330", start.AddDays(-1), 100m, 100m)],
+            AsOfDate: end));
+
+        Assert.NotNull(report.Xirr.Value);
+        Assert.InRange(report.Xirr.Value!.Value, 0.09d, 0.12d);
+    }
+
+    /// <summary>驗證期初持股缺少 raw close 時，XIRR 回傳 MissingOpeningValue 而非猜測數值。</summary>
+    [Fact]
+    public void Calculate_MissingOpeningRawClose_ReturnsMissingOpeningValue()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 10m, buyPrice: 100m, currentPrice: 110m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start.AddDays(-30), 10m, 100m)],
+            [],
+            AsOfDate: end));
+
+        Assert.Null(report.Xirr.Value);
+        Assert.Equal("MissingOpeningValue", report.Xirr.UnavailableReason.ToString());
+        Assert.Null(report.XirrOpeningValue);
+        Assert.Equal("Unavailable", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證 DateStart 當日買入只依期間現金流計算，不重複建立期初部位。</summary>
+    [Fact]
+    public void Calculate_DateStartBuy_IsNotAddedToOpeningValueTwice()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 10m, buyPrice: 10m, currentPrice: 11m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start, 10m, 10m)],
+            [Price(1, "2330", start, 10m, 10m)],
+            AsOfDate: end));
+
+        Assert.NotNull(report.Xirr.Value);
+        Assert.InRange(report.Xirr.Value!.Value, 0.099d, 0.101d);
+        Assert.Equal(0m, report.XirrOpeningValue);
+        Assert.Equal("None", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證期間中全數賣出的期初持股仍納入 XIRR，且賣出保留為正現金流。</summary>
+    [Fact]
+    public void Calculate_HoldingClosedDuringPeriod_IncludesOpeningValueAndSaleFlow()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 0m, buyPrice: 100m, currentPrice: 120m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [
+                Buy(1, 1, start.AddDays(-30), 10m, 100m),
+                Sell(2, 1, new DateOnly(2026, 7, 1), 10m, 120m),
+            ],
+            [Price(1, "2330", start.AddDays(-1), 100m, 100m)],
+            AsOfDate: end));
+
+        Assert.NotNull(report.Xirr.Value);
+        Assert.True(double.IsFinite(report.Xirr.Value!.Value));
+        Assert.Equal(1000m, report.XirrOpeningValue);
+        Assert.Equal("HistoricalRawClose", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證多個期初持股只要任一標的缺 raw close 就拒絕整體 XIRR。</summary>
+    [Fact]
+    public void Calculate_MultipleOpeningHoldingsWithMissingPrice_ReturnsMissingOpeningValue()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var first = CreateStock(1, shares: 10m, buyPrice: 100m, currentPrice: 110m);
+        var second = CreateStock(2, shares: 20m, buyPrice: 50m, currentPrice: 60m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [first, second],
+            [
+                Buy(1, 1, start.AddDays(-30), 10m, 100m),
+                Buy(2, 2, start.AddDays(-30), 20m, 50m),
+            ],
+            [Price(1, "2330", start.AddDays(-1), 100m, 100m)],
+            AsOfDate: end));
+
+        Assert.Null(report.Xirr.Value);
+        Assert.Equal("MissingOpeningValue", report.Xirr.UnavailableReason.ToString());
+        Assert.Null(report.XirrOpeningValue);
+        Assert.Equal("Unavailable", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證同日多筆 raw close 會選取 FetchedAtUtc 最新的資料。</summary>
+    [Fact]
+    public void Calculate_OpeningValue_UsesLatestFetchedRawCloseForSameDate()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var fetchedAt = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        var stock = CreateStock(1, shares: 10m, buyPrice: 100m, currentPrice: 110m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start.AddDays(-30), 10m, 100m)],
+            [
+                Price(1, "2330", start.AddDays(-1), 100m, 100m, fetchedAt.AddMinutes(1)),
+                Price(1, "2330", start.AddDays(-1), 100m, 110m, fetchedAt.AddMinutes(2)),
+            ],
+            AsOfDate: end));
+
+        Assert.Equal(1100m, report.XirrOpeningValue);
+        Assert.Equal("HistoricalRawClose", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證 DateStart 當日 Close 與 adjusted-only 價格都不可作為期初估值 fallback。</summary>
+    [Fact]
+    public void Calculate_OpeningValue_RejectsUnsupportedPriceSources()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 10m, buyPrice: 100m, currentPrice: 110m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start.AddDays(-30), 10m, 100m)],
+            [
+                Price(1, "2330", start, 100m, 100m),
+                new HistoricalAdjustedPrice
+                {
+                    Market = StockMarket.Twse,
+                    Symbol = "2330",
+                    TradingDate = start.AddDays(-1),
+                    AdjustedClose = 100m,
+                    Close = null,
+                    Provider = "fixture",
+                    FetchedAtUtc = DateTime.UtcNow,
+                },
+            ],
+            AsOfDate: end));
+
+        Assert.Null(report.XirrOpeningValue);
+        Assert.Equal("Unavailable", report.XirrOpeningValuationSource);
+        Assert.Equal("MissingOpeningValue", report.Xirr.UnavailableReason.ToString());
+    }
+
+    /// <summary>驗證 coverage gate 與期初缺價同時存在時，XIRR 揭露更具體的期初資料缺口。</summary>
+    [Fact]
+    public void Calculate_IncompleteCoverageWithMissingOpeningValue_PreservesOpeningReason()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var initialized = CreateStock(1, shares: 10m, buyPrice: 100m, currentPrice: 110m);
+        var uninitialized = CreateStock(2, shares: 5m, buyPrice: 50m, currentPrice: 60m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [initialized, uninitialized],
+            [Buy(1, 1, start.AddDays(-30), 10m, 100m)],
+            [],
+            AsOfDate: end));
+
+        Assert.Equal(StockPerformanceUnavailableReason.IncompleteLedgerCoverage, report.Twr.UnavailableReason);
+        Assert.Equal("MissingOpeningValue", report.Xirr.UnavailableReason.ToString());
+    }
+
+    /// <summary>驗證期初與期末估值同時缺失時，XIRR 保留既有 terminal unavailable reason。</summary>
+    [Fact]
+    public void Calculate_MissingOpeningAndTerminalValues_PreservesTerminalReason()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2026, 1, 31);
+        var stock = CreateStock(1, shares: 10m, buyPrice: 100m, currentPrice: 110m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start.AddDays(-30), 10m, 100m)],
+            [],
+            AsOfDate: end.AddDays(1)));
+
+        Assert.Equal(StockPerformanceUnavailableReason.MissingTerminalValue, report.Xirr.UnavailableReason);
+        Assert.Null(report.XirrOpeningValue);
+        Assert.Equal("Unavailable", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證小於金額容忍值但股數有效的正值 opening 仍加入 XIRR 現金流。</summary>
+    [Fact]
+    public void Calculate_TinyPositiveOpeningValue_IsIncludedInXirr()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 0.00000002m, buyPrice: 0.25m, currentPrice: 0.3m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start.AddDays(-30), 0.00000002m, 0.25m)],
+            [Price(1, "2330", start.AddDays(-1), 0.25m, 0.25m)],
+            AsOfDate: end));
+
+        Assert.Equal(0.000000005m, report.XirrOpeningValue);
+        Assert.NotNull(report.Xirr.Value);
+        Assert.InRange(report.Xirr.Value!.Value, 0.15d, 0.25d);
+    }
+
+    /// <summary>驗證期間前股票股利增加的股數會納入期初估值但不產生現金流。</summary>
+    [Fact]
+    public void Calculate_PrePeriodStockDividend_UsesPostDividendOpeningShares()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 110m, buyPrice: 10m, currentPrice: 10m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [
+                Buy(1, 1, start.AddDays(-100), 100m, 10m),
+                StockDividend(2, 1, start.AddDays(-50), 10m),
+            ],
+            [Price(1, "2330", start.AddDays(-1), 10m, 10m)],
+            AsOfDate: end));
+
+        Assert.NotNull(report.Xirr.Value);
+        Assert.InRange(report.Xirr.Value!.Value, -0.000001d, 0.000001d);
+        Assert.Equal(1100m, report.XirrOpeningValue);
+        Assert.Equal("HistoricalRawClose", report.XirrOpeningValuationSource);
+    }
+
+    /// <summary>驗證全部期間從第一筆買入開始時不新增期初現金流。</summary>
+    [Fact]
+    public void Calculate_AllPeriodStartingWithFirstBuy_PreservesExistingXirrSemantics()
+    {
+        var start = new DateOnly(2026, 1, 1);
+        var end = new DateOnly(2027, 1, 1);
+        var stock = CreateStock(1, shares: 10m, buyPrice: 10m, currentPrice: 11m);
+        var report = StockPerformanceCalculator.Calculate(new StockPerformanceInput(
+            start,
+            end,
+            [stock],
+            [Buy(1, 1, start, 10m, 10m)],
+            [Price(1, "2330", start, 10m, 10m)],
+            AsOfDate: end));
+
+        Assert.NotNull(report.Xirr.Value);
+        Assert.InRange(report.Xirr.Value!.Value, 0.099d, 0.101d);
+        Assert.Equal(0m, report.XirrOpeningValue);
+        Assert.Equal("None", report.XirrOpeningValuationSource);
+    }
+
     /// <summary>驗證歷史 period 缺少 raw terminal close 時 XIRR 回傳穩定 unavailable reason。</summary>
     [Fact]
     public void Calculate_MissingHistoricalTerminalValue_ReturnsTypedXirrReason()
@@ -676,7 +970,13 @@ public sealed class StockPerformanceCalculatorTests
     }
 
     /// <summary>建立同時含 adjusted 與 raw close 的歷史價格 fixture。</summary>
-    private static HistoricalAdjustedPrice Price(int stockId, string symbol, DateOnly date, decimal adjustedClose, decimal close)
+    private static HistoricalAdjustedPrice Price(
+        int stockId,
+        string symbol,
+        DateOnly date,
+        decimal adjustedClose,
+        decimal close,
+        DateTime? fetchedAtUtc = null)
         => new()
         {
             Id = stockId,
@@ -686,7 +986,7 @@ public sealed class StockPerformanceCalculatorTests
             AdjustedClose = adjustedClose,
             Close = close,
             Provider = "fixture",
-            FetchedAtUtc = DateTime.UtcNow,
+            FetchedAtUtc = fetchedAtUtc ?? DateTime.UtcNow,
         };
 
     /// <summary>驗證 nullable double 有值時必須是有限數字。</summary>

@@ -27,6 +27,8 @@ function createReport(overrides: Partial<StockPerformanceReportData> = {}): Stoc
     },
     twr: { value: 0.12, unavailableReason: 'None' },
     xirr: { value: 0.18, unavailableReason: 'None' },
+    xirrOpeningValue: 5000,
+    xirrOpeningValuationSource: 'HistoricalRawClose',
     monthlyPoints: [{
       month: '2026-08',
       endingMarketValue: 6000,
@@ -60,6 +62,16 @@ function createReport(overrides: Partial<StockPerformanceReportData> = {}): Stoc
     },
     ...overrides,
   }
+}
+
+// 建立尚未反映到既有 TypeScript contract 的期初估值 fixture，供 RED 測試描述目標 contract。
+function createReportWithOpeningValuation(overrides: Record<string, unknown> = {}): StockPerformanceReportData {
+  return {
+    ...createReport(),
+    xirrOpeningValue: 5000,
+    xirrOpeningValuationSource: 'HistoricalRawClose',
+    ...overrides,
+  } as unknown as StockPerformanceReportData
 }
 
 async function flushPromises(): Promise<void> {
@@ -105,7 +117,7 @@ describe('StockPerformanceReport', () => {
     expect(kpis.text()).toContain('12.00%')
     expect(kpis.text()).toContain('18.00%')
     expect(kpis.text()).toContain('排除資金進出時點影響，反映投資組合本身表現。')
-    expect(kpis.text()).toContain('依實際資金投入與取回日期計算的年化報酬。')
+    expect(kpis.text()).toContain('以期初投資組合價值、期間資金流與期末市值計算的年化報酬。')
     expect(wrapper.get('[data-testid="performance-return-method-note"]').text()).toBe(
       'TWR 與 XIRR 採用不同計算觀點，數值不同屬正常現象。',
     )
@@ -151,6 +163,34 @@ describe('StockPerformanceReport', () => {
     const returnKpis = wrapper.get('[data-testid="performance-kpis"]').findAll('.bg-bg-raised').slice(-2)
     expect(returnKpis.every(kpi => !kpi.text().includes('0.00%'))).toBe(true)
     expect(wrapper.get('[data-testid="performance-return-method-note"]').exists()).toBe(true)
+  })
+
+  // 驗證 XIRR 缺少期初估值時顯示 typed reason、資料品質訊息，且不顯示零百分比。
+  it('renders missing opening valuation without formatting zero percentages', async () => {
+    vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createReportWithOpeningValuation({
+      xirr: { value: null, unavailableReason: 'MissingOpeningValue' },
+      xirrOpeningValue: null,
+      xirrOpeningValuationSource: 'Unavailable',
+    }))
+    const wrapper = mount(StockPerformanceReport, { global: { stubs: { Line: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('不可用')
+    expect(wrapper.text()).toContain('缺少期初估值')
+    expect(wrapper.text()).toContain('缺少績效期間開始前完整 raw Close，因此無法可靠計算 XIRR')
+    const xirrKpi = wrapper.get('[data-testid="performance-kpis"]').findAll('.bg-bg-raised').slice(-1)[0]
+    expect(xirrKpi.text()).not.toContain('0.00%')
+  })
+
+  // 驗證 XIRR 說明包含期初投資組合價值，並在追蹤狀態呈現歷史 raw close 來源。
+  it('renders opening-aware XIRR guidance and valuation source', async () => {
+    vi.spyOn(api.reports, 'stockPerformance').mockResolvedValue(createReportWithOpeningValuation())
+    const wrapper = mount(StockPerformanceReport, { global: { stubs: { Line: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('期初投資組合價值、期間資金流與期末市值')
+    expect(wrapper.text()).toContain('期初估值來源')
+    expect(wrapper.text()).toContain('歷史 raw Close')
   })
 
   // 驗證舊 request 即使晚回來，也不能覆蓋較新期間的績效結果。

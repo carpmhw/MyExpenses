@@ -365,6 +365,7 @@ export type StockPerformanceUnavailableReason =
   | 'InsufficientCashFlows'
   | 'NoCashFlowSignChange'
   | 'MissingTerminalValue'
+  | 'MissingOpeningValue'
   | 'NoConvergence'
   | 'NonFiniteResult'
   | 'InsufficientHistoricalPrices'
@@ -375,6 +376,8 @@ export interface StockPerformanceMetric {
   value: number | null
   unavailableReason: StockPerformanceUnavailableReason
 }
+
+export type StockPerformanceOpeningValuationSource = 'None' | 'HistoricalRawClose' | 'Unavailable'
 
 export interface StockPerformanceSummary {
   currentGrossMarketValue: number
@@ -429,6 +432,8 @@ export interface StockPerformanceReport {
   summary: StockPerformanceSummary
   twr: StockPerformanceMetric
   xirr: StockPerformanceMetric
+  xirrOpeningValue: number | null
+  xirrOpeningValuationSource: StockPerformanceOpeningValuationSource
   monthlyPoints: StockPerformanceMonthlyPoint[]
   instrumentBreakdown: StockPerformanceInstrumentBreakdown[]
   dataQuality: StockPerformanceDataQuality

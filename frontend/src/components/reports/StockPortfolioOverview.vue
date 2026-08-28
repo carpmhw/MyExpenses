@@ -139,6 +139,7 @@ function formatPerformanceReason(reason: StockPerformanceUnavailableReason): str
     InsufficientCashFlows: '現金流不足',
     NoCashFlowSignChange: '現金流沒有正負變化',
     MissingTerminalValue: '缺少期末價值',
+    MissingOpeningValue: '缺少期初估值',
     NoConvergence: '計算未收斂',
     NonFiniteResult: '結果不是有限數值',
     ZeroDenominator: '分母為零',

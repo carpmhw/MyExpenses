@@ -13,6 +13,7 @@ public enum StockPerformanceUnavailableReason
     InsufficientCashFlows,
     NoCashFlowSignChange,
     MissingTerminalValue,
+    MissingOpeningValue,
     NoConvergence,
     NonFiniteResult,
     InsufficientHistoricalPrices,
@@ -108,12 +109,20 @@ public sealed record StockPerformanceReport(
     StockPerformanceSummary Summary,
     StockPerformanceMetric Twr,
     StockPerformanceMetric Xirr,
+    decimal? XirrOpeningValue,
+    string XirrOpeningValuationSource,
     IReadOnlyList<StockPerformanceMonthlyPoint> MonthlyPoints,
     IReadOnlyList<StockPerformanceInstrumentBreakdown> InstrumentBreakdown,
     StockPerformanceDataQuality DataQuality);
 
 /// <summary>描述 period terminal valuation 的來源與不可用原因。</summary>
 internal sealed record StockPerformanceTerminalValue(
+    decimal? Value,
+    string Source,
+    StockPerformanceUnavailableReason Reason);
+
+/// <summary>描述 period opening valuation 的金額、來源與不可用原因。</summary>
+internal sealed record StockPerformanceOpeningValuation(
     decimal? Value,
     string Source,
     StockPerformanceUnavailableReason Reason);
@@ -180,10 +189,13 @@ public static class StockPerformanceCalculator
         var twr = returnGateReason == StockPerformanceUnavailableReason.None
             ? CalculateTwr(input)
             : CreateUnavailableTwr(returnGateReason);
+        var opening = ResolveOpeningValue(input, replayByStock);
         var terminal = ResolveTerminalValue(input, activeStocks, replayByStock);
         var xirr = returnGateReason == StockPerformanceUnavailableReason.None
-            ? CalculateReportXirr(input, terminal)
-            : new StockPerformanceMetric(null, returnGateReason);
+            ? CalculateReportXirr(input, opening, terminal)
+            : opening.Value.HasValue
+                ? new StockPerformanceMetric(null, returnGateReason)
+                : new StockPerformanceMetric(null, opening.Reason);
         var finalQuality = quality with
         {
             PriceObservationCount = twr.ObservationCount,
@@ -201,6 +213,8 @@ public static class StockPerformanceCalculator
             summary,
             twr.Metric,
             xirr,
+            opening.Value,
+            opening.Source,
             monthly,
             breakdown,
             finalQuality);
@@ -379,12 +393,18 @@ public static class StockPerformanceCalculator
     /// <summary>建立報表所需的投資人現金流並加入 period terminal value。</summary>
     private static StockPerformanceMetric CalculateReportXirr(
         StockPerformanceInput input,
+        StockPerformanceOpeningValuation opening,
         StockPerformanceTerminalValue terminal)
     {
         if (!terminal.Value.HasValue)
             return new StockPerformanceMetric(null, terminal.Reason);
+        if (!opening.Value.HasValue)
+            return new StockPerformanceMetric(null, opening.Reason);
 
         var flows = new List<StockPerformanceCashFlow>();
+        if (opening.Value.Value > 0m)
+            flows.Add(new StockPerformanceCashFlow(input.DateStart, -opening.Value.Value));
+
         foreach (var transaction in input.Transactions.Where(transaction =>
                      transaction.TradeDate >= input.DateStart && transaction.TradeDate <= input.DateEnd))
         {
@@ -405,6 +425,52 @@ public static class StockPerformanceCalculator
 
         flows.Add(new StockPerformanceCashFlow(input.DateEnd, terminal.Value.Value));
         return CalculateXirr(flows);
+    }
+
+    /// <summary>以 DateStart 前 Ledger replay 與最近 raw close 建立完整期初估值。</summary>
+    private static StockPerformanceOpeningValuation ResolveOpeningValue(
+        StockPerformanceInput input,
+        IReadOnlyDictionary<int, StockLedgerResult> replayByStock)
+    {
+        var openingHoldings = input.Stocks
+            .Where(stock => replayByStock.ContainsKey(stock.Id))
+            .Select(stock => (Stock: stock, Shares: ReplaySharesBeforeDate(stock.Id, input.DateStart, input.Transactions)))
+            .Where(item => item.Shares > DecimalTolerance)
+            .ToList();
+        if (openingHoldings.Count == 0)
+        {
+            return new StockPerformanceOpeningValuation(
+                0m,
+                "None",
+                StockPerformanceUnavailableReason.None);
+        }
+
+        var value = 0m;
+        foreach (var holding in openingHoldings)
+        {
+            var price = input.Prices
+                .Where(item => item.Market == holding.Stock.Market
+                    && NormalizeSymbol(item.Symbol) == NormalizeSymbol(holding.Stock.Symbol)
+                    && item.TradingDate < input.DateStart
+                    && item.Close > 0m)
+                .OrderByDescending(item => item.TradingDate)
+                .ThenByDescending(item => item.FetchedAtUtc)
+                .FirstOrDefault();
+            if (price?.Close is not > 0m)
+            {
+                return new StockPerformanceOpeningValuation(
+                    null,
+                    "Unavailable",
+                    StockPerformanceUnavailableReason.MissingOpeningValue);
+            }
+
+            value += holding.Shares * price.Close.Value;
+        }
+
+        return new StockPerformanceOpeningValuation(
+            value,
+            "HistoricalRawClose",
+            StockPerformanceUnavailableReason.None);
     }
 
     /// <summary>解析 period end 的目前價格或歷史 raw close terminal valuation。</summary>
@@ -624,6 +690,8 @@ public static class StockPerformanceCalculator
             summary,
             metric,
             metric,
+            null,
+            "Unavailable",
             [],
             [],
             quality);

@@ -454,9 +454,10 @@ public static class ReportEndpoints
             .AsNoTracking()
             .OrderBy(stock => stock.Id)
             .ToListAsync();
+        var priceLookbackStart = requestedStart.AddDays(-31);
         var prices = await db.HistoricalAdjustedPrices
             .AsNoTracking()
-            .Where(price => price.TradingDate >= requestedStart && price.TradingDate <= requestedEnd)
+            .Where(price => price.TradingDate >= priceLookbackStart && price.TradingDate <= requestedEnd)
             .ToListAsync();
 
         return StockPerformanceCalculator.Calculate(new StockPerformanceInput(
