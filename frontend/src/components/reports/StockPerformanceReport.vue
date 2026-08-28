@@ -84,14 +84,14 @@ const kpis = computed(() => {
   const value = report.value
   if (!value) return []
   return [
-    { key: 'currentGrossMarketValue', label: '目前總市值', value: formatMoney(value.summary.currentGrossMarketValue), reason: '' },
-    { key: 'remainingCostBasis', label: '剩餘成本基礎', value: formatMoney(value.summary.remainingCostBasis), reason: '' },
-    { key: 'realizedGainLoss', label: '已實現損益', value: formatMoney(value.summary.realizedGainLoss), reason: '' },
-    { key: 'unrealizedGainLoss', label: '未實現損益', value: formatMoney(value.summary.unrealizedGainLoss), reason: '' },
-    { key: 'netDividendIncome', label: '淨股息收入', value: formatMoney(value.summary.netDividendIncome), reason: '' },
-    { key: 'totalGainLoss', label: '總損益', value: formatMoney(value.summary.totalGainLoss), reason: '' },
-    { key: 'twr', label: 'TWR', value: formatMetric(value.twr, true), reason: metricReason(value.twr) },
-    { key: 'xirr', label: 'XIRR', value: formatMetric(value.xirr, true), reason: metricReason(value.xirr) },
+    { key: 'currentGrossMarketValue', label: '目前總市值', value: formatMoney(value.summary.currentGrossMarketValue), description: '', reason: '' },
+    { key: 'remainingCostBasis', label: '剩餘成本基礎', value: formatMoney(value.summary.remainingCostBasis), description: '', reason: '' },
+    { key: 'realizedGainLoss', label: '已實現損益', value: formatMoney(value.summary.realizedGainLoss), description: '', reason: '' },
+    { key: 'unrealizedGainLoss', label: '未實現損益', value: formatMoney(value.summary.unrealizedGainLoss), description: '', reason: '' },
+    { key: 'netDividendIncome', label: '淨股息收入', value: formatMoney(value.summary.netDividendIncome), description: '', reason: '' },
+    { key: 'totalGainLoss', label: '總損益', value: formatMoney(value.summary.totalGainLoss), description: '', reason: '' },
+    { key: 'twr', label: 'TWR', value: formatMetric(value.twr, true), description: '排除資金進出時點影響，反映投資組合本身表現。', reason: metricReason(value.twr) },
+    { key: 'xirr', label: 'XIRR', value: formatMetric(value.xirr, true), description: '依實際資金投入與取回日期計算的年化報酬。', reason: metricReason(value.xirr) },
   ]
 })
 
@@ -152,9 +152,11 @@ const monthlyChartOptions = computed(() => ({
             <Card v-for="item in kpis" :key="item.key" class="bg-bg-raised">
               <p class="text-xs text-text-secondary">{{ item.label }}</p>
               <p class="mt-1 text-xl font-semibold text-text-primary">{{ item.value }}</p>
+              <p v-if="item.description" class="mt-1 text-xs text-text-tertiary">{{ item.description }}</p>
               <p v-if="item.reason" class="mt-1 text-xs text-color-warning-text">{{ item.reason }}</p>
             </Card>
           </div>
+          <p data-testid="performance-return-method-note" class="text-xs text-text-tertiary">TWR 與 XIRR 採用不同計算觀點，數值不同屬正常現象。</p>
 
           <div v-if="report.hasSyntheticOpeningBalances || report.dataQuality.hasIncompleteLedgerCoverage || report.dataQuality.priceCoverage < 1" data-testid="performance-data-quality" class="space-y-2 rounded-xl border border-color-warning-border bg-color-warning-bg p-4 text-sm text-color-warning-text">
             <p class="font-medium">資料品質與追蹤邊界</p>

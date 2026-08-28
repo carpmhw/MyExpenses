@@ -3,13 +3,12 @@ import { computed, inject, onMounted, ref, watch } from 'vue'
 import { Line } from 'vue-chartjs'
 import { CategoryScale, Chart as ChartJS, Filler, Legend, LinearScale, LineElement, PointElement, Tooltip } from 'chart.js'
 import { api } from '../../api'
-import type { StockMarketRiskMetric, StockMarketRiskReport, StockMarketRiskUnavailableReason, StockPerformanceReport, StockStructureReport, StockValueTrendPoint } from '../../types'
+import type { StockMarketRiskMetric, StockMarketRiskReport, StockMarketRiskUnavailableReason, StockPerformanceReport, StockPerformanceUnavailableReason, StockStructureReport, StockValueTrendPoint } from '../../types'
 import Card from '../ui/Card.vue'
 import QueryState from '../ui/QueryState.vue'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { formatMoney } from '../../utils/format'
 import { getThemeColor } from '../../utils/themeColor'
-import { getCurrentYearRange } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
@@ -21,6 +20,14 @@ const emit = defineEmits<{
 const valueTrendMonths = ref<6 | 12 | 24 | 36 | 60>(12)
 const darkMode = inject<{ isDark: { value: boolean } }>('darkMode') ?? { isDark: ref(false) }
 const timeZone = useTimeZone()
+
+// 依系統時區今天建立股票總覽共用的 YTD 起訖日期。
+function getYearToDateRange(): { start: string; end: string } {
+  const dateEnd = timeZone.getToday()
+  return { start: `${dateEnd.slice(0, 4)}-01-01`, end: dateEnd }
+}
+
+const performanceRange = ref(getYearToDateRange())
 
 const structureQuery = useAsyncQuery<StockStructureReport>({
   key: () => ({ report: 'stock-structure' }),
@@ -45,12 +52,10 @@ const valueTrendQuery = useAsyncQuery<StockValueTrendPoint[]>({
 
 const performanceQuery = useAsyncQuery<StockPerformanceReport>({
   key: () => {
-    const range = getCurrentYearRange(new Date(), timeZone.timeZoneId.value)
-    return { report: 'stock-performance-summary', dateStart: range.start, dateEnd: range.end }
+    return { report: 'stock-performance-summary', dateStart: performanceRange.value.start, dateEnd: performanceRange.value.end }
   },
   query: ({ signal }) => {
-    const range = getCurrentYearRange(new Date(), timeZone.timeZoneId.value)
-    return api.reports.stockPerformance({ dateStart: range.start, dateEnd: range.end }, { signal })
+    return api.reports.stockPerformance({ dateStart: performanceRange.value.start, dateEnd: performanceRange.value.end }, { signal })
   },
   isEmpty: data => data.instrumentBreakdown.length === 0 && data.monthlyPoints.length === 0,
   immediate: false,
@@ -119,17 +124,25 @@ function formatSignedRiskPercentage(value: number): string {
 // 將績效 metric 轉成總覽摘要的百分比，並保留後端 unavailable reason。
 function formatPerformanceMetric(value: StockPerformanceReport['twr']): string {
   if (value.value === null) return `不可用：${formatPerformanceReason(value.unavailableReason)}`
-  return `${(value.value * 100).toFixed(1)}%`
+  return `${(value.value * 100).toFixed(2)}%`
 }
 
-// 將績效摘要的 unavailable reason 轉成簡短繁體中文。
-function formatPerformanceReason(reason: string): string {
+// 將績效摘要的 typed unavailable reason 轉成簡短繁體中文。
+function formatPerformanceReason(reason: StockPerformanceUnavailableReason): string {
   return {
+    None: '資料不足',
     NoHoldings: '尚無目前持股',
     NoLedgerHistory: '尚無 Ledger 歷史',
     IncompleteLedgerCoverage: 'Ledger 覆蓋不完整',
     InsufficientHistoricalPrices: '歷史價格不足',
     PeriodBeforeTrackingStart: '早於追蹤起點',
+    InsufficientCashFlows: '現金流不足',
+    NoCashFlowSignChange: '現金流沒有正負變化',
+    MissingTerminalValue: '缺少期末價值',
+    NoConvergence: '計算未收斂',
+    NonFiniteResult: '結果不是有限數值',
+    ZeroDenominator: '分母為零',
+    InvalidPeriod: '期間無效',
   }[reason] ?? '資料不足'
 }
 
@@ -170,11 +183,12 @@ function formatReason(reason: StockMarketRiskUnavailableReason | null | undefine
   return reason ? labels[reason] : '資料準備中'
 }
 
-// 載入三個彼此獨立的總覽資料來源，讓單一失敗不影響其他區塊。
+// 載入四個彼此獨立的總覽資料來源，讓單一失敗不影響其他區塊。
 function loadInitialData(): void {
   void structureQuery.refresh()
   void riskQuery.refresh()
   void valueTrendQuery.refresh()
+  performanceRange.value = getYearToDateRange()
   void performanceQuery.refresh()
 }
 
@@ -215,13 +229,16 @@ onMounted(loadInitialData)
           </div>
           <div>
             <p class="text-xs text-text-secondary">TWR</p>
-            <p class="mt-1 text-lg font-semibold text-text-primary">{{ formatPerformanceMetric(performanceData.twr) }}</p>
+            <p class="mt-1 text-lg font-semibold" :class="performanceData.twr.value === null ? 'text-color-warning-text' : 'text-text-primary'">{{ formatPerformanceMetric(performanceData.twr) }}</p>
+            <p class="mt-1 text-xs text-text-tertiary">排除資金進出時點影響</p>
           </div>
           <div>
             <p class="text-xs text-text-secondary">XIRR</p>
-            <p class="mt-1 text-lg font-semibold text-text-primary">{{ formatPerformanceMetric(performanceData.xirr) }}</p>
+            <p class="mt-1 text-lg font-semibold" :class="performanceData.xirr.value === null ? 'text-color-warning-text' : 'text-text-primary'">{{ formatPerformanceMetric(performanceData.xirr) }}</p>
+            <p class="mt-1 text-xs text-text-tertiary">考慮投入金額與時間</p>
           </div>
         </div>
+        <p data-testid="overview-return-method-note" class="mt-3 text-xs text-text-tertiary">TWR 與 XIRR 採用不同計算觀點，數值不同屬正常現象。</p>
       </Card>
     </QueryState>
 

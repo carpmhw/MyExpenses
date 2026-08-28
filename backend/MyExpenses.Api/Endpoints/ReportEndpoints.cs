@@ -433,7 +433,11 @@ public static class ReportEndpoints
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(timeZoneService);
 
-        var requestedEnd = dateEnd ?? timeZoneService.GetLocalDate();
+        var localToday = timeZoneService.GetLocalDate();
+        var requestedEnd = dateEnd ?? localToday;
+        if (requestedEnd > localToday)
+            throw new ArgumentException("dateEnd 不可晚於今天", nameof(dateEnd));
+
         var transactions = await db.StockTransactions
             .AsNoTracking()
             .OrderBy(transaction => transaction.TradeDate)
@@ -461,7 +465,7 @@ public static class ReportEndpoints
             stocks,
             transactions,
             prices,
-            timeZoneService.GetLocalDate()));
+            localToday));
     }
 
     /// <summary>處理績效報表 HTTP request 並將日期錯誤轉成安全的 typed response。</summary>

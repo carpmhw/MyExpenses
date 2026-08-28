@@ -127,6 +127,51 @@ public sealed class StockPerformanceEndpointTests
         Assert.Contains("InvalidDateRange", await response.Content.ReadAsStringAsync());
     }
 
+    /// <summary>驗證 endpoint 拒絕晚於系統時區今天的 dateEnd，並維持 typed error contract。</summary>
+    [Fact]
+    public async Task GetStockPerformance_RejectsFutureDateEnd()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateReportAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var response = await app.GetTestClient().GetAsync(
+            "/api/reports/stock-performance?dateStart=2026-01-01&dateEnd=9999-12-31");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("InvalidDateRange", body);
+        Assert.Contains("dateEnd 不可晚於今天", body);
+    }
+
+    /// <summary>驗證今天與歷史 dateEnd 都維持可計算的有效 request。</summary>
+    [Theory]
+    [InlineData("2026-08-28")]
+    [InlineData("2026-01-31")]
+    public async Task GetStockPerformance_AcceptsTodayAndHistoricalDateEnd(string dateEndValue)
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateReportAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var response = await app.GetTestClient().GetAsync(
+            $"/api/reports/stock-performance?dateStart=2026-01-01&dateEnd={dateEndValue}");
+
+        response.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(dateEndValue, json.RootElement.GetProperty("dateEnd").GetString());
+    }
+
+    /// <summary>驗證省略 dateEnd 時使用固定系統時區今天作為報表期末日。</summary>
+    [Fact]
+    public async Task GetStockPerformance_UsesLocalTodayWhenDateEndIsOmitted()
+    {
+        await using var db = await CreateDbContextAsync();
+        await using var app = await CreateReportAppAsync((SqliteConnection)db.Database.GetDbConnection());
+        var response = await app.GetTestClient().GetAsync(
+            "/api/reports/stock-performance?dateStart=2026-01-01");
+
+        response.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("2026-08-28", json.RootElement.GetProperty("dateEnd").GetString());
+    }
+
     /// <summary>驗證 all-time request 以最早 Ledger 交易日作為報表起點。</summary>
     [Fact]
     public async Task GetStockPerformance_AllTimeUsesTrackingStart()
@@ -179,7 +224,18 @@ public sealed class StockPerformanceEndpointTests
 
     /// <summary>建立固定台灣時區設定的測試服務。</summary>
     private static TimeZoneService CreateTimeZoneService()
-        => new(Microsoft.Extensions.Options.Options.Create(new TimeZoneOptions()));
+        => new(
+            Microsoft.Extensions.Options.Options.Create(new TimeZoneOptions()),
+            new FixedTimeProvider(new DateTime(2026, 8, 28, 12, 0, 0, DateTimeKind.Utc)));
+
+    /// <summary>提供固定 UTC 時間，讓 endpoint 日期 contract 測試不受執行環境影響。</summary>
+    private sealed class FixedTimeProvider(DateTime utcNow) : TimeProvider
+    {
+        private readonly DateTimeOffset _utcNow = new(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc));
+
+        /// <summary>回傳測試指定的 UTC instant。</summary>
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+    }
 
     /// <summary>建立開啟中的 SQLite 記憶體資料庫並套用目前 schema。</summary>
     private static async Task<AppDbContext> CreateDbContextAsync()
