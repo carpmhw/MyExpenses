@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Endpoints;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 using Xunit;
 
 namespace MyExpenses.Api.Tests.Endpoints;
@@ -68,6 +69,83 @@ public class SnapshotEndpointsTests
         Assert.Equal(1047432m, snapshot.TotalAssets);
         Assert.Equal(1047132m, snapshot.TotalNetWorth);
         Assert.Equal(NetWorthBasis.AssetsMinusLiabilities, snapshot.NetWorthBasis);
+    }
+
+    /// <summary>驗證手動快照以同一匯率 snapshot 保存混合幣別的 TWD 固定總額。</summary>
+    [Fact]
+    public async Task CreateSnapshot_UsesFixedMixedCurrencyValuation()
+    {
+        await using var db = await CreateDbContextAsync();
+        db.BankAccounts.Add(new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "23456",
+            Balance = 310m,
+            CurrencyCode = "USD",
+            AccountType = "活期",
+        });
+        await db.SaveChangesAsync();
+        var service = new FixedExchangeRateService(CreateRates(0.031m, isStale: true));
+
+        var snapshot = await SnapshotEndpoints.CreateSnapshotAsync(db, service);
+
+        Assert.Equal(11000m, snapshot.TotalBankBalance);
+        Assert.Equal(1057432m, snapshot.TotalAssets);
+        Assert.True(snapshot.ExchangeRateIsStale);
+        Assert.Equal(service.Snapshot.UpdatedAtUtc, snapshot.ExchangeRateUpdatedAt);
+        Assert.Equal(10000m, Assert.Single(snapshot.BankDetails, detail => detail.CurrencyCode == "USD").ConvertedBalance);
+    }
+
+    /// <summary>驗證缺少外幣匯率時手動快照不會寫入批次或半成品明細。</summary>
+    [Fact]
+    public async Task CreateSnapshot_RejectsMissingRateBeforePersistingAnything()
+    {
+        await using var db = await CreateDbContextAsync();
+        db.BankAccounts.Add(new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "23456",
+            Balance = 310m,
+            CurrencyCode = "USD",
+            AccountType = "活期",
+        });
+        await db.SaveChangesAsync();
+        var service = new FixedExchangeRateService(new ExchangeRateSnapshot(
+            "TWD",
+            new Dictionary<string, decimal> { ["TWD"] = 1m },
+            DateTime.UtcNow,
+            false));
+
+        await Assert.ThrowsAsync<ExchangeRateUnavailableException>(() =>
+            SnapshotEndpoints.CreateSnapshotAsync(db, service));
+
+        Assert.Equal(0, await db.SnapshotBatches.CountAsync());
+    }
+
+    /// <summary>驗證匯率服務更新後既有快照的明細與總額保持不變。</summary>
+    [Fact]
+    public async Task CreateSnapshot_PreservesHistoricalValuationAfterRateUpdate()
+    {
+        await using var db = await CreateDbContextAsync();
+        db.BankAccounts.Add(new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "23456",
+            Balance = 310m,
+            CurrencyCode = "USD",
+            AccountType = "活期",
+        });
+        await db.SaveChangesAsync();
+        var service = new MutableExchangeRateService(CreateRates(0.031m, isStale: false));
+
+        var snapshot = await SnapshotEndpoints.CreateSnapshotAsync(db, service);
+        service.Snapshot = CreateRates(0.030m, isStale: false);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.SnapshotBatches.SingleAsync();
+        Assert.Equal(snapshot.TotalBankBalance, stored.TotalBankBalance);
+        Assert.Equal(10000m, stored.BankDetails.Single(detail => detail.CurrencyCode == "USD").ConvertedBalance);
+        Assert.Equal(0.031m, stored.BankDetails.Single(detail => detail.CurrencyCode == "USD").ExchangeRate);
     }
 
     /// <summary>Verifies snapshot list date filtering includes snapshots on both boundary dates.</summary>
@@ -288,5 +366,70 @@ public class SnapshotEndpointsTests
             TotalStockValue = 0m,
             TotalStockCost = 0m,
         };
+    }
+
+    /// <summary>建立測試用的 TWD 基準匯率 snapshot。</summary>
+    private static ExchangeRateSnapshot CreateRates(decimal usdRate, bool isStale)
+        => new(
+            "TWD",
+            new Dictionary<string, decimal> { ["TWD"] = 1m, ["USD"] = usdRate },
+            new DateTime(2026, 8, 29, 0, 0, 0, DateTimeKind.Utc),
+            isStale);
+
+    /// <summary>提供固定匯率 snapshot 的測試服務。</summary>
+    private sealed class FixedExchangeRateService : IExchangeRateService
+    {
+        /// <summary>初始化固定匯率 snapshot。</summary>
+        public FixedExchangeRateService(ExchangeRateSnapshot snapshot) => Snapshot = snapshot;
+
+        /// <summary>取得測試服務目前的 snapshot。</summary>
+        public ExchangeRateSnapshot Snapshot { get; }
+
+        /// <summary>回傳固定測試 snapshot。</summary>
+        public Task<ExchangeRateSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Snapshot);
+
+        /// <summary>依指定 snapshot 執行測試換算。</summary>
+        public decimal? ConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot)
+        {
+            if (currencyCode == "TWD") return amount;
+            return snapshot.Rates.TryGetValue(currencyCode, out var rate) && rate > 0m ? amount / rate : null;
+        }
+
+        /// <summary>回傳測試換算的成功狀態。</summary>
+        public bool TryConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot, out decimal convertedAmount)
+        {
+            var result = ConvertToBase(amount, currencyCode, snapshot);
+            convertedAmount = result.GetValueOrDefault();
+            return result.HasValue;
+        }
+    }
+
+    /// <summary>提供可更新 snapshot 的測試服務以驗證歷史不可變性。</summary>
+    private sealed class MutableExchangeRateService : IExchangeRateService
+    {
+        /// <summary>初始化可變匯率 snapshot。</summary>
+        public MutableExchangeRateService(ExchangeRateSnapshot snapshot) => Snapshot = snapshot;
+
+        /// <summary>取得或更新目前測試 snapshot。</summary>
+        public ExchangeRateSnapshot Snapshot { get; set; }
+
+        /// <summary>回傳目前測試 snapshot。</summary>
+        public Task<ExchangeRateSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Snapshot);
+
+        /// <summary>依目前 snapshot 執行換算。</summary>
+        public decimal? ConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot)
+            => currencyCode == "TWD"
+                ? amount
+                : snapshot.Rates.TryGetValue(currencyCode, out var rate) && rate > 0m ? amount / rate : null;
+
+        /// <summary>回傳目前 snapshot 的換算成功狀態。</summary>
+        public bool TryConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot, out decimal convertedAmount)
+        {
+            var result = ConvertToBase(amount, currencyCode, snapshot);
+            convertedAmount = result.GetValueOrDefault();
+            return result.HasValue;
+        }
     }
 }

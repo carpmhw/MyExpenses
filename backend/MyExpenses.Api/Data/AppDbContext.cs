@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MyExpenses.Api.Models;
+using MyExpenses.Api.Services;
 
 namespace MyExpenses.Api.Data;
 
@@ -36,6 +37,7 @@ public class AppDbContext : DbContext
                 nameof(BankAccount.BankName),
                 nameof(BankAccount.AccountNumber),
                 nameof(BankAccount.AccountType),
+                nameof(BankAccount.CurrencyCode),
             },
             [typeof(Stock)] = new HashSet<string>(StringComparer.Ordinal)
             {
@@ -205,6 +207,10 @@ public class AppDbContext : DbContext
             e.ToTable("BankAccounts");
             e.Property(b => b.BankName).HasMaxLength(100).IsRequired();
             e.Property(b => b.AccountNumber).HasMaxLength(50).IsRequired();
+            e.Property(b => b.CurrencyCode)
+                .HasMaxLength(3)
+                .HasDefaultValue(CurrencyPolicy.DefaultCurrencyCode)
+                .IsRequired();
             e.Property(b => b.Balance).HasColumnType("decimal(18,2)");
             e.Property(b => b.AccountType).HasMaxLength(50);
         });
@@ -327,6 +333,10 @@ public class AppDbContext : DbContext
             e.Property(s => s.TotalLiabilities).HasColumnType("decimal(18,2)");
             e.Property(s => s.TotalNetWorth).HasColumnType("decimal(18,2)");
             e.Property(s => s.NetWorthBasis).HasConversion<string>().HasMaxLength(32).IsRequired();
+            e.Property(s => s.ExchangeRateUpdatedAt).HasColumnType("TEXT");
+            e.Property(s => s.ExchangeRateIsStale)
+                .HasDefaultValue(false)
+                .IsRequired();
             e.Property(s => s.TotalBankBalance).HasColumnType("decimal(18,2)");
             e.Property(s => s.TotalStockValue).HasColumnType("decimal(18,2)");
             e.Property(s => s.TotalStockCost).HasColumnType("decimal(18,2)");
@@ -336,7 +346,15 @@ public class AppDbContext : DbContext
                 b.Property(d => d.BankName).HasMaxLength(100);
                 b.Property(d => d.AccountNumber).HasMaxLength(50);
                 b.Property(d => d.AccountType).HasMaxLength(50);
+                b.Property(d => d.CurrencyCode)
+                    .HasMaxLength(3)
+                    .IsRequired();
                 b.Property(d => d.Balance).HasColumnType("decimal(18,2)");
+                b.Property(d => d.ExchangeRate).HasColumnType("decimal(18,12)");
+                b.Property(d => d.BaseCurrencyCode)
+                    .HasMaxLength(3)
+                    .IsRequired();
+                b.Property(d => d.ConvertedBalance).HasColumnType("decimal(18,2)");
             });
             e.OwnsMany(s => s.StockDetails, s =>
             {
@@ -463,7 +481,7 @@ public class AppDbContext : DbContext
         }
     }
 
-    /// <summary>Trims only allowlisted added or modified string properties before persistence.</summary>
+    /// <summary>儲存前只正規化 allow-list 內新增或修改的字串屬性。</summary>
     private void NormalizeTrackedStrings()
     {
         ChangeTracker.DetectChanges();
@@ -484,10 +502,19 @@ public class AppDbContext : DbContext
                     continue;
                 }
 
-                if (property.CurrentValue is not string value)
+                if (entry.Metadata.ClrType == typeof(BankAccount) &&
+                    propertyName == nameof(BankAccount.CurrencyCode))
                 {
+                    var rawCurrencyCode = property.CurrentValue as string;
+                    if (!CurrencyPolicy.TryNormalize(rawCurrencyCode, out var normalizedCurrencyCode))
+                        throw new ArgumentException("不支援的貨幣代碼", nameof(BankAccount.CurrencyCode));
+
+                    property.CurrentValue = normalizedCurrencyCode;
                     continue;
                 }
+
+                if (property.CurrentValue is not string value)
+                    continue;
 
                 var trimmedValue = value.Trim();
                 property.CurrentValue = trimmedValue.Length == 0 && property.Metadata.IsNullable

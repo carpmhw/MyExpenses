@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -7,6 +8,7 @@ namespace MyExpenses.Api.Endpoints;
 
 public static class ReportEndpoints
 {
+    /// <summary>註冊收入支出、資產負債、提款摘要與其他報表端點。</summary>
     public static void MapReportEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/reports");
@@ -101,8 +103,19 @@ public static class ReportEndpoints
         })
         .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
 
-        group.MapGet("/net-worth", async (AppDbContext db) =>
-            Results.Ok(await GetNetWorthAsync(db)));
+        group.MapGet("/net-worth", async (AppDbContext db, IServiceProvider services) =>
+        {
+            try
+            {
+                return Results.Ok(await GetNetWorthAsync(db, services.GetService<IExchangeRateService>()));
+            }
+            catch (ExchangeRateUnavailableException exception)
+            {
+                return Results.Problem(
+                    detail: exception.Message,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        });
 
         group.MapGet("/installment-forecast", async (int? months, AppDbContext db, TimeZoneService timeZoneService) =>
         {
@@ -142,15 +155,31 @@ public static class ReportEndpoints
             return Results.Ok(forecast);
         });
 
-        group.MapGet("/dashboard-summary", async (int? year, int? month, AppDbContext db, TimeZoneService timeZoneService) =>
+        group.MapGet("/dashboard-summary", async (
+            int? year,
+            int? month,
+            AppDbContext db,
+            TimeZoneService timeZoneService,
+            IServiceProvider services) =>
         {
             try
             {
-                return Results.Ok(await GetDashboardSummaryAsync(year, month, db, timeZoneService));
+                return Results.Ok(await GetDashboardSummaryAsync(
+                    year,
+                    month,
+                    db,
+                    timeZoneService,
+                    services.GetService<IExchangeRateService>()));
             }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(ex.Message);
+            }
+            catch (ExchangeRateUnavailableException ex)
+            {
+                return Results.Problem(
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
             }
         })
         .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
@@ -168,40 +197,34 @@ public static class ReportEndpoints
         })
         .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
 
-        group.MapGet("/monthly-summary", async (int? year, int? month, AppDbContext db, TimeZoneService timeZoneService) =>
+        group.MapGet("/monthly-summary", async (int? year, int? month, AppDbContext db, TimeZoneService timeZoneService, IServiceProvider services) =>
         {
-            var now = timeZoneService.GetLocalNow();
-            var y = year ?? now.Year;
-            var m = month ?? now.Month;
-            var start = new DateOnly(y, m, 1);
-            var end = start.AddMonths(1).AddDays(-1);
-
-            var totalIncome = await db.Transactions
-                .Where(t => t.Type == TransactionType.Income && t.Date >= start && t.Date <= end)
-                .SumAsync(t => t.Amount);
-
-            var totalExpense = await db.Transactions
-                .Where(t => t.Type == TransactionType.Expense && t.Date >= start && t.Date <= end)
-                .SumAsync(t => t.Amount);
-
-            var totalBankBalance = await db.BankAccounts.SumAsync(b => b.Balance);
-
-            return Results.Ok(new
+            try
             {
-                TotalIncome = totalIncome,
-                TotalExpense = totalExpense,
-                TotalBankBalance = totalBankBalance
-            });
+                return Results.Ok(await GetMonthlySummaryAsync(
+                    year,
+                    month,
+                    db,
+                    timeZoneService,
+                    services.GetService<IExchangeRateService>()));
+            }
+            catch (ExchangeRateUnavailableException exception)
+            {
+                return Results.Problem(
+                    detail: exception.Message,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
         })
         .RequireApiTokenScope(ApiTokenScopes.ReportsRead);
     }
 
-    /// <summary>Builds complete selected and previous month aggregates for the dashboard.</summary>
+    /// <summary>建立 Dashboard 選定月份與前一月份的完整彙總。</summary>
     public static async Task<DashboardSummaryResponse> GetDashboardSummaryAsync(
         int? year,
         int? month,
         AppDbContext db,
-        TimeZoneService timeZoneService)
+        TimeZoneService timeZoneService,
+        IExchangeRateService? exchangeRateService = null)
     {
         var current = timeZoneService.GetLocalDate();
         var selectedYear = year ?? current.Year;
@@ -215,8 +238,29 @@ public static class ReportEndpoints
         var selectedEnd = selectedStart.AddMonths(1).AddDays(-1);
         var previousStart = selectedStart.AddMonths(-1);
         var previousEnd = selectedStart.AddDays(-1);
-        var selected = await GetDashboardPeriodAsync(db, selectedStart, selectedEnd);
-        var previous = await GetDashboardPeriodAsync(db, previousStart, previousEnd);
+        var withdrawals = await db.Withdrawals
+            .Include(withdrawal => withdrawal.BankAccount)
+            .Where(withdrawal =>
+                withdrawal.Date >= previousStart
+                && withdrawal.Date <= selectedEnd)
+            .ToListAsync();
+        var exchangeRateSnapshot = await ExchangeRateSnapshotResolver.ResolveForAccountsAsync(
+            withdrawals.Select(withdrawal => withdrawal.BankAccount),
+            exchangeRateService);
+        var selected = await GetDashboardPeriodAsync(
+            db,
+            selectedStart,
+            selectedEnd,
+            withdrawals,
+            exchangeRateService,
+            exchangeRateSnapshot);
+        var previous = await GetDashboardPeriodAsync(
+            db,
+            previousStart,
+            previousEnd,
+            withdrawals,
+            exchangeRateService,
+            exchangeRateSnapshot);
         var activeInstallmentCount = await db.Installments
             .CountAsync(installment => installment.Payments.Any(payment => !payment.IsPaid));
 
@@ -229,10 +273,16 @@ public static class ReportEndpoints
             selected.InstallmentDueAmount,
             selected.InstallmentDuePaymentCount,
             activeInstallmentCount,
-            previous.TotalWithdrawals - previous.TotalExpenses);
+            previous.TotalWithdrawals - previous.TotalExpenses,
+            CurrencyPolicy.BaseCurrencyCode,
+            exchangeRateSnapshot.UpdatedAtUtc == DateTime.UnixEpoch
+                ? null
+                : exchangeRateSnapshot.UpdatedAtUtc,
+            exchangeRateSnapshot.IsStale,
+            true);
     }
 
-    /// <summary>Returns actual complete net-worth snapshot points, selecting the latest point in each local month.</summary>
+    /// <summary>回傳完整淨值快照趨勢，並選取各系統本地月份的最新資料點。</summary>
     public static async Task<IReadOnlyList<NetWorthTrendPoint>> GetNetWorthTrendAsync(
         int? months,
         AppDbContext db,
@@ -291,17 +341,24 @@ public static class ReportEndpoints
             .ToList();
     }
 
-    /// <summary>Aggregates withdrawals, expenses, and unpaid due payments for one inclusive local period.</summary>
+    /// <summary>彙總一個含起迄日之本地期間的提款、支出與未繳應付款。</summary>
     private static async Task<DashboardPeriodAggregate> GetDashboardPeriodAsync(
         AppDbContext db,
         DateOnly start,
-        DateOnly end)
+        DateOnly end,
+        IReadOnlyCollection<Withdrawal> withdrawals,
+        IExchangeRateService? exchangeRateService,
+        ExchangeRateSnapshot exchangeRateSnapshot)
     {
-        var totalWithdrawals = await db.Withdrawals
+        var periodWithdrawals = withdrawals
             .Where(withdrawal => withdrawal.Date >= start && withdrawal.Date <= end)
-            .SumAsync(withdrawal => (decimal?)withdrawal.Amount) ?? 0m;
-        var withdrawalCount = await db.Withdrawals
-            .CountAsync(withdrawal => withdrawal.Date >= start && withdrawal.Date <= end);
+            .ToList();
+        var totalWithdrawals = periodWithdrawals.Sum(withdrawal =>
+            ConvertDashboardWithdrawalAmount(
+                withdrawal,
+                exchangeRateService,
+                exchangeRateSnapshot));
+        var withdrawalCount = periodWithdrawals.Count;
         var totalExpenses = await db.Transactions
             .Where(transaction =>
                 transaction.Type == TransactionType.Expense
@@ -331,17 +388,50 @@ public static class ReportEndpoints
             installmentDuePaymentCount);
     }
 
-    /// <summary>Builds the net-worth report using estimated net sell value for stock assets.</summary>
-    public static async Task<NetWorthReportResponse> GetNetWorthAsync(AppDbContext db)
+    /// <summary>依提款關聯帳戶幣別將原幣提款換算為 TWD。</summary>
+    private static decimal ConvertDashboardWithdrawalAmount(
+        Withdrawal withdrawal,
+        IExchangeRateService? exchangeRateService,
+        ExchangeRateSnapshot exchangeRateSnapshot)
     {
+        var currencyCode = CurrencyPolicy.NormalizeOrDefault(withdrawal.BankAccount.CurrencyCode);
+        if (currencyCode == CurrencyPolicy.BaseCurrencyCode)
+            return withdrawal.Amount;
+        if (exchangeRateService is null)
+            throw new ExchangeRateUnavailableException("存在外幣提款但未設定匯率服務");
+
+        return exchangeRateService.ConvertToBase(
+                   withdrawal.Amount,
+                   currencyCode,
+                   exchangeRateSnapshot)
+               ?? throw new ExchangeRateUnavailableException(
+                   $"缺少 {currencyCode} 匯率，無法產生 Dashboard 摘要");
+    }
+
+    /// <summary>建立使用股票預估賣出淨值與 TWD 銀行估值的資產負債報表。</summary>
+    public static async Task<NetWorthReportResponse> GetNetWorthAsync(
+        AppDbContext db,
+        IExchangeRateService? exchangeRateService = null)
+    {
+        ArgumentNullException.ThrowIfNull(db);
         var bankAccounts = await db.BankAccounts.ToListAsync();
         var stocks = await db.Stocks.ToListAsync();
+        var containsForeignCurrency = bankAccounts.Any(account =>
+            CurrencyPolicy.NormalizeOrDefault(account.CurrencyCode) != CurrencyPolicy.BaseCurrencyCode);
+        var exchangeRateSnapshot = await ExchangeRateSnapshotResolver.ResolveForAccountsAsync(
+            bankAccounts,
+            exchangeRateService);
 
         var bankRows = bankAccounts
-            .Select(b => new NetWorthBankAccountRow(b.BankName, b.AccountNumber, b.Balance))
+            .Select(account => new NetWorthBankAccountRow(
+                account.BankName,
+                account.AccountNumber,
+                CurrencyPolicy.NormalizeOrDefault(account.CurrencyCode),
+                account.Balance,
+                ConvertBankBalance(account, exchangeRateService, exchangeRateSnapshot)))
             .ToList();
         var stockRows = stocks.Select(ToNetWorthStockRow).ToList();
-        var totalBankBalance = bankRows.Sum(b => b.Balance);
+        var totalBankBalance = bankRows.Sum(b => b.ConvertedBalance);
         var totalStockValue = stockRows.Sum(s => s.EstimatedNetSellValue);
         var totalAssets = totalBankBalance + totalStockValue;
 
@@ -353,8 +443,78 @@ public static class ReportEndpoints
             totalAssets,
             unpaidInstallments,
             totalAssets - unpaidInstallments,
+            totalBankBalance,
             bankRows,
-            stockRows);
+            stockRows,
+            CurrencyPolicy.BaseCurrencyCode,
+            containsForeignCurrency ? exchangeRateSnapshot.UpdatedAtUtc : null,
+            exchangeRateSnapshot.IsStale,
+            true);
+    }
+
+    /// <summary>以共用匯率 snapshot 將單一銀行帳戶換算為 TWD。</summary>
+    private static decimal ConvertBankBalance(
+        BankAccount account,
+        IExchangeRateService? exchangeRateService,
+        ExchangeRateSnapshot exchangeRateSnapshot)
+    {
+        var currencyCode = CurrencyPolicy.NormalizeOrDefault(account.CurrencyCode);
+        if (currencyCode == CurrencyPolicy.BaseCurrencyCode)
+            return account.Balance;
+        if (exchangeRateService is null)
+            throw new ExchangeRateUnavailableException("存在外幣帳戶但未設定匯率服務");
+
+        var convertedBalance = exchangeRateService.ConvertToBase(
+            account.Balance,
+            currencyCode,
+            exchangeRateSnapshot);
+        return convertedBalance
+            ?? throw new ExchangeRateUnavailableException($"缺少 {currencyCode} 匯率，無法產生報表");
+    }
+
+    /// <summary>建立指定月份的收入、支出與 TWD 銀行資產摘要。</summary>
+    public static async Task<MonthlySummaryReportResponse> GetMonthlySummaryAsync(
+        int? year,
+        int? month,
+        AppDbContext db,
+        TimeZoneService timeZoneService,
+        IExchangeRateService? exchangeRateService = null)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(timeZoneService);
+        var now = timeZoneService.GetLocalNow();
+        var selectedYear = year ?? now.Year;
+        var selectedMonth = month ?? now.Month;
+        var start = new DateOnly(selectedYear, selectedMonth, 1);
+        var end = start.AddMonths(1).AddDays(-1);
+
+        var totalIncome = await db.Transactions
+            .Where(transaction => transaction.Type == TransactionType.Income
+                && transaction.Date >= start
+                && transaction.Date <= end)
+            .SumAsync(transaction => transaction.Amount);
+        var totalExpense = await db.Transactions
+            .Where(transaction => transaction.Type == TransactionType.Expense
+                && transaction.Date >= start
+                && transaction.Date <= end)
+            .SumAsync(transaction => transaction.Amount);
+        var bankAccounts = await db.BankAccounts.ToListAsync();
+        var containsForeignCurrency = bankAccounts.Any(account =>
+            CurrencyPolicy.NormalizeOrDefault(account.CurrencyCode) != CurrencyPolicy.BaseCurrencyCode);
+        var exchangeRateSnapshot = await ExchangeRateSnapshotResolver.ResolveForAccountsAsync(
+            bankAccounts,
+            exchangeRateService);
+        var totalBankBalance = bankAccounts
+            .Sum(account => ConvertBankBalance(account, exchangeRateService, exchangeRateSnapshot));
+
+        return new MonthlySummaryReportResponse(
+            totalIncome,
+            totalExpense,
+            totalBankBalance,
+            CurrencyPolicy.BaseCurrencyCode,
+            containsForeignCurrency ? exchangeRateSnapshot.UpdatedAtUtc : null,
+            exchangeRateSnapshot.IsStale,
+            true);
     }
 
     /// <summary>載入持股並建立目前篩選範圍的持股結構報表。</summary>
@@ -542,7 +702,7 @@ public static class ReportEndpoints
             .ToList();
     }
 
-    /// <summary>Maps a stock holding to a net-worth report row with estimated value fields.</summary>
+    /// <summary>將股票持倉映射為包含預估價值欄位的淨值報表資料列。</summary>
     private static NetWorthStockRow ToNetWorthStockRow(Stock stock)
     {
         var valuation = StockValuationCalculator.Calculate(stock);
@@ -561,13 +721,29 @@ public sealed record NetWorthReportResponse(
     decimal TotalAssets,
     decimal TotalLiabilities,
     decimal NetWorth,
+    decimal TotalBankBalance,
     IReadOnlyList<NetWorthBankAccountRow> BankAccounts,
-    IReadOnlyList<NetWorthStockRow> Stocks);
+    IReadOnlyList<NetWorthStockRow> Stocks,
+    string BaseCurrency,
+    DateTime? ExchangeRateUpdatedAt,
+    bool ExchangeRateIsStale,
+    bool ConversionAvailable);
 
 public sealed record NetWorthBankAccountRow(
     string BankName,
     string AccountNumber,
-    decimal Balance);
+    string CurrencyCode,
+    decimal Balance,
+    decimal ConvertedBalance);
+
+public sealed record MonthlySummaryReportResponse(
+    decimal TotalIncome,
+    decimal TotalExpense,
+    decimal TotalBankBalance,
+    string BaseCurrency,
+    DateTime? ExchangeRateUpdatedAt,
+    bool ExchangeRateIsStale,
+    bool ConversionAvailable);
 
 public sealed record NetWorthStockRow(
     string Name,
@@ -608,7 +784,11 @@ public sealed record DashboardSummaryResponse(
     decimal InstallmentDueAmount,
     int InstallmentDuePaymentCount,
     int ActiveInstallmentCount,
-    decimal PreviousDisposableBalance);
+    decimal PreviousDisposableBalance,
+    string BaseCurrency,
+    DateTime? ExchangeRateUpdatedAt,
+    bool ExchangeRateIsStale,
+    bool ConversionAvailable);
 
 public sealed record NetWorthTrendPoint(
     string Month,
@@ -618,7 +798,7 @@ public sealed record NetWorthTrendPoint(
     decimal TotalLiabilities,
     decimal NetWorth);
 
-/// <summary>Holds one local-period aggregate used to build a dashboard response.</summary>
+/// <summary>保存建立 Dashboard response 使用的單一本地期間彙總。</summary>
 internal sealed record DashboardPeriodAggregate(
     decimal TotalWithdrawals,
     int WithdrawalCount,

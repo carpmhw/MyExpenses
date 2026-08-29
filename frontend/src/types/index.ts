@@ -157,18 +157,29 @@ export interface CreditCardBill {
   card: CreditCard
 }
 
+export type CurrencyCode = 'TWD' | 'USD' | 'JPY' | 'CNY' | 'HKD'
+
 export interface BankAccount {
   id: number
   bankName: string
   accountNumber: string
   balance: number
   accountType: string
+  currencyCode: CurrencyCode
   createdAt: string
   updatedAt: string
 }
 
-export interface BankAccountListResponse extends PaginatedResponse<BankAccount> {
-  totalBalance: number
+export interface BankAccountListItem extends BankAccount {
+  convertedBalance: number | null
+}
+
+export interface BankAccountListResponse extends PaginatedResponse<BankAccountListItem> {
+  baseCurrency: CurrencyCode
+  totalBalanceInBaseCurrency: number | null
+  exchangeRateUpdatedAt: string | null
+  exchangeRateIsStale: boolean
+  conversionAvailable: boolean
 }
 
 export type StockInstrumentType = 'Stock' | 'StockEtf' | 'BondEtf'
@@ -646,6 +657,11 @@ export interface WithdrawalListSummary {
   count: number
   averageAmount: number
   maxAmount: number
+  baseCurrency: CurrencyCode
+  exchangeRateUpdatedAt: string | null
+  exchangeRateIsStale: boolean
+  conversionAvailable: boolean
+  totalAmountInBaseCurrency: number
 }
 
 export interface WithdrawalListResponse extends PaginatedResponse<Withdrawal> {
@@ -671,7 +687,18 @@ export interface NetWorth {
   totalAssets: number
   totalLiabilities: number
   netWorth: number
-  bankAccounts: { bankName: string; accountNumber: string; balance: number }[]
+  totalBankBalance: number
+  baseCurrency: CurrencyCode
+  exchangeRateUpdatedAt: string | null
+  exchangeRateIsStale: boolean
+  conversionAvailable: boolean
+  bankAccounts: {
+    bankName: string
+    accountNumber: string
+    currencyCode: CurrencyCode
+    balance: number
+    convertedBalance: number
+  }[]
   stocks: { name: string; symbol: string; instrumentType: StockInstrumentType; shares: number; currentPrice: number; grossMarketValue: number; estimatedNetSellValue: number }[]
 }
 
@@ -693,6 +720,10 @@ export interface MonthlySummary {
   totalIncome: number
   totalExpense: number
   totalBankBalance: number
+  baseCurrency: CurrencyCode
+  exchangeRateUpdatedAt: string | null
+  exchangeRateIsStale: boolean
+  conversionAvailable: boolean
 }
 
 export interface DashboardSummary {
@@ -705,13 +736,21 @@ export interface DashboardSummary {
   installmentDuePaymentCount: number
   activeInstallmentCount: number
   previousDisposableBalance: number
+  baseCurrency: CurrencyCode
+  exchangeRateUpdatedAt: string | null
+  exchangeRateIsStale: boolean
+  conversionAvailable: boolean
 }
 
 export interface BankDetail {
   bankName: string
   accountNumber: string
   accountType: string
+  currencyCode: CurrencyCode
   balance: number
+  exchangeRate: number
+  baseCurrencyCode: CurrencyCode
+  convertedBalance: number
 }
 
 export interface StockDetail {
@@ -739,6 +778,8 @@ export interface SnapshotBatch {
   totalStockCost: number
   bankDetails: BankDetail[]
   stockDetails: StockDetail[]
+  exchangeRateUpdatedAt: string | null
+  exchangeRateIsStale: boolean
 }
 
 export interface AutoSnapshotConfig {
@@ -830,6 +871,11 @@ export interface CompareBankDetail {
   accountNumber: string
   oldBalance: number
   newBalance: number
+  oldCurrencyCode: CurrencyCode | null
+  newCurrencyCode: CurrencyCode | null
+  oldConvertedBalance: number
+  newConvertedBalance: number
+  currencyChanged: boolean
   change: number
   changePercent: number
 }
@@ -929,5 +975,6 @@ export interface ExchangeRateResponse {
   base: string
   rates: Record<string, number>
   updatedAt: string
+  isStale: boolean
   warning?: string
 }

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { SnapshotBatch } from '../../types'
+import type { CurrencyCode, SnapshotBatch } from '../../types'
 import Modal from '../ui/Modal.vue'
-import { formatMoney, formatShares } from '../../utils/format'
+import { formatCurrency, formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
 import { formatSnapshotAccountSuffix, hasCompleteNetWorthBasis } from '../../utils/snapshot'
 import { useTimeZone } from '../../composables/useTimeZone'
@@ -14,13 +14,13 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 const timeZone = useTimeZone()
 
-// Exposes the nullable selected snapshot to the template.
+// 將 nullable 的選定快照提供給 template 使用。
 const snapshot = computed(() => props.snapshot)
 
-// Determines whether the selected snapshot contains a historical liability basis.
+// 判斷選定快照是否包含歷史負債口徑。
 const hasCompleteBasis = computed(() => snapshot.value ? hasCompleteNetWorthBasis(snapshot.value) : false)
 
-// Chooses a truthful aggregate label and value for legacy and complete snapshots.
+// 為舊版與完整快照選擇符合資料事實的彙總標籤及數值。
 const snapshotAggregate = computed(() => {
   if (!snapshot.value) return { label: '資產總額', value: 0 }
   return hasCompleteBasis.value
@@ -28,23 +28,36 @@ const snapshotAggregate = computed(() => {
     : { label: '資產總額', value: snapshot.value.totalAssets }
 })
 
-// Calculates aggregate stock gain or loss from the selected historical snapshot.
+// 依選定歷史快照計算股票合計損益。
 const stockGainLoss = computed(() => {
   if (!snapshot.value) return 0
   return snapshot.value.totalStockValue - snapshot.value.totalStockCost
 })
 
-// Formats a snapshot timestamp using the configured application time zone.
+// 使用應用程式設定時區格式化快照時間。
 function formatDate(date: string): string {
   return timeZone.formatDateTime(date)
 }
 
-// Adds an explicit plus sign to positive monetary changes.
+// 格式化快照銀行明細的原幣金額與固定 TWD 估值。
+function formatBankAmount(amount: number, currencyCode: CurrencyCode | undefined): string {
+  return formatCurrency(amount, currencyCode ?? 'TWD')
+}
+
+// 以快照保存的基準幣別、匯率與原幣顯示不可變換算來源。
+function formatStoredExchangeRate(bank: SnapshotBatch['bankDetails'][number]): string {
+  const baseCurrency = bank.baseCurrencyCode ?? 'TWD'
+  const currency = bank.currencyCode ?? 'TWD'
+  const rate = Number(bank.exchangeRate ?? 1).toLocaleString('zh-TW', { maximumFractionDigits: 8 })
+  return `1 ${baseCurrency} = ${rate} ${currency}`
+}
+
+// 為正數金額變化加上明確的正號。
 function formatGainLoss(value: number): string {
   return value > 0 ? `+${formatMoney(value)}` : formatMoney(value)
 }
 
-// Selects semantic text colors for positive, negative, and neutral changes.
+// 依正數、負數與零值變化選擇語意文字顏色。
 function gainLossClass(value: number): string {
   if (value > 0) return 'text-color-income-text'
   if (value < 0) return 'text-color-expense-text'
@@ -70,6 +83,9 @@ function gainLossClass(value: number): string {
         <p v-if="snapshot.notes?.trim()" class="mt-3 text-sm text-text-secondary whitespace-pre-wrap break-words">
           {{ snapshot.notes.trim() }}
         </p>
+        <p v-if="snapshot.exchangeRateIsStale" class="mt-3 text-xs text-color-warning-text">
+          此快照使用過期匯率{{ snapshot.exchangeRateUpdatedAt ? `，更新於 ${formatDate(snapshot.exchangeRateUpdatedAt)}` : '' }}
+        </p>
       </div>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -84,7 +100,7 @@ function gainLossClass(value: number): string {
 
         <div class="min-w-0 rounded-xl border border-border-default bg-bg-card p-4">
           <p class="text-sm text-text-secondary">銀行總額</p>
-          <p class="mt-2 break-words text-xl font-semibold text-text-primary">{{ formatMoney(snapshot.totalBankBalance) }}</p>
+           <p class="mt-2 break-words text-xl font-semibold text-text-primary">{{ formatCurrency(snapshot.totalBankBalance, 'TWD') }}</p>
         </div>
 
         <div class="min-w-0 rounded-xl border border-border-default bg-bg-card p-4 sm:col-span-2 lg:col-span-1">
@@ -120,16 +136,22 @@ function gainLossClass(value: number): string {
                 <tr class="border-b border-border-default text-sm text-text-secondary">
                   <th scope="col" class="w-[28%] px-3 py-3 font-medium">銀行名稱</th>
                   <th scope="col" class="w-[28%] px-3 py-3 font-medium">帳號後五碼</th>
-                  <th scope="col" class="w-[24%] px-3 py-3 font-medium">帳戶類型</th>
-                  <th scope="col" class="w-[20%] px-3 py-3 text-right font-medium">餘額</th>
+                  <th scope="col" class="w-[16%] px-3 py-3 font-medium">幣別</th>
+                   <th scope="col" class="w-[18%] px-3 py-3 font-medium">帳戶類型</th>
+                   <th scope="col" class="w-[18%] px-3 py-3 text-right font-medium">原幣餘額</th>
+                   <th scope="col" class="w-[18%] px-3 py-3 text-right font-medium">保存匯率</th>
+                   <th scope="col" class="w-[18%] px-3 py-3 text-right font-medium">折合 TWD</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(bank, bankIndex) in snapshot.bankDetails" :key="`${bank.bankName}-${bankIndex}`" class="border-b border-border-default last:border-b-0">
                   <td class="min-w-0 break-words px-3 py-3 text-sm text-text-primary">{{ bank.bankName }}</td>
                   <td class="min-w-0 break-all px-3 py-3 font-mono text-sm text-text-secondary">{{ formatSnapshotAccountSuffix(bank.accountNumber) }}</td>
-                  <td class="min-w-0 break-words px-3 py-3 text-sm text-text-secondary">{{ bank.accountType || '未提供' }}</td>
-                  <td class="min-w-0 break-all px-3 py-3 text-right text-sm font-medium text-text-primary">{{ formatMoney(bank.balance) }}</td>
+                   <td class="min-w-0 break-words px-3 py-3 text-sm text-text-secondary">{{ bank.currencyCode || 'TWD' }}</td>
+                    <td class="min-w-0 break-words px-3 py-3 text-sm text-text-secondary">{{ bank.accountType || '未提供' }}</td>
+                    <td class="min-w-0 break-all px-3 py-3 text-right text-sm font-medium text-text-primary">{{ formatBankAmount(bank.balance, bank.currencyCode) }}</td>
+                    <td class="min-w-0 break-words px-3 py-3 text-right text-sm text-text-secondary">{{ formatStoredExchangeRate(bank) }}</td>
+                    <td class="min-w-0 break-all px-3 py-3 text-right text-sm font-medium text-text-primary">{{ formatCurrency(bank.convertedBalance ?? bank.balance, bank.baseCurrencyCode ?? 'TWD') }}</td>
                 </tr>
               </tbody>
             </table>
@@ -141,18 +163,30 @@ function gainLossClass(value: number): string {
                 <p class="text-xs text-text-secondary">銀行名稱</p>
                 <p class="mt-1 break-words font-medium text-text-primary">{{ bank.bankName }}</p>
               </div>
-              <dl class="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
+               <dl class="mt-4 grid min-w-0 grid-cols-2 gap-3">
                 <div class="min-w-0">
                   <dt class="text-xs text-text-secondary">帳號後五碼</dt>
                   <dd class="mt-1 break-all font-mono text-sm text-text-primary">{{ formatSnapshotAccountSuffix(bank.accountNumber) }}</dd>
                 </div>
                 <div class="min-w-0">
+                  <dt class="text-xs text-text-secondary">幣別</dt>
+                  <dd class="mt-1 text-sm text-text-primary">{{ bank.currencyCode || 'TWD' }}</dd>
+                </div>
+                <div class="min-w-0">
                   <dt class="text-xs text-text-secondary">帳戶類型</dt>
                   <dd class="mt-1 break-words text-sm text-text-primary">{{ bank.accountType || '未提供' }}</dd>
                 </div>
-                <div class="min-w-0">
-                  <dt class="text-xs text-text-secondary">餘額</dt>
-                  <dd class="mt-1 min-w-0 break-all whitespace-normal text-sm font-medium text-text-primary">{{ formatMoney(bank.balance) }}</dd>
+                 <div class="min-w-0">
+                   <dt class="text-xs text-text-secondary">原幣餘額</dt>
+                   <dd class="mt-1 min-w-0 break-all whitespace-normal text-sm font-medium text-text-primary">{{ formatBankAmount(bank.balance, bank.currencyCode) }}</dd>
+                 </div>
+                 <div class="min-w-0">
+                   <dt class="text-xs text-text-secondary">保存匯率</dt>
+                   <dd class="mt-1 min-w-0 break-words text-sm text-text-primary">{{ formatStoredExchangeRate(bank) }}</dd>
+                 </div>
+                 <div class="min-w-0">
+                  <dt class="text-xs text-text-secondary">折合 TWD</dt>
+                  <dd class="mt-1 min-w-0 break-all whitespace-normal text-sm font-medium text-text-primary">{{ formatCurrency(bank.convertedBalance ?? bank.balance, bank.baseCurrencyCode ?? 'TWD') }}</dd>
                 </div>
               </dl>
             </article>

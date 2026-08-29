@@ -10,6 +10,8 @@ public class SnapshotBatch
     public decimal? TotalLiabilities { get; set; }
     public decimal TotalNetWorth { get; set; }
     public NetWorthBasis NetWorthBasis { get; set; } = NetWorthBasis.AssetsOnly;
+    public DateTime? ExchangeRateUpdatedAt { get; set; }
+    public bool ExchangeRateIsStale { get; set; }
     public decimal TotalBankBalance { get; set; }
     public decimal TotalStockValue { get; set; }
     public decimal TotalStockCost { get; set; }
@@ -22,7 +24,11 @@ public class BankDetail
     public string BankName { get; set; } = string.Empty;
     public string AccountNumber { get; set; } = string.Empty;
     public string AccountType { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = "TWD";
     public decimal Balance { get; set; }
+    public decimal ExchangeRate { get; set; } = 1m;
+    public string BaseCurrencyCode { get; set; } = "TWD";
+    public decimal ConvertedBalance { get; set; }
 }
 
 public class StockDetail

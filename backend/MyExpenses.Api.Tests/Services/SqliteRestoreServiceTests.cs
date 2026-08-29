@@ -187,15 +187,6 @@ public class SqliteRestoreServiceTests
             Category = category,
             PaymentMethod = paymentMethod,
         });
-        db.BankAccounts.Add(new BankAccount
-        {
-            BankName = "測試銀行",
-            AccountNumber = "12345",
-            Balance = 1000m,
-            AccountType = "活期",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        });
         db.CreditCards.Add(new CreditCard
         {
             BankName = "測試銀行",
@@ -206,6 +197,11 @@ public class SqliteRestoreServiceTests
             CreditLimit = 10000m,
         });
         await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT INTO BankAccounts (BankName, AccountNumber, Balance, AccountType, CreatedAt, UpdatedAt) "
+            + "VALUES ('測試銀行', '12345', 1000, '活期', $created_at, $updated_at)",
+            new SqliteParameter("$created_at", DateTime.UtcNow),
+            new SqliteParameter("$updated_at", DateTime.UtcNow));
     }
 
     /// <summary>建立目前 migration 的 active database，供驗證 rollback copy 內容。</summary>

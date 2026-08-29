@@ -412,6 +412,8 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
         },
         "twr": {"value": 0.12, "unavailableReason": "None"},
         "xirr": {"value": 0.18, "unavailableReason": "None"},
+        "xirrOpeningValue": 5000,
+        "xirrOpeningValuationSource": "HistoricalRawClose",
         "monthlyPoints": [{
             "month": "2026-08",
             "endingMarketValue": 6000,
@@ -447,6 +449,7 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
     created_operations: list[str] = []
 
     def stocks_and_ledger(route: Route) -> None:
+        """回應股票、Ledger、費稅估算與交易 mutation 的 deterministic API route。"""
         path = urlparse(route.request.url).path
         if path == "/api/stocks" and route.request.method == "GET":
             route_json(route, stock_list)
@@ -471,6 +474,9 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
         if path == "/api/stocks/ledger" and route.request.method == "GET":
             route_json(route, {"items": [ledger_row], "total": 1, "page": 1, "pageSize": 20})
             return
+        if path == "/api/stocks/ledger/estimate-costs" and route.request.method == "POST":
+            route_json(route, {"fee": 10, "tax": 1})
+            return
         if path.endswith("/transactions") and route.request.method == "POST":
             created_operations.append("transaction")
             route_json(route, ledger_row, status=201)
@@ -478,6 +484,7 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
         route.fallback()
 
     mocked_page.route("**/api/stocks**", stocks_and_ledger)
+
     mocked_page.route("**/api/reports/stock-performance**", lambda route: route_json(route, performance))
     mocked_page.goto("/stocks")
 
@@ -500,6 +507,7 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
     dialog = mocked_page.get_by_role("dialog")
     dialog.get_by_test_id("transaction-shares").fill("2")
     dialog.get_by_test_id("transaction-price").fill("610")
+    expect(dialog.get_by_test_id("transaction-estimate-ready")).to_be_visible()
     dialog.get_by_test_id("transaction-save").click()
     expect(mocked_page.get_by_text("交易已建立").last).to_be_visible()
 
@@ -507,6 +515,8 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
     dialog = mocked_page.get_by_role("dialog")
     dialog.get_by_test_id("transaction-type").select_option("Dividend")
     dialog.get_by_test_id("transaction-cash-amount").fill("100")
+    dialog.get_by_test_id("transaction-fee").fill("0")
+    dialog.get_by_test_id("transaction-tax").fill("0")
     dialog.get_by_test_id("transaction-save").click()
     expect(mocked_page.get_by_text("交易已建立").last).to_be_visible()
 
@@ -515,6 +525,7 @@ def test_stock_ledger_initialization_and_performance_smoke(mocked_page: Page) ->
     dialog.get_by_test_id("transaction-type").select_option("Sell")
     dialog.get_by_test_id("transaction-shares").fill("2")
     dialog.get_by_test_id("transaction-price").fill("610")
+    expect(dialog.get_by_test_id("transaction-estimate-ready")).to_be_visible()
     dialog.get_by_test_id("transaction-save").click()
     expect(mocked_page.get_by_text("交易已建立").last).to_be_visible()
     assert created_operations.count("position") == 1

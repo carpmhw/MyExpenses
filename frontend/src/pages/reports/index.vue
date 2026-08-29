@@ -4,7 +4,7 @@ import { api } from '../../api'
 import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, NetWorthTrendPoint } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import QueryState from '../../components/ui/QueryState.vue'
-import { formatMoney, formatShares } from '../../utils/format'
+import { formatCurrency, formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
 import { addCalendarDays, getCurrentYearRange } from '../../utils/timezone'
 import { getThemeColor } from '../../utils/themeColor'
@@ -92,6 +92,11 @@ const categoryData = computed(() => categoryQuery.data.value ?? [])
 const netWorthData = computed(() => netWorthQuery.data.value ?? null)
 const netWorthTrend = computed(() => netWorthTrendQuery.data.value ?? [])
 const forecastData = computed(() => forecastQuery.data.value ?? [])
+
+// 以報表回傳的基準幣別格式化資產負債金額。
+function formatNetWorthAmount(amount: number | null | undefined): string {
+  return formatCurrency(amount, netWorthData.value?.baseCurrency ?? 'TWD')
+}
 
 // Validates the selected date range and keeps it within the supported report window.
 function validateDateRange() {
@@ -490,19 +495,27 @@ function selectCategory(item: CategoryDistribution) {
         :error-message="queryErrorMessage(netWorthQuery.error.value)"
         :retry="netWorthQuery.retry"
       >
-        <div class="grid grid-cols-3 gap-4 mb-6">
+        <div class="grid grid-cols-1 gap-4 mb-6 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <p class="text-xs text-text-secondary mb-1">總資產</p>
-            <p class="text-xl font-bold text-color-income-text">{{ formatMoney(netWorthData?.totalAssets ?? 0) }}</p>
+            <p class="text-xl font-bold text-color-income-text">{{ formatNetWorthAmount(netWorthData?.totalAssets) }}</p>
           </Card>
           <Card>
             <p class="text-xs text-text-secondary mb-1">總負債</p>
-            <p class="text-xl font-bold text-color-expense-text">{{ formatMoney(netWorthData?.totalLiabilities ?? 0) }}</p>
+            <p class="text-xl font-bold text-color-expense-text">{{ formatNetWorthAmount(netWorthData?.totalLiabilities) }}</p>
           </Card>
           <Card>
             <p class="text-xs text-text-secondary mb-1">淨值</p>
             <p class="text-xl font-bold" :class="(netWorthData?.netWorth ?? 0) >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">
-              {{ formatMoney(netWorthData?.netWorth ?? 0) }}
+              {{ formatNetWorthAmount(netWorthData?.netWorth) }}
+            </p>
+          </Card>
+          <Card>
+            <p class="text-xs text-text-secondary mb-1">銀行總額 · {{ netWorthData?.baseCurrency ?? 'TWD' }}</p>
+            <p class="text-xl font-bold text-text-primary">{{ formatNetWorthAmount(netWorthData?.totalBankBalance) }}</p>
+            <p v-if="netWorthData?.exchangeRateIsStale" class="mt-1 text-xs text-color-warning-text">使用過期匯率</p>
+            <p v-else-if="netWorthData?.exchangeRateUpdatedAt" class="mt-1 text-xs text-text-tertiary">
+              匯率已更新
             </p>
           </Card>
         </div>
@@ -514,14 +527,16 @@ function selectCategory(item: CategoryDistribution) {
               <tr class="border-b border-border-default">
                 <th class="text-left py-2 text-text-secondary font-medium">銀行</th>
                 <th class="text-left py-2 text-text-secondary font-medium">帳號</th>
-                <th class="text-right py-2 text-text-secondary font-medium">餘額</th>
+                <th class="text-right py-2 text-text-secondary font-medium">原幣餘額</th>
+                <th class="text-right py-2 text-text-secondary font-medium">折合 TWD</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="acc in netWorthData.bankAccounts" :key="acc.accountNumber" class="border-b border-border-default">
                 <td class="py-2 text-text-primary">{{ acc.bankName }}</td>
                 <td class="py-2 text-text-secondary">{{ acc.accountNumber }}</td>
-                <td class="py-2 text-right text-text-primary font-medium">{{ formatMoney(acc.balance) }}</td>
+                <td class="py-2 text-right text-text-primary font-medium whitespace-nowrap">{{ formatCurrency(acc.balance, acc.currencyCode) }}</td>
+                <td class="py-2 text-right text-text-secondary font-medium whitespace-nowrap">{{ formatCurrency(acc.convertedBalance, netWorthData.baseCurrency) }}</td>
               </tr>
             </tbody>
           </table>

@@ -5,7 +5,7 @@ import { ApiError, api } from '../../api'
 import type { Withdrawal, Transaction, Installment, DashboardSummary } from '../../types'
 import Icon from '../../components/ui/Icon.vue'
 import QueryState from '../../components/ui/QueryState.vue'
-import { formatMoney } from '../../utils/format'
+import { formatCurrency, formatMoney } from '../../utils/format'
 import { formatDateOnly, getSystemDateParts } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
@@ -17,16 +17,16 @@ const initialSystemDate = getSystemDateParts(new Date(), timeZone.timeZoneId.val
 const year = ref(initialSystemDate.year)
 const month = ref(initialSystemDate.month)
 
-// Returns the first calendar day for the selected dashboard month.
+// 回傳 Dashboard 選定月份的第一個日曆日。
 function getMonthStart(y: number, m: number): string {
   return `${y}-${String(m).padStart(2, '0')}-01`
 }
-// Returns the last calendar day for the selected dashboard month.
+// 回傳 Dashboard 選定月份的最後一個日曆日。
 function getMonthEnd(y: number, m: number): string {
   const d = new Date(y, m, 0)
   return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-// Calculates the previous dashboard month while preserving year boundaries.
+// 計算 Dashboard 前一月份並正確處理跨年邊界。
 function prevMonthKey(y: number, m: number): { year: number; month: number } {
   return m === 1 ? { year: y - 1, month: 12 } : { year: y, month: m - 1 }
 }
@@ -34,17 +34,17 @@ function prevMonthKey(y: number, m: number): { year: number; month: number } {
 const startDate = computed(() => getMonthStart(year.value, month.value))
 const endDate = computed(() => getMonthEnd(year.value, month.value))
 
-// Moves the dashboard period one month backward.
+// 將 Dashboard 期間往前移動一個月。
 function goPrev() {
   const k = prevMonthKey(year.value, month.value)
   year.value = k.year; month.value = k.month
 }
-// Moves the dashboard period one month forward.
+// 將 Dashboard 期間往後移動一個月。
 function goNext() {
   if (month.value === 12) { year.value++; month.value = 1 }
   else month.value++
 }
-// Restores the dashboard period to the current system month.
+// 將 Dashboard 期間還原為目前系統月份。
 function goCurrent() {
   const current = getSystemDateParts(new Date(), timeZone.timeZoneId.value)
   year.value = current.year
@@ -92,14 +92,16 @@ const hasAnyData = computed(() => Boolean(
   || installmentsQuery.data.value,
 ))
 
-// Converts typed query errors into safe inline messages without exposing raw responses.
+// 將 typed query error 轉成不暴露原始 response 的安全行內訊息。
 function queryErrorMessage(error: unknown): string {
   return error instanceof ApiError ? error.userMessage : '載入失敗，請重試。'
 }
 
-// Formats nullable summary amounts without presenting unavailable data as zero.
+// 依 Dashboard response 的基準幣別格式化 nullable summary 金額。
 function formatSummaryAmount(amount: number | null): string {
-  return amount === null ? '—' : formatMoney(amount)
+  return amount === null
+    ? '不可用'
+    : formatCurrency(amount, dashboardSummary.value?.baseCurrency ?? 'TWD')
 }
 
 const totalWithdrawals = computed(() =>
@@ -142,28 +144,28 @@ const recentInstallments = computed(() =>
     .slice(0, 4)
 )
 
-// Formats the paid-period progress shown for an installment row.
+// 格式化分期資料列顯示的已繳期數進度。
 function progressLabel(i: Installment): string {
   const paid = i.periods - i.remainingPeriods
   return `${paid}/${i.periods}`
 }
 
-// Formats a date-only value as the dashboard month/day label.
+// 將 date-only 值格式化為 Dashboard 月日標籤。
 function formatDateMMDD(d: string): string {
   const formatted = formatDateOnly(d)
   return formatted.includes('/') ? formatted.slice(5) : d
 }
 
-// Formats an event timestamp as month/day in the configured system time zone.
+// 依設定的系統時區將事件時間格式化為月日標籤。
 function formatEventDateMMDD(timestamp: string): string {
   return timeZone.formatDateTime(timestamp).slice(5)
 }
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
+  <div class="p-4 sm:p-6 space-y-6">
     <!-- Header -->
-    <div class="flex items-start justify-between">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="space-y-1">
         <div class="flex items-center gap-2">
           <h1 class="text-xl font-bold text-text-primary">財務總覽</h1>
@@ -224,10 +226,10 @@ function formatEventDateMMDD(timestamp: string): string {
         :retry="summaryQuery.retry"
       >
         <div
-          class="flex rounded-2xl overflow-hidden"
+          class="flex flex-col rounded-2xl overflow-hidden md:flex-row"
           style="background: linear-gradient(135deg, var(--color-bg-hero-start), var(--color-bg-hero-mid) 50%, var(--color-bg-hero-end))"
         >
-        <div class="flex-1 flex flex-col justify-between p-7 gap-3">
+        <div data-testid="dashboard-hero-summary" class="flex-1 flex flex-col justify-between p-7 gap-3">
           <div class="space-y-3">
             <div class="inline-flex items-center gap-1.5 bg-color-income-hero-bg rounded-full px-3 py-1">
               <span class="w-1.5 h-1.5 rounded-full bg-color-income-hero-dot" />
@@ -235,6 +237,9 @@ function formatEventDateMMDD(timestamp: string): string {
             </div>
             <p class="text-4xl font-bold text-text-on-dark tracking-tight">
               {{ formatSummaryAmount(disposableBalance) }}
+            </p>
+            <p v-if="dashboardSummary?.exchangeRateIsStale" class="text-xs text-color-warning-text">
+              此摘要使用過期匯率{{ dashboardSummary.exchangeRateUpdatedAt ? `，更新於 ${timeZone.formatDateTime(dashboardSummary.exchangeRateUpdatedAt)}` : '' }}
             </p>
             <div class="flex items-center gap-4">
               <div v-if="comparisonPct !== null" class="flex items-center gap-1.5">
@@ -266,7 +271,7 @@ function formatEventDateMMDD(timestamp: string): string {
             </button>
           </div>
         </div>
-        <div class="w-[280px] flex flex-col justify-center gap-2.5 pr-6">
+        <div data-testid="dashboard-hero-details" class="flex w-full flex-col justify-center gap-2.5 px-7 pb-7 md:w-[280px] md:px-0 md:pb-0 md:pr-6">
           <div class="flex items-center gap-3">
             <div class="w-9 h-9 rounded-lg bg-color-income-hero-icon-bg flex items-center justify-center">
               <Icon name="TrendingDown" :size="18" class="text-color-income-hero-fg" />
@@ -299,9 +304,9 @@ function formatEventDateMMDD(timestamp: string): string {
       </QueryState>
 
       <!-- Cards Row -->
-      <div class="flex gap-5">
+      <div class="grid grid-cols-1 gap-5 xl:grid-cols-[340px_minmax(0,1fr)_minmax(0,1fr)]">
         <!-- Withdraw Card -->
-        <div class="w-[340px] bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
+        <div data-testid="dashboard-activity-card" class="min-w-0 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
           <QueryState
             :status="withdrawalsQuery.status.value"
             :error-message="queryErrorMessage(withdrawalsQuery.error.value)"
@@ -338,7 +343,7 @@ function formatEventDateMMDD(timestamp: string): string {
             <span class="text-xs text-text-secondary flex-1 text-right">
               {{ formatDateMMDD(w.date) }}
             </span>
-            <span class="text-sm font-bold text-text-primary">{{ formatMoney(w.amount) }}</span>
+            <span class="text-sm font-bold text-text-primary">{{ formatCurrency(w.amount, w.bankAccount.currencyCode ?? 'TWD') }}</span>
           </div>
           <div
             v-if="recentWithdrawals.length === 0"
@@ -350,7 +355,7 @@ function formatEventDateMMDD(timestamp: string): string {
         </div>
 
         <!-- Expense Card -->
-        <div class="flex-1 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
+        <div data-testid="dashboard-activity-card" class="min-w-0 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
           <QueryState
             :status="expensesQuery.status.value"
             :error-message="queryErrorMessage(expensesQuery.error.value)"
@@ -403,7 +408,7 @@ function formatEventDateMMDD(timestamp: string): string {
         </div>
 
         <!-- Installment Card -->
-        <div class="flex-1 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
+        <div data-testid="dashboard-activity-card" class="min-w-0 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
           <QueryState
             :status="installmentsQuery.status.value"
             :error-message="queryErrorMessage(installmentsQuery.error.value)"

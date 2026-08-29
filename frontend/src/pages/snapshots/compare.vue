@@ -6,7 +6,7 @@ import type { SnapshotCompareResult } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import QueryState from '../../components/ui/QueryState.vue'
-import { formatMoney } from '../../utils/format'
+import { formatCurrency, formatMoney } from '../../utils/format'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 
@@ -155,19 +155,25 @@ function formatDate(dateStr: string) {
             <thead>
               <tr class="border-b border-border-default">
                 <th class="text-left py-2 px-3 text-text-secondary font-medium">銀行</th>
-                <th class="text-right py-2 px-3 text-text-secondary font-medium">舊餘額</th>
-                <th class="text-right py-2 px-3 text-text-secondary font-medium">新餘額</th>
-                <th class="text-right py-2 px-3 text-text-secondary font-medium">變動</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">舊原幣</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">新原幣</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">舊折合 TWD</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">新折合 TWD</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">TWD 變動</th>
                 <th class="text-right py-2 px-3 text-text-secondary font-medium">變動%</th>
+                <th class="text-right py-2 px-3 text-text-secondary font-medium">狀態</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="b in result.differences.bankDetails" :key="b.accountNumber" class="border-b border-border-default">
                 <td class="py-3 px-3 text-text-primary">{{ b.bankName }}</td>
-                <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(b.oldBalance) }}</td>
-                <td class="py-3 px-3 text-right text-text-primary">{{ formatMoney(b.newBalance) }}</td>
-                <td class="py-3 px-3 text-right" :class="b.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatMoney(b.change) }}</td>
+                <td class="py-3 px-3 text-right text-text-primary whitespace-nowrap">{{ formatCurrency(b.oldBalance, b.oldCurrencyCode ?? 'TWD') }}</td>
+                <td class="py-3 px-3 text-right text-text-primary whitespace-nowrap">{{ formatCurrency(b.newBalance, b.newCurrencyCode ?? 'TWD') }}</td>
+                <td class="py-3 px-3 text-right text-text-primary whitespace-nowrap">{{ formatCurrency(b.oldConvertedBalance, 'TWD') }}</td>
+                <td class="py-3 px-3 text-right text-text-primary whitespace-nowrap">{{ formatCurrency(b.newConvertedBalance, 'TWD') }}</td>
+                <td class="py-3 px-3 text-right whitespace-nowrap" :class="b.change >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ formatCurrency(b.change, 'TWD') }}</td>
                 <td class="py-3 px-3 text-right" :class="b.changePercent >= 0 ? 'text-color-income-text' : 'text-color-expense-text'">{{ b.changePercent }}%</td>
+                <td class="py-3 px-3 text-right text-xs text-color-warning-text whitespace-nowrap">{{ b.currencyChanged ? '幣別已變更' : '' }}</td>
               </tr>
             </tbody>
           </table>
