@@ -12,7 +12,7 @@ namespace MyExpenses.Api.Tests.Endpoints;
 
 public class FinancialReportSummaryTests
 {
-    /// <summary>Verifies dashboard summaries aggregate withdrawals, expenses, and due payments for both periods.</summary>
+    /// <summary>驗證 Dashboard 摘要完整彙總本期與前期的提款、支出及應付款。</summary>
     [Fact]
     public async Task GetDashboardSummary_AggregatesCompleteCurrentAndPreviousPeriods()
     {
@@ -81,7 +81,142 @@ public class FinancialReportSummaryTests
         Assert.Equal(1100m, result.PreviousDisposableBalance);
     }
 
-    /// <summary>Verifies dashboard summary rejects invalid calendar months.</summary>
+    /// <summary>驗證 Dashboard 將本期與前期外幣提款換算為 TWD 並共用一次匯率 snapshot。</summary>
+    [Fact]
+    public async Task GetDashboardSummary_ConvertsCurrentAndPreviousWithdrawalsToTwd()
+    {
+        await using var db = await CreateDbContextAsync();
+        var timeZone = CreateTimeZoneService();
+        var account = new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "USD01",
+            AccountType = "活期",
+            Balance = 0m,
+            CurrencyCode = "USD",
+        };
+        db.BankAccounts.Add(account);
+        await db.SaveChangesAsync();
+        db.Withdrawals.AddRange(
+            new Withdrawal
+            {
+                BankAccountId = account.Id,
+                Amount = 310m,
+                Date = new DateOnly(2026, 6, 5),
+            },
+            new Withdrawal
+            {
+                BankAccountId = account.Id,
+                Amount = 155m,
+                Date = new DateOnly(2026, 5, 5),
+            });
+        await db.SaveChangesAsync();
+        var rates = new ExchangeRateSnapshot(
+            CurrencyPolicy.BaseCurrencyCode,
+            new Dictionary<string, decimal>
+            {
+                [CurrencyPolicy.BaseCurrencyCode] = 1m,
+                ["USD"] = 0.031m,
+            },
+            new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+            true);
+        var exchangeRateService = new CountingExchangeRateService(rates);
+
+        var result = await ReportEndpoints.GetDashboardSummaryAsync(
+            2026,
+            6,
+            db,
+            timeZone,
+            exchangeRateService);
+
+        Assert.Equal(10000m, result.TotalWithdrawals);
+        Assert.Equal(10000m, result.DisposableBalance);
+        Assert.Equal(5000m, result.PreviousDisposableBalance);
+        Assert.Equal(CurrencyPolicy.BaseCurrencyCode, result.BaseCurrency);
+        Assert.Equal(rates.UpdatedAtUtc, result.ExchangeRateUpdatedAt);
+        Assert.True(result.ExchangeRateIsStale);
+        Assert.True(result.ConversionAvailable);
+        Assert.Equal(1, exchangeRateService.Calls);
+    }
+
+    /// <summary>驗證只有 TWD 提款時不呼叫外部匯率服務。</summary>
+    [Fact]
+    public async Task GetDashboardSummary_TwdWithdrawalsDoNotCallExchangeRateService()
+    {
+        await using var db = await CreateDbContextAsync();
+        var account = new BankAccount
+        {
+            BankName = "台幣銀行",
+            AccountNumber = "TWD01",
+            AccountType = "活期",
+            Balance = 0m,
+            CurrencyCode = CurrencyPolicy.BaseCurrencyCode,
+        };
+        db.BankAccounts.Add(account);
+        await db.SaveChangesAsync();
+        db.Withdrawals.Add(new Withdrawal
+        {
+            BankAccountId = account.Id,
+            Amount = 1000m,
+            Date = new DateOnly(2026, 6, 5),
+        });
+        await db.SaveChangesAsync();
+        var exchangeRateService = new CountingExchangeRateService(ExchangeRateSnapshot.Identity);
+
+        var result = await ReportEndpoints.GetDashboardSummaryAsync(
+            2026,
+            6,
+            db,
+            CreateTimeZoneService(),
+            exchangeRateService);
+
+        Assert.Equal(1000m, result.TotalWithdrawals);
+        Assert.Equal(0, exchangeRateService.Calls);
+        Assert.Null(result.ExchangeRateUpdatedAt);
+        Assert.False(result.ExchangeRateIsStale);
+    }
+
+    /// <summary>驗證外幣提款缺率時 Dashboard 不回傳原幣直加總。</summary>
+    [Fact]
+    public async Task GetDashboardSummary_MissingForeignRateFailsClosed()
+    {
+        await using var db = await CreateDbContextAsync();
+        var account = new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "USD01",
+            AccountType = "活期",
+            Balance = 0m,
+            CurrencyCode = "USD",
+        };
+        db.BankAccounts.Add(account);
+        await db.SaveChangesAsync();
+        db.Withdrawals.Add(new Withdrawal
+        {
+            BankAccountId = account.Id,
+            Amount = 310m,
+            Date = new DateOnly(2026, 6, 5),
+        });
+        await db.SaveChangesAsync();
+        var exchangeRateService = new CountingExchangeRateService(new ExchangeRateSnapshot(
+            CurrencyPolicy.BaseCurrencyCode,
+            new Dictionary<string, decimal>
+            {
+                [CurrencyPolicy.BaseCurrencyCode] = 1m,
+            },
+            DateTime.UtcNow,
+            false));
+
+        await Assert.ThrowsAsync<ExchangeRateUnavailableException>(() =>
+            ReportEndpoints.GetDashboardSummaryAsync(
+                2026,
+                6,
+                db,
+                CreateTimeZoneService(),
+                exchangeRateService));
+    }
+
+    /// <summary>驗證 Dashboard 摘要拒絕無效的日曆月份。</summary>
     [Fact]
     public async Task GetDashboardSummary_RejectsInvalidMonth()
     {
@@ -94,7 +229,7 @@ public class FinancialReportSummaryTests
         Assert.Equal("月份必須介於 1 到 12 之間", error.Message);
     }
 
-    /// <summary>Verifies net-worth trends select the latest complete snapshot in each local calendar month.</summary>
+    /// <summary>驗證淨值趨勢選取各本地月份最新的完整快照。</summary>
     [Fact]
     public async Task GetNetWorthTrend_UsesLatestCompletePointAndOmitsLegacySnapshots()
     {
@@ -139,7 +274,7 @@ public class FinancialReportSummaryTests
         Assert.Equal(1050m, point.NetWorth);
     }
 
-    /// <summary>Verifies net-worth trend months use the configured local calendar across a UTC month boundary.</summary>
+    /// <summary>驗證淨值趨勢跨 UTC 月界時仍使用設定的本地日曆月份。</summary>
     [Fact]
     public async Task GetNetWorthTrend_UsesConfiguredLocalMonthBoundary()
     {
@@ -166,7 +301,7 @@ public class FinancialReportSummaryTests
         Assert.Equal("2026/06", point.Month);
     }
 
-    /// <summary>Creates an in-memory SQLite context for report summary tests.</summary>
+    /// <summary>建立報表摘要測試使用的記憶體 SQLite context。</summary>
     private static async Task<AppDbContext> CreateDbContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -179,7 +314,50 @@ public class FinancialReportSummaryTests
         return db;
     }
 
-    /// <summary>Creates the configured Asia/Taipei service used by report tests.</summary>
+    /// <summary>提供固定匯率 snapshot 並記錄取得次數的測試服務。</summary>
+    private sealed class CountingExchangeRateService : IExchangeRateService
+    {
+        /// <summary>初始化固定匯率 snapshot。</summary>
+        public CountingExchangeRateService(ExchangeRateSnapshot snapshot)
+        {
+            Snapshot = snapshot;
+        }
+
+        /// <summary>取得匯率 snapshot 的呼叫次數。</summary>
+        public int Calls { get; private set; }
+
+        /// <summary>取得測試使用的固定匯率 snapshot。</summary>
+        public ExchangeRateSnapshot Snapshot { get; }
+
+        /// <summary>記錄呼叫並回傳固定匯率 snapshot。</summary>
+        public Task<ExchangeRateSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(Snapshot);
+        }
+
+        /// <summary>依指定 snapshot 將原幣金額換算為 TWD。</summary>
+        public decimal? ConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot)
+            => currencyCode == CurrencyPolicy.BaseCurrencyCode
+                ? amount
+                : snapshot.Rates.TryGetValue(currencyCode, out var rate) && rate > 0m
+                    ? amount / rate
+                    : null;
+
+        /// <summary>嘗試依指定 snapshot 將原幣金額換算為 TWD。</summary>
+        public bool TryConvertToBase(
+            decimal amount,
+            string currencyCode,
+            ExchangeRateSnapshot snapshot,
+            out decimal convertedAmount)
+        {
+            var converted = ConvertToBase(amount, currencyCode, snapshot);
+            convertedAmount = converted.GetValueOrDefault();
+            return converted.HasValue;
+        }
+    }
+
+    /// <summary>建立報表測試使用的 Asia/Taipei 時區服務。</summary>
     private static TimeZoneService CreateTimeZoneService()
         => new(Microsoft.Extensions.Options.Options.Create(new TimeZoneOptions { Default = "Asia/Taipei" }));
 }

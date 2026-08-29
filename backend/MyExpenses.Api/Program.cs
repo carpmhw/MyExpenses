@@ -143,6 +143,11 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("exchange-rates", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MyExpenses/1.0");
+});
 builder.Services.AddSingleton(new HistoricalMarketDataOptions());
 builder.Services.AddHttpClient("historical-market-data", client =>
 {
@@ -208,6 +213,14 @@ builder.Services.Configure<BootstrapOptions>(
     builder.Configuration.GetSection(BootstrapOptions.SectionName));
 builder.Services.AddSingleton<TimeZoneService>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+// 匯率 provider 與服務使用 singleton 共享一小時記憶體快取及更新鎖。
+builder.Services.AddSingleton<IExchangeRateProvider>(services =>
+    new OpenExchangeRateProvider(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient("exchange-rates")));
+builder.Services.AddSingleton<IExchangeRateService>(services =>
+    new ExchangeRateService(
+        services.GetRequiredService<IExchangeRateProvider>(),
+        services.GetRequiredService<TimeProvider>()));
 builder.Services.AddScoped<InstallmentCommandService>();
 builder.Services.AddScoped<StockLedgerService>();
 builder.Services.AddScoped<ScheduledJobExecutionRepository>();

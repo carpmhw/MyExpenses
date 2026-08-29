@@ -10,6 +10,7 @@ export function useExchangeRates() {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const warning = ref<string | null>(null)
+  const isStale = ref(false)
   let generation = 0
   let activeController: AbortController | null = null
 
@@ -31,6 +32,7 @@ export function useExchangeRates() {
       if (currentGeneration !== generation) return
       rates.value = data.rates
       updatedAt.value = data.updatedAt
+      isStale.value = data.isStale
       if (data.warning) {
         warning.value = data.warning
       }
@@ -40,6 +42,7 @@ export function useExchangeRates() {
       if (!hadData) {
         rates.value = {}
         updatedAt.value = ''
+        isStale.value = false
       }
     } finally {
       if (currentGeneration === generation) loading.value = false
@@ -121,6 +124,7 @@ export function useExchangeRates() {
     loading,
     error,
     warning,
+    isStale,
     fetchRates,
     convert,
     formatAmount,

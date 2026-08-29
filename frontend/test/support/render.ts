@@ -38,6 +38,7 @@ export function mountWithAppProviders<T extends Component>(
     isReady: ref(true),
     loadError: ref(false),
     getToday: () => '2026-08-02',
+    formatDateTime: (value: string | Date) => typeof value === 'string' ? value : value.toISOString(),
   }
   const toast = { success: () => undefined, error: () => undefined }
   const darkMode = { isDark: ref(false), toggle: () => undefined }

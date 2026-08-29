@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Net;
 using Microsoft.Extensions.Logging;
 using MyExpenses.Api.Models;
 
@@ -681,8 +682,18 @@ public static class RetryClassification
     /// <summary>判斷例外是否適合在同一 execution 內重試。</summary>
     public static bool IsRetryable(Exception exception)
     {
-        if (exception is TimeoutException or HttpRequestException)
+        if (exception is TimeoutException)
             return true;
+        if (exception is HttpRequestException httpRequestException)
+        {
+            if (!httpRequestException.StatusCode.HasValue)
+                return true;
+
+            var statusCode = httpRequestException.StatusCode.Value;
+            var numericStatusCode = (int)statusCode;
+            return statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests
+                || numericStatusCode is >= 500 and <= 599;
+        }
         if (exception is Microsoft.Data.Sqlite.SqliteException sqlite)
             return sqlite.SqliteErrorCode is 5 or 6;
         if (exception.InnerException is not null)

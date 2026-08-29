@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../../api'
-import type { Withdrawal, BankAccount, WithdrawalListSummary } from '../../types'
+import { ApiError, api } from '../../api'
+import type { Withdrawal, BankAccountListItem, WithdrawalListResponse } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -12,9 +12,10 @@ import Input from '../../components/ui/Input.vue'
 import Select from '../../components/ui/Select.vue'
 import Icon from '../../components/ui/Icon.vue'
 import { usePagination } from '../../composables/usePagination'
-import { formatMoney } from '../../utils/format'
+import { formatCurrency } from '../../utils/format'
 import { addCalendarDays, getCurrentMonthRange } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
+import { useAsyncQuery } from '../../composables/useAsyncQuery'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
@@ -23,21 +24,32 @@ const route = useRoute()
 const router = useRouter()
 const pagination = usePagination(1, 15)
 
-const withdrawals = ref<Withdrawal[]>([])
-const summary = ref<WithdrawalListSummary>({
-  totalAmount: 0,
-  count: 0,
-  averageAmount: 0,
-  maxAmount: 0,
-})
-const bankAccounts = ref<BankAccount[]>([])
-const loading = ref(false)
+const bankAccounts = ref<BankAccountListItem[]>([])
 const saving = ref(false)
 
 const startDate = ref((route.query.startDate as string) || getDefaultStartDate())
 const endDate = ref((route.query.endDate as string) || getDefaultEndDate())
 
+const withdrawalQuery = useAsyncQuery<WithdrawalListResponse>({
+  key: () => ['withdrawals', pagination.page.value, pagination.pageSize.value, startDate.value, endDate.value],
+  query: ({ signal }) => api.withdrawals.list({
+    page: pagination.page.value,
+    pageSize: pagination.pageSize.value,
+    startDate: startDate.value || undefined,
+    endDate: endDate.value || undefined,
+  }, { signal }),
+  isEmpty: result => result.items.length === 0,
+})
 
+const withdrawals = computed(() => withdrawalQuery.data.value?.items ?? [])
+const summary = computed(() => withdrawalQuery.data.value?.summary ?? null)
+
+watch(() => withdrawalQuery.data.value?.total, total => {
+  if (total !== undefined) pagination.total.value = total
+})
+
+
+// 驗證提款查詢日期順序與最長一年範圍。
 function validateDateRange() {
   const s = startDate.value
   const e = endDate.value
@@ -85,11 +97,24 @@ const bankAccountOptions = computed(() =>
 
 const stats = computed(() => {
   return {
-    total: summary.value.totalAmount,
-    count: summary.value.count,
-    max: summary.value.maxAmount,
-    avg: summary.value.averageAmount,
+    total: summary.value?.totalAmount ?? 0,
+    count: summary.value?.count ?? 0,
+    max: summary.value?.maxAmount ?? 0,
+    avg: summary.value?.averageAmount ?? 0,
   }
+})
+
+// 將提款查詢錯誤轉成安全的畫面訊息。
+function withdrawalErrorMessage(): string {
+  return withdrawalQuery.error.value instanceof ApiError
+    ? withdrawalQuery.error.value.userMessage
+    : '載入失敗，請重試。'
+}
+
+const withdrawalListError = computed(() => {
+  if (withdrawalQuery.status.value === 'error') return withdrawalErrorMessage()
+  if (withdrawalQuery.status.value === 'stale') return '資料可能已過期，請重試'
+  return null
 })
 
 const formErrors = computed(() => {
@@ -99,14 +124,17 @@ const formErrors = computed(() => {
   return errs
 })
 
+// 取得系統時區目前月份的第一天。
 function getDefaultStartDate() {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).start
 }
 
+// 取得系統時區目前月份的最後一天。
 function getDefaultEndDate() {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).end
 }
 
+// 將目前日期與分頁條件同步到 route query string。
 function syncQueryString() {
   router.replace({
     query: {
@@ -117,6 +145,7 @@ function syncQueryString() {
   })
 }
 
+// 開啟使用預設日期與第一個帳戶的新增提款表單。
 function openCreate() {
   editingItem.value = null
   form.value = {
@@ -128,6 +157,7 @@ function openCreate() {
   modalOpen.value = true
 }
 
+// 將指定提款資料帶入編輯表單。
 function openEdit(item: Withdrawal) {
   editingItem.value = item
   form.value = {
@@ -139,7 +169,8 @@ function openEdit(item: Withdrawal) {
   modalOpen.value = true
 }
 
-async function save() {
+// 儲存提款 command，並在確認成功後獨立重新整理列表。
+async function save(): Promise<void> {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
 
@@ -153,69 +184,62 @@ async function save() {
       toast.success('提款已建立')
     }
     modalOpen.value = false
-    await fetchWithdrawals()
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '儲存失敗')
+    return
   } finally {
     saving.value = false
   }
+  await refreshAfterMutation()
 }
 
+// 開啟指定提款的刪除確認對話框。
 function confirmDelete(id: number) {
   deletingId.value = id
   confirmOpen.value = true
 }
 
-async function doDelete() {
+// 刪除提款 command，並在確認成功後獨立重新整理列表。
+async function doDelete(): Promise<void> {
   if (deletingId.value !== null) {
     try {
       await api.withdrawals.delete(deletingId.value)
       confirmOpen.value = false
       deletingId.value = null
       toast.success('提款已刪除')
-      await fetchWithdrawals()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '刪除失敗')
+      return
     }
+    await refreshAfterMutation()
   }
 }
 
+// 取得提款表單可選的銀行帳戶與其原幣資訊。
 async function fetchBankAccounts() {
   const result = await api.bankAccounts.list({ pageSize: 999 })
   bankAccounts.value = result.items
 }
 
-async function fetchWithdrawals() {
-  loading.value = true
-  try {
-    const result = await api.withdrawals.list({
-      page: pagination.page.value,
-      pageSize: pagination.pageSize.value,
-      startDate: startDate.value || undefined,
-      endDate: endDate.value || undefined,
-    })
-    withdrawals.value = result.items
-    summary.value = result.summary
-    pagination.total.value = result.total
-  } finally {
-    loading.value = false
+// 在已確認 mutation 成功後重新整理列表，並獨立回報 refresh failure。
+async function refreshAfterMutation(): Promise<void> {
+  await withdrawalQuery.refresh()
+  if (withdrawalQuery.status.value === 'error' || withdrawalQuery.status.value === 'stale') {
+    toast.error('提款已成功，但資料重新整理失敗，請稍後重試')
   }
 }
 
 watch([startDate, endDate], () => {
   pagination.reset()
   syncQueryString()
-  fetchWithdrawals()
 })
 
 watch(() => pagination.page.value, () => {
   syncQueryString()
-  fetchWithdrawals()
 })
 
 onMounted(async () => {
   await fetchBankAccounts()
-  await fetchWithdrawals()
 })
 </script>
 
@@ -229,7 +253,7 @@ onMounted(async () => {
       <Button @click="openCreate">+ 新增提款</Button>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div v-if="summary" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <Card>
         <div class="flex items-center gap-4">
           <div class="w-11 h-11 rounded-xl bg-color-expense-action flex items-center justify-center">
@@ -237,7 +261,8 @@ onMounted(async () => {
           </div>
           <div>
             <p class="text-xs text-text-secondary">總提款金額</p>
-            <p class="text-xl font-bold text-text-primary">{{ formatMoney(stats.total) }}</p>
+            <p class="text-xl font-bold text-text-primary">{{ formatCurrency(stats.total, 'TWD') }}</p>
+             <p v-if="!summary.conversionAvailable" class="mt-1 text-xs text-color-warning-text">折合 TWD 不可用</p>
           </div>
         </div>
       </Card>
@@ -259,7 +284,7 @@ onMounted(async () => {
           </div>
           <div>
             <p class="text-xs text-text-secondary">平均每筆</p>
-            <p class="text-xl font-bold text-text-primary">{{ formatMoney(stats.avg) }}</p>
+            <p class="text-xl font-bold text-text-primary">{{ formatCurrency(stats.avg, 'TWD') }}</p>
           </div>
         </div>
       </Card>
@@ -270,10 +295,14 @@ onMounted(async () => {
           </div>
           <div>
             <p class="text-xs text-text-secondary">最高單筆</p>
-            <p class="text-xl font-bold text-text-primary">{{ formatMoney(stats.max) }}</p>
+            <p class="text-xl font-bold text-text-primary">{{ formatCurrency(stats.max, 'TWD') }}</p>
           </div>
         </div>
       </Card>
+    </div>
+
+    <div v-if="summary?.exchangeRateIsStale" class="mb-6 rounded-lg bg-color-warning-bg px-3 py-2 text-xs text-color-warning-text">
+      提款摘要使用過期匯率{{ summary.exchangeRateUpdatedAt ? `，更新於 ${timeZone.formatDateTime(summary.exchangeRateUpdatedAt)}` : '' }}
     </div>
 
     <Card>
@@ -295,7 +324,14 @@ onMounted(async () => {
         <span class="text-xs text-text-tertiary">（最多 1 年）</span>
       </div>
 
-      <DataTable :columns="columns" :loading="loading" :items="withdrawals">
+      <DataTable
+        :columns="columns"
+        :loading="withdrawalQuery.status.value === 'loading'"
+        :items="withdrawals"
+        :refreshing="withdrawalQuery.status.value === 'refreshing'"
+        :error="withdrawalListError"
+        :retry="withdrawalQuery.retry"
+      >
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無提款紀錄</div>
         </template>
@@ -305,13 +341,13 @@ onMounted(async () => {
           <td class="py-3 px-4 w-[180px]">
             <span
               class="inline-flex items-center px-2 py-0.5 rounded-md text-xs border border-color-info bg-color-info-bg text-color-info-text"
-            >
-              {{ item.bankAccount?.bankName }}
+              >
+              {{ item.bankAccount?.bankName }} · {{ item.bankAccount?.currencyCode }}
             </span>
           </td>
           <td class="py-3 px-4 text-right w-[130px]">
             <span class="font-semibold text-sm text-color-expense-text">
-              {{ formatMoney(item.amount) }}
+               {{ formatCurrency(item.amount, item.bankAccount?.currencyCode ?? 'TWD') }}
             </span>
           </td>
           <td class="py-3 px-4 text-text-tertiary text-sm">{{ item.description }}</td>
@@ -334,7 +370,7 @@ onMounted(async () => {
         </tr>
       </DataTable>
 
-      <div class="flex items-center justify-between px-4 py-3 border-t border-border-default">
+      <div v-if="withdrawalQuery.data.value" class="flex items-center justify-between px-4 py-3 border-t border-border-default">
         <span class="text-sm text-text-secondary">共 {{ pagination.total.value }} 筆</span>
         <div class="flex items-center gap-2">
           <Button variant="ghost" :disabled="!pagination.hasPrev.value" @click="pagination.prev()">上一頁</Button>

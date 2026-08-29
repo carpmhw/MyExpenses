@@ -17,7 +17,7 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
 }>()
 
-const { rates, updatedAt, loading, error, warning, fetchRates, convert, formatAmount, getCurrencyName, getCurrencySymbol } = useExchangeRates()
+const { rates, updatedAt, loading, error, warning, isStale, fetchRates, convert, formatAmount, getCurrencyName, getCurrencySymbol } = useExchangeRates()
 const toast = useToast()
 const timeZone = useTimeZone()
 
@@ -105,6 +105,10 @@ function refresh(): void {
       <div v-if="warning" class="mb-4 flex items-center gap-2 rounded-lg bg-color-warning-bg px-3 py-2 text-sm text-color-warning-text">
         <Icon name="AlertTriangle" :size="16" />
         {{ warning }}
+      </div>
+      <div v-if="isStale" class="mb-4 flex items-center gap-2 rounded-lg bg-color-warning-bg px-3 py-2 text-sm text-color-warning-text">
+        <Icon name="AlertTriangle" :size="16" />
+        使用過期匯率，更新於 {{ updatedAt ? timeZone.formatDateTime(updatedAt) : '未知時間' }}
       </div>
 
       <div class="space-y-3">

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -9,15 +10,24 @@ public static class SnapshotEndpoints
 {
     private const int MaximumSnapshotRangeYears = 5;
 
+    /// <summary>註冊手動快照、歷史查詢、比較與自動排程端點。</summary>
     public static void MapSnapshotEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/snapshots");
 
-        group.MapPost("/", async (AppDbContext db) =>
+        group.MapPost("/", async (AppDbContext db, [FromServices] IExchangeRateService exchangeRateService) =>
         {
-            var snapshot = await CreateSnapshotAsync(db);
-
-            return Results.Created($"/api/snapshots/{snapshot.Id}", snapshot);
+            try
+            {
+                var snapshot = await CreateSnapshotAsync(db, exchangeRateService);
+                return Results.Created($"/api/snapshots/{snapshot.Id}", snapshot);
+            }
+            catch (ExchangeRateUnavailableException exception)
+            {
+                return Results.Problem(
+                    detail: exception.Message,
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
         });
 
         group.MapGet("/", async (int? page, int? pageSize, DateOnly? dateStart, DateOnly? dateEnd, AppDbContext db, TimeZoneService timeZoneService) =>
@@ -54,22 +64,41 @@ public static class SnapshotEndpoints
             var s2 = await db.SnapshotBatches.FindAsync(id2);
             if (s1 is null || s2 is null) return Results.NotFound();
 
-            var bankDetails = s1.BankDetails.Select(b1 =>
+            var bankDetails = s1.BankDetails
+                .Select(detail => new SnapshotBankComparison(
+                    detail,
+                    s2.BankDetails.FirstOrDefault(candidate =>
+                        candidate.BankName == detail.BankName && candidate.AccountNumber == detail.AccountNumber)))
+                .Concat(s2.BankDetails
+                    .Where(detail => !s1.BankDetails.Any(candidate =>
+                        candidate.BankName == detail.BankName && candidate.AccountNumber == detail.AccountNumber))
+                    .Select(detail => new SnapshotBankComparison(null, detail)))
+                .Select(pair =>
             {
-                var b2 = s2.BankDetails.FirstOrDefault(b =>
-                    b.BankName == b1.BankName && b.AccountNumber == b1.AccountNumber);
-                var oldBal = b1.Balance;
-                var newBal = b2?.Balance ?? 0;
-                var change = newBal - oldBal;
-                var changePercent = oldBal != 0 ? Math.Round(change / oldBal * 100, 2) : 0;
+                var oldDetail = pair.Old;
+                var newDetail = pair.New;
+                var oldBalance = oldDetail?.Balance ?? 0m;
+                var newBalance = newDetail?.Balance ?? 0m;
+                var oldConvertedBalance = oldDetail?.ConvertedBalance ?? 0m;
+                var newConvertedBalance = newDetail?.ConvertedBalance ?? 0m;
+                var change = newConvertedBalance - oldConvertedBalance;
+                var changePercent = oldConvertedBalance != 0
+                    ? Math.Round(change / oldConvertedBalance * 100, 2)
+                    : 0m;
                 return new
                 {
-                    bankName = b1.BankName,
-                    accountNumber = b1.AccountNumber,
-                    oldBalance = oldBal,
-                    newBalance = newBal,
+                    bankName = oldDetail?.BankName ?? newDetail!.BankName,
+                    accountNumber = oldDetail?.AccountNumber ?? newDetail!.AccountNumber,
+                    oldBalance,
+                    newBalance,
+                    oldCurrencyCode = oldDetail?.CurrencyCode,
+                    newCurrencyCode = newDetail?.CurrencyCode,
+                    oldConvertedBalance,
+                    newConvertedBalance,
                     change,
                     changePercent,
+                    currencyChanged = oldDetail is not null && newDetail is not null
+                        && !string.Equals(oldDetail.CurrencyCode, newDetail.CurrencyCode, StringComparison.Ordinal),
                 };
             }).ToList();
 
@@ -221,22 +250,29 @@ public static class SnapshotEndpoints
         return new SnapshotDifference(oldValue, newValue, change, changePercent);
     }
 
-    /// <summary>Creates and persists a manual financial snapshot using estimated net sell value for stock holdings.</summary>
-    public static async Task<SnapshotBatch> CreateSnapshotAsync(AppDbContext db)
+    /// <summary>建立保存固定銀行估值與股票淨賣出值的手動財務快照。</summary>
+    public static async Task<SnapshotBatch> CreateSnapshotAsync(
+        AppDbContext db,
+        IExchangeRateService? exchangeRateService = null)
     {
+        ArgumentNullException.ThrowIfNull(db);
         await using var transaction = await db.Database.BeginTransactionAsync();
         var bankAccounts = await db.BankAccounts.ToListAsync();
         var stocks = await db.Stocks.ToListAsync();
         var totalLiabilities = await db.InstallmentPayments
-            .Where(payment => !payment.IsPaid)
-            .SumAsync(payment => (decimal?)payment.Amount) ?? 0m;
+                .Where(payment => !payment.IsPaid)
+                .SumAsync(payment => (decimal?)payment.Amount) ?? 0m;
         var now = DateTime.UtcNow;
+        var exchangeRateSnapshot = await ExchangeRateSnapshotResolver.ResolveForAccountsAsync(
+            bankAccounts,
+            exchangeRateService);
         var snapshot = FinancialSnapshotBuilder.Build(
             $"快照 {now:yyyy-MM-dd HH:mm}",
             null,
             now,
             bankAccounts,
             stocks,
+            exchangeRateSnapshot,
             totalLiabilities);
 
         db.SnapshotBatches.Add(snapshot);
@@ -349,6 +385,9 @@ public static class SnapshotEndpoints
             throw new ArgumentException("日期區間最多只能查詢 5 年");
         }
     }
+
+    /// <summary>保存兩張快照中同一銀行帳戶的配對資料。</summary>
+    private sealed record SnapshotBankComparison(BankDetail? Old, BankDetail? New);
 
 }
 

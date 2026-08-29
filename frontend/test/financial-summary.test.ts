@@ -33,7 +33,7 @@ test('dashboard consumes complete dashboard summary instead of reducing recent r
 
 test('list pages render server-provided summaries', () => {
   assert.match(readSource('pages/expenses/index.vue'), /transactionQuery\.data\.value\?\.summary/)
-  assert.match(readSource('pages/withdrawals/index.vue'), /result\.summary/)
+  assert.match(readSource('pages/withdrawals/index.vue'), /withdrawalQuery\.data\.value\?\.summary/)
   assert.match(readSource('pages/installments/index.vue'), /installmentListQuery\.data\.value\?\.summary/)
 })
 

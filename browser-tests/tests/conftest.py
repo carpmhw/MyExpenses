@@ -58,13 +58,36 @@ def _default_api_response(route: Route) -> None:
     if path.endswith("/credit-card-bills"):
         route_json(route, [])
         return
+    if path.endswith("/bank-accounts"):
+        route_json(route, {
+            "items": [],
+            "total": 0,
+            "page": 1,
+            "pageSize": 15,
+            "baseCurrency": "TWD",
+            "totalBalanceInBaseCurrency": 0,
+            "exchangeRateUpdatedAt": None,
+            "exchangeRateIsStale": False,
+            "conversionAvailable": True,
+        })
+        return
     if path.endswith("/withdrawals"):
         route_json(route, {
             "items": [],
             "total": 0,
             "page": 1,
             "pageSize": 50,
-            "summary": {"totalAmount": 0, "count": 0, "averageAmount": 0, "maxAmount": 0},
+            "summary": {
+                "totalAmount": 0,
+                "count": 0,
+                "averageAmount": 0,
+                "maxAmount": 0,
+                "baseCurrency": "TWD",
+                "exchangeRateUpdatedAt": None,
+                "exchangeRateIsStale": False,
+                "conversionAvailable": True,
+                "totalAmountInBaseCurrency": 0,
+            },
         })
         return
     if path.endswith("/transactions"):
@@ -103,6 +126,10 @@ def _default_api_response(route: Route) -> None:
             "installmentDuePaymentCount": 0,
             "activeInstallmentCount": 0,
             "previousDisposableBalance": 0,
+            "baseCurrency": "TWD",
+            "exchangeRateUpdatedAt": None,
+            "exchangeRateIsStale": False,
+            "conversionAvailable": True,
         })
         return
     if path.startswith("/api/reports/") or path.startswith("/api/snapshots/"):

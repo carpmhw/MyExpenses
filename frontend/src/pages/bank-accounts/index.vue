@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted } from 'vue'
 import { api } from '../../api'
-import type { BankAccount } from '../../types'
+import type { BankAccountListItem, CurrencyCode } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
 import Modal from '../../components/ui/Modal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import Input from '../../components/ui/Input.vue'
+import Select from '../../components/ui/Select.vue'
 import Icon from '../../components/ui/Icon.vue'
-import { formatMoney } from '../../utils/format'
+import { formatCurrency } from '../../utils/format'
+import { CURRENCY_OPTIONS } from '../../utils/currency'
+import { createBankAccountForm, hasCurrencyChanged, type BankAccountForm } from '../../utils/bankAccount'
 import { createLatestRequestGuard } from '../../utils/latestRequest'
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
@@ -17,16 +20,21 @@ import { useTimeZone } from '../../composables/useTimeZone'
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
 
-const accounts = ref<BankAccount[]>([])
-const totalBalance = ref(0)
+const accounts = ref<BankAccountListItem[]>([])
+const totalBalanceInBaseCurrency = ref<number | null>(null)
+const baseCurrency = ref<CurrencyCode>('TWD')
+const exchangeRateUpdatedAt = ref<string | null>(null)
+const exchangeRateIsStale = ref(false)
+const conversionAvailable = ref(true)
 const bankNameFilter = ref('')
 const loading = ref(false)
 const saving = ref(false)
+const listError = ref<string | null>(null)
 const pagination = usePagination(1, 15)
 
 const modalOpen = ref(false)
-const editingItem = ref<BankAccount | null>(null)
-const form = ref({ bankName: '', accountNumber: '', balance: 0, accountType: '' })
+const editingItem = ref<BankAccountListItem | null>(null)
+const form = ref<BankAccountForm>(createBankAccountForm())
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
@@ -39,12 +47,20 @@ const columns = [
   { key: 'updatedAt', label: '修改日期' },
   { key: 'bankName', label: '銀行名稱' },
   { key: 'lastFiveDigits', label: '帳號後五碼' },
-  { key: 'balance', label: '餘額', align: 'right' as const },
+  { key: 'currencyCode', label: '幣別', align: 'center' as const },
+  { key: 'balance', label: '原幣餘額', align: 'right' as const },
+  { key: 'convertedBalance', label: '折合 TWD', align: 'right' as const },
   { key: 'accountType', label: '帳戶類型' },
 ]
 
+// 以系統時區格式化帳戶建立與修改日期。
 function formatDate(dateStr: string) {
   return timeZone.formatDateTime(dateStr).slice(0, 10)
+}
+
+// 以系統時區格式化匯率更新時間。
+function formatRateUpdatedAt(dateStr: string | null): string {
+  return dateStr ? timeZone.formatDateTime(dateStr) : '無外部匯率'
 }
 
 const formErrors = computed(() => {
@@ -56,38 +72,49 @@ const formErrors = computed(() => {
   return errs
 })
 
-// Fetches bank accounts for the current page and bank name filter.
+const currencyChanged = computed(() =>
+  hasCurrencyChanged(editingItem.value?.currencyCode, form.value.currencyCode),
+)
+
+// 取得目前頁面與銀行名稱篩選條件的帳戶資料。
 async function fetchList() {
   const requestId = listRequestGuard.next()
   loading.value = true
+  listError.value = null
   try {
     const result = await api.bankAccounts.list({ page: pagination.page.value, pageSize: pagination.pageSize.value, bankName: bankNameFilter.value })
     if (!listRequestGuard.isLatest(requestId)) return
     accounts.value = result.items
     pagination.total.value = result.total
-    totalBalance.value = result.totalBalance
+    totalBalanceInBaseCurrency.value = result.totalBalanceInBaseCurrency
+    baseCurrency.value = result.baseCurrency
+    exchangeRateUpdatedAt.value = result.exchangeRateUpdatedAt
+    exchangeRateIsStale.value = result.exchangeRateIsStale
+    conversionAvailable.value = result.conversionAvailable
+  } catch (e) {
+    if (listRequestGuard.isLatest(requestId)) {
+      listError.value = e instanceof Error ? e.message : '載入銀行帳戶失敗，請重試'
+    }
   } finally {
     if (listRequestGuard.isLatest(requestId)) loading.value = false
   }
 }
 
+// 開啟新增帳戶表單並重設為 TWD 預設幣別。
 function openCreate() {
   editingItem.value = null
-  form.value = { bankName: '', accountNumber: '', balance: 0, accountType: '' }
+  form.value = createBankAccountForm()
   modalOpen.value = true
 }
 
-function openEdit(item: BankAccount) {
+// 開啟編輯表單並回填帳戶原幣資料。
+function openEdit(item: BankAccountListItem) {
   editingItem.value = item
-  form.value = {
-    bankName: item.bankName,
-    accountNumber: item.accountNumber,
-    balance: item.balance,
-    accountType: item.accountType,
-  }
+  form.value = createBankAccountForm(item)
   modalOpen.value = true
 }
 
+// 驗證並提交新增或編輯帳戶資料。
 async function save() {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
@@ -110,11 +137,13 @@ async function save() {
   }
 }
 
+// 開啟指定帳戶的刪除確認對話框。
 function confirmDelete(id: number) {
   deletingId.value = id
   confirmOpen.value = true
 }
 
+// 刪除已確認的銀行帳戶並重新整理列表。
 async function doDelete() {
   if (deletingId.value !== null) {
     try {
@@ -129,6 +158,7 @@ async function doDelete() {
   }
 }
 
+// 建立包含目前資產資料的財務快照。
 async function takeSnapshot() {
   snapshotLoading.value = true
   try {
@@ -175,8 +205,17 @@ watch(bankNameFilter, () => {
           </div>
           <div>
             <p class="text-xs text-text-secondary">總計金額</p>
-            <p class="text-xl font-bold text-text-primary">{{ formatMoney(totalBalance) }}</p>
-            <p class="text-xs text-text-tertiary mt-1">符合目前篩選條件</p>
+            <p class="text-xl font-bold text-text-primary">
+              {{ totalBalanceInBaseCurrency === null ? '不可用' : formatCurrency(totalBalanceInBaseCurrency, baseCurrency) }}
+            </p>
+            <p class="text-xs text-text-tertiary mt-1">符合目前篩選條件 · 基準 {{ baseCurrency }}</p>
+            <p v-if="!conversionAvailable" class="text-xs text-color-warning-text mt-1">匯率不可用，保留原幣資料</p>
+            <p v-else-if="exchangeRateIsStale" class="text-xs text-color-warning-text mt-1">
+              使用過期匯率 · {{ formatRateUpdatedAt(exchangeRateUpdatedAt) }}
+            </p>
+            <p v-else-if="exchangeRateUpdatedAt" class="text-xs text-text-tertiary mt-1">
+              匯率更新於 {{ formatRateUpdatedAt(exchangeRateUpdatedAt) }}
+            </p>
           </div>
         </div>
       </Card>
@@ -192,7 +231,7 @@ watch(bankNameFilter, () => {
           class="w-full sm:w-64 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary placeholder:text-text-tertiary"
         />
       </div>
-      <DataTable :columns="columns" :loading="loading" :items="accounts">
+      <DataTable :columns="columns" :loading="loading" :items="accounts" :error="listError" :retry="fetchList">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無銀行帳戶資料</div>
         </template>
@@ -200,9 +239,13 @@ watch(bankNameFilter, () => {
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + index + 1 }}</td>
           <td class="py-3 px-4 text-text-secondary w-[110px]">{{ formatDate(item.createdAt) }}</td>
           <td class="py-3 px-4 text-text-secondary w-[110px]">{{ formatDate(item.updatedAt) }}</td>
-          <td class="py-3 px-4 text-text-primary font-medium">{{ item.bankName }}</td>
-          <td class="py-3 px-4 text-text-secondary font-mono w-[130px]">{{ item.accountNumber.slice(-5) }}</td>
-          <td class="py-3 px-4 text-text-primary font-bold text-sm w-[140px] text-right">{{ formatMoney(item.balance) }}</td>
+          <td class="py-3 px-4 text-text-primary font-medium whitespace-nowrap">{{ item.bankName }}</td>
+          <td class="py-3 px-4 text-text-secondary font-mono w-[130px] whitespace-nowrap">{{ item.accountNumber.slice(-5) }}</td>
+          <td class="py-3 px-4 text-text-primary font-medium text-center whitespace-nowrap">{{ item.currencyCode }}</td>
+          <td class="py-3 px-4 text-text-primary font-bold text-sm w-[150px] text-right whitespace-nowrap">{{ formatCurrency(item.balance, item.currencyCode) }}</td>
+          <td class="py-3 px-4 text-text-secondary text-sm w-[150px] text-right whitespace-nowrap">
+            {{ formatCurrency(item.convertedBalance, baseCurrency) }}
+          </td>
           <td class="py-3 px-4 text-text-secondary w-[250px] whitespace-nowrap">{{ item.accountType }}</td>
           <td class="py-3 px-4 w-[80px]">
             <div class="flex items-center gap-1">
@@ -255,6 +298,13 @@ watch(bankNameFilter, () => {
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">類型</label>
           <Input v-model="form.accountType" placeholder="e.g. 活存、定存" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text-primary mb-1" for="bank-account-currency">幣別</label>
+          <Select id="bank-account-currency" v-model="form.currencyCode" :options="CURRENCY_OPTIONS" />
+          <p v-if="currencyChanged" class="mt-1 text-xs text-color-warning-text">
+            變更幣別不會自動換算餘額，請確認輸入值已是新的原幣金額。
+          </p>
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>

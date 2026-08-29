@@ -118,6 +118,77 @@ public class FinancialSummaryEndpointTests
         Assert.Equal(300m, result.Summary.MaxAmount);
     }
 
+    /// <summary>驗證提款摘要對不同帳戶幣別先換算為 TWD 再計算總額與統計值。</summary>
+    [Fact]
+    public async Task ListWithdrawals_MixedCurrenciesUseConvertedSummary()
+    {
+        await using var db = await CreateDbContextAsync();
+        var twdAccount = new BankAccount
+        {
+            BankName = "台灣銀行",
+            AccountNumber = "12345",
+            AccountType = "活期",
+            Balance = 0m,
+            CurrencyCode = "TWD",
+        };
+        var usdAccount = new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "23456",
+            AccountType = "活期",
+            Balance = 0m,
+            CurrencyCode = "USD",
+        };
+        db.BankAccounts.AddRange(twdAccount, usdAccount);
+        await db.SaveChangesAsync();
+        db.Withdrawals.AddRange(
+            CreateWithdrawal(twdAccount.Id, 100m),
+            CreateWithdrawal(usdAccount.Id, 31m));
+        await db.SaveChangesAsync();
+
+        var result = await WithdrawalEndpoints.ListWithdrawalsAsync(
+            new DateOnly(2026, 6, 1),
+            new DateOnly(2026, 6, 30),
+            1,
+            15,
+            db,
+            new FixedExchangeRateService());
+
+        Assert.Equal(1100m, result.Summary.TotalAmount);
+        Assert.Equal(550m, result.Summary.AverageAmount);
+        Assert.Equal(1000m, result.Summary.MaxAmount);
+        Assert.Equal(CurrencyPolicy.BaseCurrencyCode, result.Summary.BaseCurrency);
+        Assert.True(result.Summary.ConversionAvailable);
+    }
+
+    /// <summary>驗證提款摘要缺少必要匯率時不直接相加原幣金額。</summary>
+    [Fact]
+    public async Task ListWithdrawals_WhenExchangeRateIsUnavailable_FailsClosed()
+    {
+        await using var db = await CreateDbContextAsync();
+        var account = new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "23456",
+            AccountType = "活期",
+            Balance = 0m,
+            CurrencyCode = "USD",
+        };
+        db.BankAccounts.Add(account);
+        await db.SaveChangesAsync();
+        db.Withdrawals.Add(CreateWithdrawal(account.Id, 31m));
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ExchangeRateUnavailableException>(() =>
+            WithdrawalEndpoints.ListWithdrawalsAsync(
+                new DateOnly(2026, 6, 1),
+                new DateOnly(2026, 6, 30),
+                1,
+                15,
+                db,
+                new MissingExchangeRateService()));
+    }
+
     /// <summary>Verifies installment summaries use due payments rather than every active per-period value.</summary>
     [Fact]
     public async Task ListInstallments_SummaryUsesUnpaidDuePayments()
@@ -240,5 +311,54 @@ public class FinancialSummaryEndpointTests
         var today = timeZone.GetLocalDate();
         var start = new DateOnly(today.Year, today.Month, 1);
         return (start, start.AddMonths(1).AddDays(-1));
+    }
+
+    /// <summary>提供 USD 匯率供提款摘要測試換算。</summary>
+    private sealed class FixedExchangeRateService : IExchangeRateService
+    {
+        /// <summary>取得固定的 TWD 基準匯率 snapshot。</summary>
+        public Task<ExchangeRateSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ExchangeRateSnapshot(
+                CurrencyPolicy.BaseCurrencyCode,
+                new Dictionary<string, decimal>
+                {
+                    [CurrencyPolicy.BaseCurrencyCode] = 1m,
+                    ["USD"] = 0.031m,
+                },
+                new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+                false));
+
+        /// <summary>依指定 snapshot 將提款金額換算為 TWD。</summary>
+        public decimal? ConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot)
+            => currencyCode == CurrencyPolicy.BaseCurrencyCode
+                ? amount
+                : snapshot.Rates.TryGetValue(currencyCode, out var rate) && rate > 0m ? amount / rate : null;
+
+        /// <summary>回傳提款換算的成功狀態。</summary>
+        public bool TryConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot, out decimal convertedAmount)
+        {
+            var result = ConvertToBase(amount, currencyCode, snapshot);
+            convertedAmount = result.GetValueOrDefault();
+            return result.HasValue;
+        }
+    }
+
+    /// <summary>回傳只含 TWD 的測試 snapshot 以模擬缺少外幣匯率。</summary>
+    private sealed class MissingExchangeRateService : IExchangeRateService
+    {
+        /// <summary>回傳缺少 USD 的 TWD snapshot。</summary>
+        public Task<ExchangeRateSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(ExchangeRateSnapshot.Identity);
+
+        /// <summary>缺少外幣匯率時回傳不可用。</summary>
+        public decimal? ConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot)
+            => currencyCode == CurrencyPolicy.BaseCurrencyCode ? amount : null;
+
+        /// <summary>回傳缺少外幣匯率的失敗狀態。</summary>
+        public bool TryConvertToBase(decimal amount, string currencyCode, ExchangeRateSnapshot snapshot, out decimal convertedAmount)
+        {
+            convertedAmount = 0m;
+            return currencyCode == CurrencyPolicy.BaseCurrencyCode;
+        }
     }
 }
