@@ -113,7 +113,9 @@ public static class StockStructureReportCalculator
             {
                 var first = group.First();
                 var symbol = group.Key.Symbol;
-                var label = symbol ?? $"{first.Name} (#{first.Id})";
+                var label = symbol is null
+                    ? $"{first.Name} (#{first.Id})"
+                    : $"{first.Name} ({symbol})";
                 return new StockStructureAllocation(
                     symbol ?? $"\0holding:{group.Key.HoldingId}",
                     label,
@@ -122,7 +124,12 @@ public static class StockStructureReportCalculator
             })
             .ToList();
 
-        return ApplyAllocationPercentages(allocations, totalEstimatedNetSellValue);
+        return ApplyAllocationPercentages(
+            allocations,
+            totalEstimatedNetSellValue,
+            allocation => allocation.Key.StartsWith("\0holding:", StringComparison.Ordinal)
+                ? allocation.Label
+                : allocation.Key);
     }
 
     /// <summary>依指定欄位建立並排序配置分組。</summary>
@@ -184,10 +191,11 @@ public static class StockStructureReportCalculator
             1m / hhi);
     }
 
-    /// <summary>計算配置百分比並依配置金額由大到小排序。</summary>
+    /// <summary>計算配置百分比並依配置金額由大到小排序，可選擇獨立的同額次排序鍵。</summary>
     private static IReadOnlyList<StockStructureAllocation> ApplyAllocationPercentages(
         IEnumerable<StockStructureAllocation> allocations,
-        decimal totalEstimatedNetSellValue)
+        decimal totalEstimatedNetSellValue,
+        Func<StockStructureAllocation, string>? tieBreakerSelector = null)
     {
         return allocations
             .Select(allocation => allocation with
@@ -195,7 +203,9 @@ public static class StockStructureReportCalculator
                 Percentage = CalculatePercentage(allocation.Value, totalEstimatedNetSellValue),
             })
             .OrderByDescending(allocation => allocation.Value)
-            .ThenBy(allocation => allocation.Label, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(
+                allocation => tieBreakerSelector?.Invoke(allocation) ?? allocation.Label,
+                StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 

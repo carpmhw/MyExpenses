@@ -44,11 +44,18 @@ public class StockStructureReportCalculatorTests
         var secondValuation = StockValuationCalculator.Calculate(holdings[1]);
 
         var symbol = Assert.Single(report.SymbolAllocations, allocation => allocation.Key == "2330");
+        Assert.Equal("台積電 A (2330)", symbol.Label);
         Assert.Equal(firstValuation.EstimatedNetSellValue + secondValuation.EstimatedNetSellValue, symbol.Value);
         Assert.Equal(3, report.SymbolAllocations.Count);
         Assert.Equal(4, report.Holdings.Count);
         Assert.NotNull(report.Holdings[0].AllocationPercentage);
         Assert.Contains(report.BrokerAllocations, allocation => allocation.Label == "未指定券商");
+        Assert.Equal(
+            "無代號 A (#3)",
+            Assert.Single(report.SymbolAllocations, allocation => allocation.Key == "\0holding:3").Label);
+        Assert.Equal(
+            "無代號 B (#4)",
+            Assert.Single(report.SymbolAllocations, allocation => allocation.Key == "\0holding:4").Label);
         Assert.Equal(
             report.SymbolAllocations.OrderByDescending(allocation => allocation.Value).Select(allocation => allocation.Key),
             report.SymbolAllocations.Select(allocation => allocation.Key));
@@ -60,6 +67,43 @@ public class StockStructureReportCalculatorTests
         });
         Assert.Single(caseInsensitiveReport.SymbolAllocations);
         Assert.Equal("ABC", caseInsensitiveReport.SymbolAllocations[0].Key);
+        Assert.Equal("大小寫一 (ABC)", caseInsensitiveReport.SymbolAllocations[0].Label);
+    }
+
+    /// <summary>驗證代號大小寫、前導零及金額與代號同額次排序維持既有結果。</summary>
+    [Fact]
+    public void Calculate_NormalizesSymbolsAndPreservesValueThenSymbolSortOrder()
+    {
+        var holdings = new[]
+        {
+            CreateStock(1, "高額配置", "ccc", StockInstrumentType.Stock, 100m, 200m, 100m, "甲券商"),
+            CreateStock(2, "Zulu 配置", "aaa", StockInstrumentType.Stock, 100m, 100m, 100m, "乙券商"),
+            CreateStock(3, "Alpha 配置", "bbb", StockInstrumentType.Stock, 100m, 100m, 100m, "丙券商"),
+            CreateStock(4, "前導零 ETF", " 0007 ", StockInstrumentType.StockEtf, 100m, 50m, 100m, "丁券商"),
+        };
+
+        var report = StockStructureReportCalculator.Calculate(holdings);
+
+        Assert.Equal(new[] { "CCC", "AAA", "BBB", "0007" }, report.SymbolAllocations.Select(allocation => allocation.Key));
+        Assert.Equal("高額配置 (CCC)", report.SymbolAllocations[0].Label);
+        Assert.Equal("Zulu 配置 (AAA)", report.SymbolAllocations[1].Label);
+        Assert.Equal("Alpha 配置 (BBB)", report.SymbolAllocations[2].Label);
+        Assert.Equal("前導零 ETF (0007)", report.SymbolAllocations[3].Label);
+    }
+
+    /// <summary>驗證非標的配置仍以既有顯示標籤作為同額次排序。</summary>
+    [Fact]
+    public void Calculate_PreservesLabelTieBreakersForNonSymbolAllocations()
+    {
+        var holdings = new[]
+        {
+            CreateStock(1, "上市標的", "AAA", StockInstrumentType.Stock, 100m, 100m, 100m, "甲券商", StockMarket.Twse),
+            CreateStock(2, "上櫃標的", "BBB", StockInstrumentType.Stock, 100m, 100m, 100m, "乙券商", StockMarket.Tpex),
+        };
+
+        var report = StockStructureReportCalculator.Calculate(holdings);
+
+        Assert.Equal(new[] { "上市", "上櫃" }, report.MarketAllocations.Select(allocation => allocation.Label));
     }
 
     /// <summary>驗證固定集中度、類型、券商與虧損規則的邊界結果。</summary>
@@ -76,12 +120,40 @@ public class StockStructureReportCalculatorTests
 
         var report = StockStructureReportCalculator.Calculate(holdings);
         var codes = report.Insights.Select(insight => insight.Code).ToHashSet();
+        var expectedValues = new[] { 119593m, 15932m, 7956m, 7956m };
+        var expectedTotal = expectedValues.Sum();
+        var expectedPercentages = expectedValues
+            .Select(value => value / expectedTotal * 100m)
+            .ToArray();
+        var expectedWeights = expectedPercentages.Select(percentage => percentage / 100m).ToArray();
+        var expectedHhi = expectedWeights.Sum(weight => weight * weight);
 
         Assert.Contains("SingleSymbolConcentration", codes);
         Assert.Contains("TopThreeConcentration", codes);
         Assert.Contains("InstrumentTypeConcentration", codes);
         Assert.Contains("BrokerConcentration", codes);
         Assert.Contains("EstimatedLosses", codes);
+
+        Assert.Equal((decimal?)expectedPercentages[0], report.Concentration.Top1Percentage);
+        Assert.Equal((decimal?)expectedPercentages.Take(3).Sum(), report.Concentration.Top3Percentage);
+        Assert.Equal((decimal?)expectedPercentages.Sum(), report.Concentration.Top5Percentage);
+        Assert.Equal((decimal?)expectedHhi, report.Concentration.Hhi);
+        Assert.Equal((decimal?)(1m / expectedHhi), report.Concentration.EffectiveHoldingCount);
+
+        var singleSymbolInsight = Assert.Single(
+            report.Insights,
+            insight => insight.Code == "SingleSymbolConcentration");
+        Assert.Equal("集中標的 (AAA)", singleSymbolInsight.AffectedName);
+        Assert.Contains("集中標的 (AAA)", singleSymbolInsight.Message);
+        Assert.Equal((decimal?)expectedPercentages[0], singleSymbolInsight.ObservedPercentage);
+        Assert.Equal(30m, singleSymbolInsight.ThresholdPercentage);
+
+        var topThreeInsight = Assert.Single(
+            report.Insights,
+            insight => insight.Code == "TopThreeConcentration");
+        Assert.Equal("集中標的 (AAA)、第二標的 (BBB)、第三標的 (CCC)", topThreeInsight.AffectedName);
+        Assert.Equal((decimal?)expectedPercentages.Take(3).Sum(), topThreeInsight.ObservedPercentage);
+        Assert.Equal(70m, topThreeInsight.ThresholdPercentage);
     }
 
     /// <summary>驗證分散且獲利的持股只產生無提醒資訊。</summary>

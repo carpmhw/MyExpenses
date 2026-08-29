@@ -7,7 +7,7 @@ import { deferred } from '../support/deferred'
 import { mountWithAppProviders } from '../support/render'
 
 vi.mock('vue-chartjs', () => ({
-  Bar: { template: '<div data-testid="bar-chart" />' },
+  Bar: { props: ['data'], template: '<div data-testid="bar-chart">{{ JSON.stringify(data.labels) }}</div>' },
   Line: { props: ['data'], template: '<div data-testid="line-chart">{{ JSON.stringify(data.labels) }}</div>' },
   Doughnut: { template: '<div data-testid="doughnut-chart" />' },
 }))
@@ -37,7 +37,7 @@ const report: StockStructureReportData = {
     affectedCount: null,
     amount: null,
   }],
-  symbolAllocations: [{ key: 'AAA', label: 'AAA', value: 9960, percentage: 100 }],
+  symbolAllocations: [{ key: 'AAA', label: '標的一 (AAA)', value: 9960, percentage: 100 }],
   instrumentTypeAllocations: [{ key: 'Stock', label: '股票', value: 9960, percentage: 100 }],
   brokerAllocations: [{ key: '甲券商', label: '甲券商', value: 9960, percentage: 100 }],
   marketAllocations: [{ key: 'Twse', label: '上市', value: 9960, percentage: 100 }],
@@ -105,6 +105,16 @@ describe('StockStructureReport', () => {
     expect(structure).toHaveBeenCalledTimes(1)
     expect(valueTrend).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('標的一')
+  })
+
+  it('passes the complete backend allocation label to the Top 10 bar chart', async () => {
+    vi.spyOn(api.reports, 'stockStructure').mockResolvedValue(report)
+    vi.spyOn(api.reports, 'stockValueTrend').mockResolvedValue(trend)
+
+    const wrapper = mountWithAppProviders(StockStructureReport)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="bar-chart"]').text()).toBe('["標的一 (AAA)"]')
   })
 
   it('reloads only current analysis when filters change and clears the old result', async () => {
