@@ -94,7 +94,13 @@ async function fetchList() {
   loading.value = true
   listError.value = null
   try {
-    const result = await request<BankAccountListResponse>(`/bank-accounts?${buildListQuery()}`)
+    const result = currencyCodeFilter.value
+      ? await request<BankAccountListResponse>(`/bank-accounts?${buildListQuery()}`)
+      : await api.bankAccounts.list({
+          page: pagination.page.value,
+          pageSize: pagination.pageSize.value,
+          bankName: bankNameFilter.value,
+        })
     if (!listRequestGuard.isLatest(requestId)) return
     accounts.value = result.items
     pagination.total.value = result.total
