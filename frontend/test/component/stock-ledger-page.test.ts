@@ -338,6 +338,73 @@ describe('StocksPage ledger contract', () => {
     expect(wrapper.text()).toContain('交易紀錄')
   })
 
+  // 驗證點擊持股列會重設分頁，並只查詢一次該股票的交易紀錄。
+  it('opens the filtered transaction ledger from a holding row', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue({
+      ...createLedgerResponse(),
+      total: 21,
+    })
+
+    const wrapper = mountWithAppProviders(StocksPage)
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-type-filter"]').setValue('Sell')
+    await wrapper.get('[data-testid="ledger-date-start"]').setValue('2026-01-01')
+    await wrapper.get('[data-testid="ledger-date-end"]').setValue('2026-08-01')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-page-next"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-holdings"]').trigger('click')
+    ledger.mockClear()
+
+    await wrapper.get('[data-testid="stock-row-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="stock-tab-ledger"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="ledger-stock-filter"]').element.value).toBe('1')
+    expect(ledger).toHaveBeenCalledTimes(1)
+    expect(ledger).toHaveBeenCalledWith(expect.objectContaining({
+      stockId: 1,
+      type: 'Sell',
+      dateStart: '2026-01-01',
+      dateEnd: '2026-08-01',
+      page: 1,
+    }))
+
+    await wrapper.get('[data-testid="ledger-stock-filter"]').setValue('')
+    await flushPromises()
+
+    expect(ledger).toHaveBeenCalledTimes(2)
+    expect(ledger).toHaveBeenLastCalledWith(expect.objectContaining({
+      stockId: undefined,
+      type: 'Sell',
+      dateStart: '2026-01-01',
+      dateEnd: '2026-08-01',
+      page: 1,
+    }))
+  })
+
+  // 驗證股票名稱提供原生鍵盤控制項，且啟動後只查詢一次交易紀錄。
+  it('opens the filtered transaction ledger from the stock name control', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
+
+    const wrapper = mountWithAppProviders(StocksPage)
+    await flushPromises()
+    const stockNameControl = wrapper.get('[data-testid="stock-ledger-1"]')
+
+    expect(stockNameControl.element.tagName).toBe('BUTTON')
+    await stockNameControl.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="stock-tab-ledger"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="ledger-stock-filter"]').element.value).toBe('1')
+    expect(ledger).toHaveBeenCalledTimes(1)
+    expect(ledger).toHaveBeenCalledWith(expect.objectContaining({ stockId: 1, page: 1 }))
+  })
+
   // 驗證 stock/type/date filters 由 page 傳入 Ledger API，並將頁碼重設至第一頁。
   it('passes ledger filters and resets pagination', async () => {
     vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
@@ -381,10 +448,11 @@ describe('StocksPage ledger contract', () => {
   // 驗證 Ledger-managed 的股數與買入均價在股票編輯表單中不可直接修改。
   it('locks ledger-managed shares and buy price in the edit form', async () => {
     vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
 
     const wrapper = mountWithAppProviders(StocksPage)
     await flushPromises()
-    await wrapper.find('tbody tr').findAll('button')[0].trigger('click')
+    await wrapper.get('[data-testid="stock-edit-1"]').trigger('click')
     await flushPromises()
 
     const shares = document.querySelector<HTMLInputElement>('input[type="number"][step="1"]')!
@@ -392,6 +460,8 @@ describe('StocksPage ledger contract', () => {
     expect(shares.disabled).toBe(true)
     expect(buyPrice.disabled).toBe(true)
     expect(document.body.textContent).toContain('股數由交易紀錄管理')
+    expect(wrapper.get('[data-testid="stock-tab-holdings"]').attributes('aria-selected')).toBe('true')
+    expect(ledger).not.toHaveBeenCalled()
   })
 
   // 驗證已結清的 Ledger 持股仍可編輯名稱與現價，不被零 projection 驗證阻擋。
@@ -408,7 +478,7 @@ describe('StocksPage ledger contract', () => {
 
     const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
     await flushPromises()
-    await wrapper.find('tbody tr').findAll('button')[0].trigger('click')
+    await wrapper.get('[data-testid="stock-edit-1"]').trigger('click')
     await flushPromises()
 
     const form = document.body.querySelector<HTMLFormElement>('form')!
@@ -435,7 +505,7 @@ describe('StocksPage ledger contract', () => {
 
     const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
     await flushPromises()
-    await wrapper.find('tbody tr').findAll('button')[0].trigger('click')
+    await wrapper.get('[data-testid="stock-edit-1"]').trigger('click')
     await flushPromises()
 
     const form = document.body.querySelector<HTMLFormElement>('form')!
@@ -459,6 +529,7 @@ describe('StocksPage ledger contract', () => {
   // 驗證持股列 Buy 快捷操作預選正確 StockId 與交易型別。
   it('opens a Buy transaction from the holding row', async () => {
     vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
     vi.spyOn(api.stocks, 'options').mockResolvedValue([{
       id: 1,
       name: '台積電',
@@ -475,12 +546,15 @@ describe('StocksPage ledger contract', () => {
 
     expect((document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')!).value).toBe('1')
     expect((document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-type"]')!).value).toBe('Buy')
+    expect(wrapper.get('[data-testid="stock-tab-holdings"]').attributes('aria-selected')).toBe('true')
+    expect(ledger).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
   // 驗證持股列 Sell 快捷操作預選正確 StockId、交易型別與券商提示。
   it('opens a Sell transaction from the holding row', async () => {
     vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
     vi.spyOn(api.stocks, 'options').mockResolvedValue([{
       id: 1,
       name: '台積電',
@@ -498,6 +572,8 @@ describe('StocksPage ledger contract', () => {
     expect((document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')!).value).toBe('1')
     expect((document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-type"]')!).value).toBe('Sell')
     expect(document.body.textContent).toContain('2330 台積電｜甲券商')
+    expect(wrapper.get('[data-testid="stock-tab-holdings"]').attributes('aria-selected')).toBe('true')
+    expect(ledger).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -609,6 +685,7 @@ describe('StocksPage ledger contract', () => {
   // 驗證持股列的 Ledger delete control 不可執行，避免送出必然被 backend 拒絕的 request。
   it('disables deletion for Ledger-managed holdings', async () => {
     vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse())
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
 
     const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
     await flushPromises()
@@ -617,18 +694,23 @@ describe('StocksPage ledger contract', () => {
     expect(deleteButton.attributes('disabled')).toBeDefined()
     await deleteButton.trigger('click')
     expect(document.body.textContent).not.toContain('確定要刪除此股票記錄嗎？')
+    expect(wrapper.get('[data-testid="stock-tab-holdings"]').attributes('aria-selected')).toBe('true')
+    expect(ledger).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
   // 驗證沒有 Ledger 的 legacy 持股仍可開啟既有刪除確認流程。
   it('keeps deletion available for legacy holdings', async () => {
     vi.spyOn(api.stocks, 'list').mockResolvedValue(createStockListResponse(false))
+    const ledger = vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
 
     const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
     await flushPromises()
 
     await wrapper.find('[data-testid="stock-delete-1"]').trigger('click')
     expect(document.body.textContent).toContain('確定要刪除此股票記錄嗎？')
+    expect(wrapper.get('[data-testid="stock-tab-holdings"]').attributes('aria-selected')).toBe('true')
+    expect(ledger).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

@@ -177,8 +177,7 @@ describe('StocksPage market contract', () => {
 
     const wrapper = mountWithAppProviders(StocksPage)
     await flushPromises()
-    const stockRows = wrapper.findAll('tbody tr')
-    await stockRows[0].findAll('button')[0].trigger('click')
+    await wrapper.get('[data-testid="stock-edit-1"]').trigger('click')
     await flushPromises()
     const form = document.body.querySelector('form')!
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -190,7 +189,7 @@ describe('StocksPage market contract', () => {
     const controlsLocked = cancelButton.disabled && closeButton.disabled
     cancelButton.click()
     await nextTick()
-    await stockRows[1].findAll('button')[0].trigger('click')
+    await wrapper.get('[data-testid="stock-edit-2"]').trigger('click')
     await flushPromises()
 
     lookup.resolve({
@@ -245,7 +244,7 @@ describe('StocksPage market contract', () => {
 
     const wrapper = mountWithAppProviders(StocksPage)
     await flushPromises()
-    await wrapper.find('tbody tr').findAll('button')[0].trigger('click')
+    await wrapper.get('[data-testid="stock-edit-1"]').trigger('click')
     await flushPromises()
     const form = document.body.querySelector<HTMLFormElement>('form')!
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -329,7 +328,7 @@ describe('StocksPage market contract', () => {
 
     const wrapper = mount(StocksPage, { global: { provide: { toast } } })
     await flushPromises()
-    const editButton = wrapper.find('tbody tr').findAll('button')[0]
+    const editButton = wrapper.get('[data-testid="stock-edit-1"]')
     await editButton.trigger('click')
     await flushPromises()
     document.body.querySelector<HTMLFormElement>('form')!
