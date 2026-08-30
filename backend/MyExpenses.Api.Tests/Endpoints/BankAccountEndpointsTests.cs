@@ -22,6 +22,61 @@ public class BankAccountEndpointsTests
         Assert.All(result.Items, account => Assert.Contains("國泰", account.BankName));
     }
 
+    /// <summary>驗證銀行帳戶列表可依幣別篩選，且會正規化查詢幣別大小寫。</summary>
+    [Fact]
+    public async Task ListBankAccounts_FiltersByCurrencyCode()
+    {
+        await using var db = await CreateDbContextAsync();
+        db.BankAccounts.Add(new BankAccount
+        {
+            BankName = "美元銀行",
+            AccountNumber = "45678",
+            Balance = 310m,
+            CurrencyCode = "USD",
+            AccountType = "活期",
+        });
+        await db.SaveChangesAsync();
+
+        var result = await BankAccountEndpoints.ListBankAccountsAsync(1, 10, null, db, null, " usd ");
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal("USD", item.CurrencyCode);
+        Assert.Equal("美元銀行", item.BankName);
+        Assert.Equal(1, result.Total);
+    }
+
+    /// <summary>驗證銀行名稱與幣別條件會共同套用於列表查詢。</summary>
+    [Fact]
+    public async Task ListBankAccounts_CombinesBankNameAndCurrencyFilters()
+    {
+        await using var db = await CreateDbContextAsync();
+        db.BankAccounts.AddRange(
+            new BankAccount
+            {
+                BankName = "國泰外幣",
+                AccountNumber = "45678",
+                Balance = 310m,
+                CurrencyCode = "USD",
+                AccountType = "活期",
+            },
+            new BankAccount
+            {
+                BankName = "玉山外幣",
+                AccountNumber = "56789",
+                Balance = 200m,
+                CurrencyCode = "USD",
+                AccountType = "活期",
+            });
+        await db.SaveChangesAsync();
+
+        var result = await BankAccountEndpoints.ListBankAccountsAsync(1, 10, "國泰", db, null, "USD");
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal("國泰外幣", item.BankName);
+        Assert.Equal("USD", item.CurrencyCode);
+        Assert.Equal(1, result.Total);
+    }
+
     /// <summary>Verifies filtered totals are counted before pagination is applied.</summary>
     [Fact]
     public async Task ListBankAccounts_CountsAllMatchingAccountsBeforePagination()
