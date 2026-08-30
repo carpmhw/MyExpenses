@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject, watch, onMounted } from 'vue'
+import { ref, computed, inject, watch, onMounted, nextTick } from 'vue'
 import { api } from '../../api'
 import type {
   EditableStockTransactionType,
@@ -299,6 +299,14 @@ watch([ledgerStockId, ledgerType, ledgerDateStart, ledgerDateEnd], () => {
   ledgerPage.value = 1
   if (activeTab.value === 'ledger') void fetchLedger()
 })
+
+// 先同步股票與分頁，待篩選 watcher 完成後再啟用 Ledger，確保導覽只查詢一次。
+async function viewHoldingLedger(item: StockListItem): Promise<void> {
+  ledgerStockId.value = item.id
+  ledgerPage.value = 1
+  await nextTick()
+  activeTab.value = 'ledger'
+}
 
 /** 依指定表單快照建立正規化持股 payload，避免非同步期間混入其他表單資料。 */
 function buildStockPayload(formState: StockFormState): Omit<Stock, 'id'> {
@@ -730,6 +738,7 @@ onMounted(fetchStocks)
         :loading="loading"
         :page="pagination.page.value"
         :page-size="pagination.pageSize.value"
+        @view-ledger="viewHoldingLedger"
         @edit="openEdit"
         @buy="item => openTransaction(item.id, 'Buy')"
         @sell="item => openTransaction(item.id, 'Sell')"

@@ -13,6 +13,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  viewLedger: [item: StockListItem]
   edit: [item: StockListItem]
   buy: [item: StockListItem]
   sell: [item: StockListItem]
@@ -53,9 +54,25 @@ function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale
     <template #empty>
       <div class="py-4 text-center text-text-tertiary">尚無股票資料</div>
     </template>
-    <tr v-for="(item, idx) in props.items" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
+    <tr
+      v-for="(item, idx) in props.items"
+      :key="item.id"
+      :data-testid="`stock-row-${item.id}`"
+      :title="`查看 ${item.name} 的交易紀錄`"
+      class="cursor-pointer border-b border-border-default transition-colors hover:bg-bg-raised"
+      @click="emit('viewLedger', item)"
+    >
       <td class="w-[60px] px-4 py-3 text-sm text-text-secondary">{{ (props.page - 1) * props.pageSize + idx + 1 }}</td>
-      <td class="px-4 py-3 font-medium text-text-primary">{{ item.name }}</td>
+      <td class="px-4 py-3">
+        <button
+          :data-testid="`stock-ledger-${item.id}`"
+          type="button"
+          class="cursor-pointer rounded-sm font-medium text-text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          @click.stop="emit('viewLedger', item)"
+        >
+          {{ item.name }}
+        </button>
+      </td>
       <td class="px-4 py-3 font-mono text-text-secondary">{{ item.symbol }}</td>
       <td class="whitespace-nowrap px-4 py-3 text-sm text-text-secondary">{{ formatStockMarket(item.market) }}</td>
       <td class="whitespace-nowrap px-4 py-3 text-sm text-text-secondary">{{ formatStockInstrumentType(item.instrumentType) }}</td>
@@ -66,14 +83,14 @@ function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale
       <td class="px-4 py-3 text-sm text-text-secondary">{{ item.broker || '－' }}</td>
       <td class="w-[80px] px-4 py-3">
         <div class="flex items-center gap-1">
-          <button type="button" class="cursor-pointer rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-bg-raised" @click="emit('edit', item)">
+          <button :data-testid="`stock-edit-${item.id}`" type="button" class="cursor-pointer rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-bg-raised" @click.stop="emit('edit', item)">
             <Icon name="pencil" :size="16" />
           </button>
           <button
             :data-testid="`stock-buy-${item.id}`"
             type="button"
             class="cursor-pointer rounded-lg px-2 py-1 text-xs font-medium text-color-income-text transition-colors hover:bg-bg-raised"
-            @click="emit('buy', item)"
+            @click.stop="emit('buy', item)"
           >
             買入
           </button>
@@ -81,7 +98,7 @@ function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale
             :data-testid="`stock-sell-${item.id}`"
             type="button"
             class="cursor-pointer rounded-lg px-2 py-1 text-xs font-medium text-color-expense-text transition-colors hover:bg-bg-raised"
-            @click="emit('sell', item)"
+            @click.stop="emit('sell', item)"
           >
             賣出
           </button>
@@ -91,7 +108,7 @@ function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale
             :disabled="item.hasLedger"
             :title="item.hasLedger ? '此股票已有交易紀錄，無法直接刪除' : '刪除股票'"
             class="rounded-lg p-1.5 text-color-expense-text transition-colors hover:bg-bg-raised disabled:cursor-not-allowed disabled:opacity-40"
-            @click="emit('delete', item.id)"
+            @click.stop="emit('delete', item.id)"
           >
             <Icon name="trash-2" :size="16" />
           </button>
