@@ -19,9 +19,10 @@ public static class BankAccountEndpoints
             int? page,
             int? pageSize,
             string? bankName,
+            string? currencyCode,
             AppDbContext db,
             [FromServices] IExchangeRateService exchangeRateService) =>
-            Results.Ok(await ListBankAccountsAsync(page, pageSize, bankName, db, exchangeRateService)));
+            Results.Ok(await ListBankAccountsAsync(page, pageSize, bankName, db, exchangeRateService, currencyCode)));
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
             await db.BankAccounts.FindAsync(id) is BankAccount account
@@ -78,13 +79,18 @@ public static class BankAccountEndpoints
         int? pageSize,
         string? bankName,
         AppDbContext db,
-        IExchangeRateService? exchangeRateService = null)
+        IExchangeRateService? exchangeRateService = null,
+        string? currencyCode = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         var query = db.BankAccounts.AsNoTracking().AsQueryable();
         var trimmedBankName = bankName?.Trim();
         if (!string.IsNullOrEmpty(trimmedBankName))
             query = query.Where(account => account.BankName.Contains(trimmedBankName));
+
+        var normalizedCurrencyCode = currencyCode?.Trim().ToUpperInvariant();
+        if (!string.IsNullOrEmpty(normalizedCurrencyCode))
+            query = query.Where(account => account.CurrencyCode == normalizedCurrencyCode);
 
         var rows = await query
             .Select(account => new BankAccountListProjection(
