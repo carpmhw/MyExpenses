@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted } from 'vue'
-import { api } from '../../api'
-import type { BankAccountListItem, CurrencyCode } from '../../types'
+import { api, request } from '../../api'
+import type { BankAccountListItem, BankAccountListResponse, CurrencyCode } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -27,6 +27,7 @@ const exchangeRateUpdatedAt = ref<string | null>(null)
 const exchangeRateIsStale = ref(false)
 const conversionAvailable = ref(true)
 const bankNameFilter = ref('')
+const currencyCodeFilter = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const listError = ref<string | null>(null)
@@ -76,13 +77,24 @@ const currencyChanged = computed(() =>
   hasCurrencyChanged(editingItem.value?.currencyCode, form.value.currencyCode),
 )
 
-// 取得目前頁面與銀行名稱篩選條件的帳戶資料。
+// 建立銀行帳戶列表查詢，讓銀行名稱與幣別共同套用至總額、筆數及分頁。
+function buildListQuery(): string {
+  const query = new URLSearchParams()
+  query.set('page', String(pagination.page.value))
+  query.set('pageSize', String(pagination.pageSize.value))
+  const bankName = bankNameFilter.value.trim()
+  if (bankName) query.set('bankName', bankName)
+  if (currencyCodeFilter.value) query.set('currencyCode', currencyCodeFilter.value)
+  return query.toString()
+}
+
+// 取得目前頁面與銀行名稱、幣別篩選條件的帳戶資料。
 async function fetchList() {
   const requestId = listRequestGuard.next()
   loading.value = true
   listError.value = null
   try {
-    const result = await api.bankAccounts.list({ page: pagination.page.value, pageSize: pagination.pageSize.value, bankName: bankNameFilter.value })
+    const result = await request<BankAccountListResponse>(`/bank-accounts?${buildListQuery()}`)
     if (!listRequestGuard.isLatest(requestId)) return
     accounts.value = result.items
     pagination.total.value = result.total
@@ -174,8 +186,8 @@ async function takeSnapshot() {
 onMounted(fetchList)
 
 watch(() => pagination.page.value, () => fetchList())
-// Resets filtered searches to the first page so counts and totals stay aligned.
-watch(bankNameFilter, () => {
+// 篩選條件變更時回到第一頁，使筆數、總額與列表維持一致。
+watch([bankNameFilter, currencyCodeFilter], () => {
   if (pagination.page.value !== 1) {
     pagination.page.value = 1
     return
@@ -222,18 +234,30 @@ watch(bankNameFilter, () => {
     </div>
 
     <Card>
-      <div class="flex flex-wrap items-center gap-3 mb-4">
-        <span class="text-sm font-medium text-text-primary">銀行名稱</span>
-        <input
-          v-model="bankNameFilter"
-          type="text"
-          placeholder="輸入銀行名稱關鍵字"
-          class="w-full sm:w-64 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary placeholder:text-text-tertiary"
-        />
+      <div class="flex flex-wrap items-end gap-3 mb-4">
+        <div class="w-full sm:w-64">
+          <label class="block text-sm font-medium text-text-primary mb-1" for="bank-account-bank-name-filter">銀行名稱</label>
+          <input
+            id="bank-account-bank-name-filter"
+            v-model="bankNameFilter"
+            type="text"
+            placeholder="輸入銀行名稱關鍵字"
+            class="w-full min-h-11 px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary placeholder:text-text-tertiary"
+          />
+        </div>
+        <div class="w-full sm:w-52">
+          <label class="block text-sm font-medium text-text-primary mb-1" for="bank-account-currency-filter">幣別</label>
+          <Select
+            id="bank-account-currency-filter"
+            v-model="currencyCodeFilter"
+            :options="CURRENCY_OPTIONS"
+            placeholder="全部幣別"
+          />
+        </div>
       </div>
       <DataTable :columns="columns" :loading="loading" :items="accounts" :error="listError" :retry="fetchList">
         <template #empty>
-          <div class="text-center text-text-tertiary py-4">尚無銀行帳戶資料</div>
+          <div class="text-center text-text-tertiary py-4">尚無符合篩選條件的銀行帳戶資料</div>
         </template>
         <tr v-for="(item, index) in accounts" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + index + 1 }}</td>
