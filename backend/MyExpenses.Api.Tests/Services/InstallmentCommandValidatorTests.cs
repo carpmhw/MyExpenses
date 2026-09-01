@@ -27,6 +27,23 @@ public class InstallmentCommandValidatorTests
         Assert.Equal(422, error.StatusCode);
     }
 
+    /// <summary>驗證一期信用卡交易可通過共用排程驗證。</summary>
+    [Fact]
+    public void ValidateSchedule_AcceptsOnePeriod()
+    {
+        InstallmentCommandValidator.ValidateSchedule(100m, 1, new DateOnly(2026, 6, 20));
+    }
+
+    /// <summary>驗證零期仍會被共用排程驗證拒絕。</summary>
+    [Fact]
+    public void ValidateSchedule_RejectsZeroPeriods()
+    {
+        var error = Assert.Throws<FinancialCommandException>(
+            () => InstallmentCommandValidator.ValidateSchedule(100m, 0, new DateOnly(2026, 6, 20)));
+
+        Assert.Equal(400, error.StatusCode);
+    }
+
     /// <summary>Verifies only the credit-card payment method is accepted for installment purchases.</summary>
     [Fact]
     public void ValidateCreditCardPaymentMethod_RejectsOtherSystemCode()

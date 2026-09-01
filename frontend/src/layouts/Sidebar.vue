@@ -38,7 +38,7 @@ const navItems = [
     { label: '儀表板', icon: LayoutDashboard, route: '/dashboard' },
     { label: '提款紀錄', icon: Banknote, route: '/withdrawals' },
     { label: '交易明細', icon: Receipt, route: '/transactions' },
-    { label: '信用卡分期', icon: CreditCard, route: '/installments' },
+    { label: '信用卡交易', icon: CreditCard, route: '/installments' },
     { label: '報表分析', icon: BarChart3, route: '/reports' },
     { label: '財務快照', icon: Camera, route: '/snapshots' },
     { label: '業務排程', icon: Activity, route: '/schedules' },

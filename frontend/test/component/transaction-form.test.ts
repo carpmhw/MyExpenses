@@ -108,29 +108,11 @@ describe('transaction form interaction contract', () => {
     wrapper.unmount()
   })
 
-  it('clears incompatible category and installment state when expense becomes income', async () => {
+  it('clears an expense category when expense becomes income', async () => {
     const { wrapper, dialog } = await openTransactionForm()
 
     const type = dialog.querySelector<HTMLSelectElement>('#transaction-type')
-    const paymentMethod = dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')
     expect(type).not.toBeNull()
-    expect(paymentMethod).not.toBeNull()
-
-    paymentMethod!.value = '10'
-    paymentMethod!.dispatchEvent(new Event('change'))
-    await flushPromises()
-
-    const paymentMode = dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')
-    expect(paymentMode).not.toBeNull()
-    paymentMode!.value = 'installment'
-    paymentMode!.dispatchEvent(new Event('change'))
-    await flushPromises()
-
-    const card = dialog.querySelector<HTMLSelectElement>('#transaction-installment-card')
-    expect(card).not.toBeNull()
-    card!.value = '7'
-    card!.dispatchEvent(new Event('change'))
-    await flushPromises()
 
     type!.value = 'Income'
     type!.dispatchEvent(new Event('change'))
@@ -138,13 +120,10 @@ describe('transaction form interaction contract', () => {
 
     expect(dialog.querySelector<HTMLSelectElement>('#transaction-category')?.value).toBe('')
     expect(dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')?.value).toBe('')
-    expect(dialog.querySelector('#transaction-payment-mode')).toBeNull()
-    expect(dialog.querySelector('#transaction-installment-card')).toBeNull()
-    expect(dialog.querySelector('#transaction-installment-periods')).toBeNull()
     wrapper.unmount()
   })
 
-  it('preserves neutral values while clearing credit-card state when payment changes', async () => {
+  it('preserves neutral values when transaction type changes', async () => {
     const { wrapper, dialog } = await openTransactionForm()
 
     const date = dialog.querySelector<HTMLInputElement>('#transaction-date')!
@@ -160,78 +139,15 @@ describe('transaction form interaction contract', () => {
     notes.value = '測試備註'
     notes.dispatchEvent(new Event('input'))
 
-    const paymentMethod = dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')!
-    paymentMethod.value = '10'
-    paymentMethod.dispatchEvent(new Event('change'))
-    await flushPromises()
-    const paymentMode = dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!
-    paymentMode.value = 'installment'
-    paymentMode.dispatchEvent(new Event('change'))
-    await flushPromises()
-
-    paymentMethod.value = '11'
-    paymentMethod.dispatchEvent(new Event('change'))
+    const type = dialog.querySelector<HTMLSelectElement>('#transaction-type')!
+    type.value = 'Income'
+    type.dispatchEvent(new Event('change'))
     await flushPromises()
 
     expect(date.value).toBe('2026-08-01')
     expect(amount.value).toBe('1280')
     expect(description.value).toBe('晚餐')
     expect(notes.value).toBe('測試備註')
-    expect(dialog.querySelector('#transaction-payment-mode')).toBeNull()
-    expect(dialog.querySelector('#transaction-installment-card')).toBeNull()
-    wrapper.unmount()
-  })
-
-  it('routes a one-time credit-card expense to the ordinary transaction command', async () => {
-    const create = vi.spyOn(api.transactions, 'create').mockResolvedValue({} as never)
-    const purchase = vi.spyOn(api.installmentPurchases, 'create').mockResolvedValue({} as never)
-    const { wrapper, dialog } = await openTransactionForm()
-
-    dialog.querySelector<HTMLInputElement>('#transaction-amount')!.value = '1280'
-    dialog.querySelector<HTMLInputElement>('#transaction-amount')!.dispatchEvent(new Event('input'))
-    dialog.querySelector<HTMLInputElement>('#transaction-description')!.value = '晚餐'
-    dialog.querySelector<HTMLInputElement>('#transaction-description')!.dispatchEvent(new Event('input'))
-    const paymentMethod = dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')!
-    paymentMethod.value = '10'
-    paymentMethod.dispatchEvent(new Event('change'))
-    await flushPromises()
-    const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')
-    expect(submit).not.toBeNull()
-    submit!.click()
-    await flushPromises()
-
-    expect(create).toHaveBeenCalledTimes(1)
-    expect(purchase).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
-
-  it('routes an installment credit-card expense only to the atomic purchase command', async () => {
-    const create = vi.spyOn(api.transactions, 'create').mockResolvedValue({} as never)
-    const purchase = vi.spyOn(api.installmentPurchases, 'create').mockResolvedValue({} as never)
-    const { wrapper, dialog } = await openTransactionForm()
-
-    dialog.querySelector<HTMLInputElement>('#transaction-amount')!.value = '1280'
-    dialog.querySelector<HTMLInputElement>('#transaction-amount')!.dispatchEvent(new Event('input'))
-    dialog.querySelector<HTMLInputElement>('#transaction-description')!.value = '家電'
-    dialog.querySelector<HTMLInputElement>('#transaction-description')!.dispatchEvent(new Event('input'))
-    const paymentMethod = dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')!
-    paymentMethod.value = '10'
-    paymentMethod.dispatchEvent(new Event('change'))
-    await flushPromises()
-    dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!.value = 'installment'
-    dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!.dispatchEvent(new Event('change'))
-    await flushPromises()
-    dialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.value = '7'
-    dialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.dispatchEvent(new Event('change'))
-    dialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.value = '3'
-    dialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.dispatchEvent(new Event('input'))
-    const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')
-    expect(submit).not.toBeNull()
-    submit!.click()
-    await flushPromises()
-
-    expect(purchase).toHaveBeenCalledTimes(1)
-    expect(create).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -300,39 +216,6 @@ describe('transaction form interaction contract', () => {
     wrapper.unmount()
   })
 
-  it('reuses the same idempotency key when an installment command is retried', async () => {
-    const purchase = vi.spyOn(api.installmentPurchases, 'create')
-      .mockRejectedValueOnce(new Error('network interrupted'))
-      .mockResolvedValueOnce({} as never)
-    const { wrapper, dialog } = await openTransactionForm()
-    fillOrdinaryExpense(dialog)
-    const paymentMethod = dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')!
-    paymentMethod.value = '10'
-    paymentMethod.dispatchEvent(new Event('change'))
-    await flushPromises()
-    const paymentMode = dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!
-    paymentMode.value = 'installment'
-    paymentMode.dispatchEvent(new Event('change'))
-    await flushPromises()
-    dialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.value = '7'
-    dialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.dispatchEvent(new Event('change'))
-    dialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.value = '3'
-    dialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.dispatchEvent(new Event('input'))
-
-    const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!
-    submit.click()
-    await flushPromises()
-    await flushPromises()
-    expect(document.body.textContent).toContain('可使用相同資料安全重試')
-    submit.click()
-    await flushPromises()
-    await flushPromises()
-
-    expect(purchase).toHaveBeenCalledTimes(2)
-    expect(purchase.mock.calls[0]?.[1]).toBe(purchase.mock.calls[1]?.[1])
-    wrapper.unmount()
-  })
-
   it('marks the list stale instead of reporting command failure after refresh fails', async () => {
     const list = vi.spyOn(api.transactions, 'list')
     vi.spyOn(api.transactions, 'create').mockResolvedValue({} as never)
@@ -363,52 +246,69 @@ describe('transaction form interaction contract', () => {
     wrapper.unmount()
   })
 
-  it('resets installment idempotency when a new form is opened', async () => {
-    const keys: string[] = []
-    const purchase = vi.spyOn(api.installmentPurchases, 'create').mockImplementation(async (_data, key) => {
-      keys.push(key)
-      throw new Error('network interrupted')
-    })
+  it('excludes credit-card payment and installment controls from new transactions', async () => {
     const { wrapper, dialog } = await openTransactionForm()
-    fillOrdinaryExpense(dialog)
-    const paymentMethod = dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')!
-    paymentMethod.value = '10'
-    paymentMethod.dispatchEvent(new Event('change'))
-    await flushPromises()
-    dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!.value = 'installment'
-    dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!.dispatchEvent(new Event('change'))
-    await flushPromises()
-    dialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.value = '7'
-    dialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.dispatchEvent(new Event('change'))
-    dialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.value = '3'
-    dialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.dispatchEvent(new Event('input'))
-    dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
-    await flushPromises()
-    await flushPromises()
-    const cancel = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button[type="button"]'))
-      .find(button => button.textContent?.trim() === '取消')
-    cancel?.click()
-    await flushPromises()
-    wrapper.get('button').trigger('click')
-    await flushPromises()
-    const nextDialog = document.body.querySelector('[role="dialog"]') as HTMLElement
-    fillOrdinaryExpense(nextDialog)
-    const nextPaymentMethod = nextDialog.querySelector<HTMLSelectElement>('#transaction-payment-method')!
-    nextPaymentMethod.value = '10'
-    nextPaymentMethod.dispatchEvent(new Event('change'))
-    await flushPromises()
-    nextDialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!.value = 'installment'
-    nextDialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!.dispatchEvent(new Event('change'))
-    await flushPromises()
-    nextDialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.value = '7'
-    nextDialog.querySelector<HTMLSelectElement>('#transaction-installment-card')!.dispatchEvent(new Event('change'))
-    nextDialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.value = '3'
-    nextDialog.querySelector<HTMLInputElement>('#transaction-installment-periods')!.dispatchEvent(new Event('input'))
-    nextDialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+
+    const paymentOptions = [...dialog.querySelectorAll<HTMLSelectElement>('#transaction-payment-method option')]
+      .map(option => option.textContent)
+    expect(paymentOptions).not.toContain('信用卡')
+    expect(dialog.querySelector('#transaction-payment-mode')).toBeNull()
+    expect(dialog.querySelector('#transaction-installment-card')).toBeNull()
+    expect(dialog.querySelector('#transaction-installment-periods')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('renders a historical credit-card payment as read-only and preserves its identifier', async () => {
+    const update = vi.fn()
+    const form = mount(TransactionForm, {
+      props: {
+        initialValue: {
+          ...createInitialTransactionForm('2026-08-03', [{ id: 1, name: '餐飲', type: 'Expense', icon: '', color: '', sortOrder: 1 }]),
+          amount: 300,
+          description: '舊信用卡交易',
+          paymentMethodId: 10,
+        },
+        categories: [{ id: 1, name: '餐飲', type: 'Expense', icon: '', color: '', sortOrder: 1 }],
+        paymentMethods: [
+          { id: 10, name: '自訂信用卡', systemCode: 'credit-card', icon: '', sortOrder: 1, color: '#2563eb' },
+          { id: 11, name: '現金', systemCode: 'cash', icon: '', sortOrder: 2, color: '' },
+        ],
+        editing: {
+          id: 42,
+          type: 'Expense',
+          amount: 300,
+          date: '2026-08-03',
+          description: '舊信用卡交易',
+          notes: null,
+          categoryId: 1,
+          paymentMethodId: 10,
+          createdAt: '',
+          category: { id: 1, name: '餐飲', type: 'Expense', icon: '', color: '', sortOrder: 1 },
+          paymentMethod: { id: 10, name: '自訂信用卡', systemCode: 'credit-card', icon: '', sortOrder: 1, color: '#2563eb' },
+        },
+        onSubmit: update,
+      },
+    })
     await flushPromises()
 
-    expect(purchase).toHaveBeenCalledTimes(2)
-    expect(keys[0]).not.toBe(keys[1])
+    const paymentMethod = form.element.querySelector<HTMLInputElement>('#transaction-payment-method')
+    expect(paymentMethod?.readOnly).toBe(true)
+    expect(paymentMethod?.value).toBe('信用卡')
+    expect(form.element.querySelector<HTMLSelectElement>('#transaction-type')?.disabled).toBe(true)
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'update',
+      data: expect.objectContaining({ paymentMethodId: 10 }),
+    }))
+    form.unmount()
+  })
+
+  it('does not load credit-card reference data for ordinary transaction entry', async () => {
+    const { wrapper } = await openTransactionForm()
+
+    expect(api.creditCards.list).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -419,7 +319,6 @@ describe('transaction form interaction contract', () => {
         initialValue: createInitialTransactionForm('2026-08-03', [{ id: 1, name: '餐飲', type: 'Expense', icon: '', color: '', sortOrder: 1 }]),
         categories: [{ id: 1, name: '餐飲', type: 'Expense', icon: '', color: '', sortOrder: 1 }],
         paymentMethods: [{ id: 11, name: '現金', systemCode: 'cash', icon: '', sortOrder: 1, color: '' }],
-        creditCards: [],
         editing: {
           id: 42,
           type: 'Expense',
@@ -480,22 +379,4 @@ describe('transaction form interaction contract', () => {
     expect(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
   })
 
-  it('defers credit-card readiness feedback until installment payment is selected', async () => {
-    await openTransactionForm(() => {
-      vi.spyOn(api.creditCards, 'list').mockRejectedValueOnce(new Error('cards unavailable'))
-    })
-
-    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement
-    const paymentMethod = dialog.querySelector<HTMLSelectElement>('#transaction-payment-method')!
-    paymentMethod.value = '10'
-    paymentMethod.dispatchEvent(new Event('change'))
-    await flushPromises()
-    const paymentMode = dialog.querySelector<HTMLSelectElement>('#transaction-payment-mode')!
-    paymentMode.value = 'installment'
-    paymentMode.dispatchEvent(new Event('change'))
-    await flushPromises()
-
-    expect(dialog.textContent).toContain('信用卡資料載入失敗')
-    expect(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
-  })
 })

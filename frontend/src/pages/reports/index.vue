@@ -374,7 +374,7 @@ function selectCategory(item: CategoryDistribution) {
             { key: 'stockStructure', label: '持股結構' },
            { key: 'marketRisk', label: '市場風險' },
            { key: 'networth', label: '資產負債' },
-          { key: 'forecast', label: '分期預測' },
+          { key: 'forecast', label: '信用卡應繳預測' },
         ] as const)"
         :key="tab.key"
         :id="`report-tab-${tab.key}`"
@@ -588,17 +588,17 @@ function selectCategory(item: CategoryDistribution) {
       </Card>
     </div>
 
-    <!-- 分期預測 -->
+    <!-- 信用卡應繳預測 -->
     <div v-else-if="activeTab === 'forecast'" id="report-panel-forecast" role="tabpanel" aria-labelledby="report-tab-forecast">
       <Card>
         <QueryState
           :status="forecastQuery.status.value"
           :error-message="queryErrorMessage(forecastQuery.error.value)"
-          :empty-message="'暫無分期預測數據'"
+          :empty-message="'暫無信用卡應繳預測資料'"
           :last-success-at="forecastQuery.lastSuccessAt.value"
           :retry="forecastQuery.retry"
         >
-          <h2 class="text-base font-semibold text-text-primary mb-4">未來 6 個月分期應繳預測</h2>
+          <h2 class="text-base font-semibold text-text-primary mb-4">未來 6 個月信用卡應繳預測</h2>
           <template>
             <div class="h-[360px]">
               <Bar :data="forecastChartData" :options="forecastChartOptions" />

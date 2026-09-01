@@ -66,6 +66,44 @@ public class InstallmentDerivedStateTests
         Assert.Equal(0, paidOff.Summary.ActiveCount);
     }
 
+    /// <summary>驗證指定日期範圍與進行中狀態時仍包含範圍外的未繳交易。</summary>
+    [Fact]
+    public async Task ListInstallments_ActiveFilterIncludesUnpaidTransactionsOutsideDateRange()
+    {
+        await using var db = await CreateDbContextAsync();
+        var installment = new Installment
+        {
+            TotalAmount = 100m,
+            Periods = 1,
+            PerPeriod = 100m,
+            PurchaseDate = new DateOnly(2025, 1, 1),
+            Description = "日期範圍外進行中交易",
+        };
+        db.Installments.Add(installment);
+        await db.SaveChangesAsync();
+        db.InstallmentPayments.Add(new InstallmentPayment
+        {
+            InstallmentId = installment.Id,
+            Period = 1,
+            Amount = 100m,
+            IsPaid = false,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await InstallmentEndpoints.ListInstallmentsAsync(
+            1,
+            10,
+            null,
+            new DateOnly(2026, 6, 1),
+            new DateOnly(2026, 6, 30),
+            "Active",
+            db);
+
+        Assert.Single(result.Items);
+        Assert.Equal(1, result.Summary.TotalCount);
+        Assert.Equal(1, result.Summary.ActiveCount);
+    }
+
     /// <summary>Creates an in-memory SQLite context for derived state endpoint tests.</summary>
     private static async Task<AppDbContext> CreateDbContextAsync()
     {

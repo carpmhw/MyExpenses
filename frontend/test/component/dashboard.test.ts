@@ -4,6 +4,7 @@ import Dashboard from '../../src/pages/dashboard/index.vue'
 import { api } from '../../src/api'
 import { createTestRouter } from '../support/render'
 import { deferred } from '../support/deferred'
+import type { Installment } from '../../src/types'
 
 // 等待 Vue watcher 與非同步查詢完成目前排程。
 async function flushPromises(): Promise<void> {
@@ -146,5 +147,46 @@ describe('Dashboard reliability states', () => {
     expect(wrapper.text()).toContain('US$310.00')
     expect(wrapper.text()).toContain('此摘要使用過期匯率')
     expect(wrapper.text()).toContain('2026/08/01 08:00')
+  })
+
+  it('uses credit card transaction wording and displays one-period activity', async () => {
+    const onePeriod: Installment = {
+      id: 7,
+      transactionId: null,
+      cardId: 3,
+      totalAmount: 1200,
+      periods: 1,
+      perPeriod: 1200,
+      remainingPeriods: 1,
+      status: 'Active',
+      purchaseDate: '2026-08-02',
+      createdAt: '2026-08-20T00:00:00Z',
+      description: '一次付清測試',
+      transaction: null,
+      card: null,
+      payments: [{ id: 71, installmentId: 7, period: 1, amount: 1200, paidDate: null, dueDate: '2026-08-23', isPaid: false }],
+    }
+    vi.spyOn(api.reports, 'dashboardSummary').mockResolvedValue({ ...summary, installmentDueAmount: 1200, installmentDuePaymentCount: 1, activeInstallmentCount: 1 })
+    vi.spyOn(api.withdrawals, 'list').mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 50, summary: { totalAmount: 0, count: 0, averageAmount: 0, maxAmount: 0, baseCurrency: 'TWD', exchangeRateUpdatedAt: null, exchangeRateIsStale: false, conversionAvailable: true, totalAmountInBaseCurrency: 0 } })
+    vi.spyOn(api.transactions, 'list').mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 50, summary: { totalAmount: 0, totalIncome: 0, totalExpense: 0, count: 0, dailyAverage: 0, maxAmount: 0 } })
+    vi.spyOn(api.installments, 'list').mockResolvedValue({ items: [onePeriod] })
+    const router = createTestRouter()
+    const wrapper = mount(Dashboard, {
+      global: {
+        plugins: [router],
+        provide: {
+          timeZone: { timeZoneId: { value: 'Asia/Taipei' }, isReady: { value: true }, loadError: { value: false }, getToday: () => '2026-08-02', formatDateTime: (value: string) => value },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('本期信用卡應繳')
+    expect(wrapper.text()).toContain('信用卡交易')
+    expect(wrapper.text()).toContain('Credit Card Transactions')
+    expect(wrapper.text()).toContain('1 期（一次付清）')
+    expect(wrapper.text()).toContain('08/02')
+    expect(wrapper.text()).not.toContain('08/20')
+    expect(wrapper.text()).not.toContain('信用卡分期')
   })
 })

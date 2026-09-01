@@ -192,6 +192,27 @@ describe('report and snapshot query ownership', () => {
     expect(wrapper.text()).toContain('new period failed')
   })
 
+  it('presents the forecast as credit card payments and includes a one-period amount', async () => {
+    const forecast = vi.spyOn(api.reports, 'installmentForecast').mockResolvedValue([{
+      month: '2026-08',
+      totalAmount: 1200,
+      payments: [{ cardBankName: '測試銀行', description: '一次付清測試', period: 1, amount: 1200, dueDate: '2026-08-23' }],
+    }])
+    vi.spyOn(api.reports, 'incomeExpenseTrend').mockResolvedValue([])
+    const wrapper = mountWithAppProviders(ReportsPage, {
+      global: { stubs: { Bar: { template: '<div />' }, Line: { template: '<div />' }, Doughnut: { template: '<div />' } } },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '信用卡應繳預測')!.trigger('click')
+    await flushPromises()
+
+    expect(forecast).toHaveBeenCalledWith({ months: 6 }, expect.anything())
+    expect(wrapper.text()).toContain('未來 6 個月信用卡應繳預測')
+    expect(wrapper.text()).toContain('一次付清測試')
+    expect(wrapper.text()).not.toContain('分期預測')
+  })
+
   it('keeps snapshot list and trend as separate date-range queries', async () => {
     const list = vi.spyOn(api.snapshots, 'list').mockResolvedValue({ items: [snapshot], total: 1, page: 1, pageSize: 15 })
     const trend = vi.spyOn(api.snapshots, 'trend').mockResolvedValue([])

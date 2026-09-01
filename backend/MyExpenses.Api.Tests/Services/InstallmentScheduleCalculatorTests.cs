@@ -41,12 +41,20 @@ public class InstallmentScheduleCalculatorTests
         Assert.Equal(new[] { 33m, 33m, 34m }, amounts);
     }
 
+    /// <summary>驗證一期交易的付款金額就是完整總額。</summary>
+    [Fact]
+    public void CalculateAmounts_AcceptsOnePeriodAsFullAmount()
+    {
+        var amounts = InstallmentScheduleCalculator.CalculateAmounts(100m, 1);
+
+        Assert.Equal(new[] { 100m }, amounts);
+    }
+
     /// <summary>Verifies schedule amount calculation rejects non-positive totals and periods.</summary>
     [Theory]
     [InlineData(0, 3)]
     [InlineData(-1, 3)]
     [InlineData(100, 0)]
-    [InlineData(100, 1)]
     public void CalculateAmounts_RejectsInvalidInput(decimal totalAmount, int periods)
     {
         Assert.Throws<ArgumentException>(() => InstallmentScheduleCalculator.CalculateAmounts(totalAmount, periods));

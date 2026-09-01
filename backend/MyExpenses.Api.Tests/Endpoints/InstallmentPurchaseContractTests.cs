@@ -150,8 +150,51 @@ public class InstallmentPurchaseContractTests
         });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using (var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            var payments = body.RootElement.GetProperty("payments").EnumerateArray().ToArray();
+            Assert.Equal(new[] { 33m, 33m, 34m }, payments.Select(payment => payment.GetProperty("amount").GetDecimal()));
+            Assert.Equal(new[] { "2026-07-23", "2026-08-23", "2026-09-23" }, payments.Select(payment => payment.GetProperty("dueDate").GetString()));
+        }
         Assert.Equal(1, await app.CountInstallmentsAsync());
         Assert.Equal(3, await app.CountPaymentsAsync());
+    }
+
+    /// <summary>驗證一期信用卡交易只建立一筆完整金額的待繳付款並可結清。</summary>
+    [Fact]
+    public async Task PostStandaloneInstallment_OnePeriodCreatesSinglePayableAndCanBePaidOff()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.PostAsJsonAsync("/api/installments", new
+        {
+            cardId = app.CardId,
+            totalAmount = 100m,
+            periods = 1,
+            purchaseDate = "2026-06-20",
+            description = "一次付清",
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var createdBody = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var installment = createdBody.RootElement;
+        var payment = Assert.Single(installment.GetProperty("payments").EnumerateArray());
+        Assert.Equal(100m, payment.GetProperty("amount").GetDecimal());
+        Assert.Equal("2026-07-23", payment.GetProperty("dueDate").GetString());
+        Assert.Equal(1, installment.GetProperty("remainingPeriods").GetInt32());
+        Assert.Equal((int)InstallmentStatus.Active, installment.GetProperty("status").GetInt32());
+        Assert.Equal(0, await app.CountTransactionsAsync());
+
+        var paidResponse = await client.PatchAsJsonAsync(
+            $"/api/installments/{installment.GetProperty("id").GetInt32()}/payments/{payment.GetProperty("id").GetInt32()}",
+            new { isPaid = true, paidDate = "2026-07-20" });
+
+        Assert.Equal(HttpStatusCode.OK, paidResponse.StatusCode);
+        using var paidBody = JsonDocument.Parse(await paidResponse.Content.ReadAsStringAsync());
+        Assert.Equal(0, paidBody.RootElement.GetProperty("remainingPeriods").GetInt32());
+        Assert.Equal((int)InstallmentStatus.PaidOff, paidBody.RootElement.GetProperty("status").GetInt32());
     }
 
     /// <summary>Verifies schedule updates preserve the original aggregate when validation fails.</summary>

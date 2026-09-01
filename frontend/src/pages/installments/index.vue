@@ -23,16 +23,18 @@ const toast = inject<{ success: (m: string) => void; error: (m: string) => void 
 const timeZone = useTimeZone()
 
 const creditCards = ref<CreditCard[]>([])
+const creditCardLoading = ref(false)
+const creditCardError = ref<string | null>(null)
 const pagination = usePagination(1, 15)
 
 const filterCardId = ref<number | ''>('')
 const filterStatus = ref<string>('')
 
-// Returns the default installment start date in the configured time zone.
+// 回傳設定時區中的信用卡交易預設起始日期。
 function getDefaultStartDate(): string {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).start
 }
-// Returns the default installment end date in the configured time zone.
+// 回傳設定時區中的信用卡交易預設結束日期。
 function getDefaultEndDate(): string {
   return getCurrentMonthRange(new Date(), timeZone.timeZoneId.value).end
 }
@@ -81,8 +83,8 @@ const scheduleInstallment = computed(() => scheduleQuery.data.value)
 const loading = computed(() => installmentListQuery.status.value === 'loading' || installmentListQuery.status.value === 'refreshing')
 const saving = computed(() => mutation.status.value === 'submitting' || deleteMutation.status.value === 'submitting' || paymentMutation.status.value === 'submitting')
 
-// Validates the installment date range before it becomes a query identity.
-function validateDateRange() {
+// 在日期範圍成為查詢識別前驗證其上下限。
+function validateDateRange(): void {
   const s = startDate.value
   const e = endDate.value
   if (!s || !e) return
@@ -177,14 +179,14 @@ const stats = computed(() => {
   }
 })
 
-// Formats nullable installment summary values without presenting query failure as zero.
+// 格式化可為空的信用卡交易摘要，避免把查詢失敗誤呈現為零。
 function formatSummaryValue(value: number | null): string {
   return value === null ? '—' : formatMoney(value)
 }
 
-// Converts list or detail errors into safe inline messages.
+// 將列表或明細錯誤轉換為安全的行內訊息。
 function queryErrorMessage(error: unknown): string {
-  return error instanceof ApiError ? error.userMessage : '分期資料載入失敗，請重試。'
+  return error instanceof ApiError ? error.userMessage : '信用卡交易資料載入失敗，請重試。'
 }
 
 const hasPaidPayments = computed(() =>
@@ -194,15 +196,54 @@ const hasPaidPayments = computed(() =>
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
   if (!form.value.totalAmount || form.value.totalAmount <= 0) errs.totalAmount = '總金額必須大於零'
-  if (!form.value.periods || form.value.periods <= 1) errs.periods = '期數必須大於 1'
+  if (!Number.isInteger(form.value.periods) || form.value.periods < 1) errs.periods = '期數必須至少為 1 期'
   if (!form.value.cardId) errs.cardId = '請選擇信用卡'
   if (!form.value.purchaseDate) errs.purchaseDate = '請選擇刷卡日期'
   if (!form.value.description?.trim()) errs.description = '請填寫交易描述'
   return errs
 })
 
+interface SchedulePreviewPayment {
+  period: number
+  amount: number
+  dueDate: string
+}
+
+// 依後端相同的拆分規則計算信用卡交易付款預覽金額。
+function calculatePreviewAmounts(totalAmount: number, periods: number): number[] {
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0 || !Number.isInteger(periods) || periods < 1) return []
+  const perPeriod = Math.floor(totalAmount / periods)
+  const remainder = totalAmount - perPeriod * periods
+  return Array.from({ length: periods }, (_, index) => index === periods - 1 ? perPeriod + remainder : perPeriod)
+}
+
+// 依信用卡結帳週期計算付款預覽到期日。
+function calculatePreviewDueDate(purchaseDate: string, selectedCard: CreditCard, period: number): string {
+  const [year, month, day] = purchaseDate.slice(0, 10).split('-').map(Number)
+  const monthIndex = month - 1 + (day > selectedCard.statementDay ? 1 : 0) + period - 1
+  const targetYear = year + Math.floor(monthIndex / 12)
+  const targetMonth = (monthIndex % 12) + 1
+  const targetDay = Math.min(selectedCard.dueDay, new Date(targetYear, targetMonth, 0).getDate())
+  return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`
+}
+
+// 將一期交易顯示為一次付清，其餘期數保留一般期數文字。
+function formatPeriodLabel(periods: number): string {
+  return periods === 1 ? '1 期（一次付清）' : `${periods} 期`
+}
+
+const schedulePreview = computed<SchedulePreviewPayment[]>(() => {
+  const selectedCard = creditCards.value.find(card => card.id === form.value.cardId)
+  if (!selectedCard || !form.value.purchaseDate) return []
+  return calculatePreviewAmounts(form.value.totalAmount, form.value.periods).map((amount, index) => ({
+    period: index + 1,
+    amount,
+    dueDate: calculatePreviewDueDate(form.value.purchaseDate, selectedCard, index + 1),
+  }))
+})
+
 watch([() => form.value.totalAmount, () => form.value.periods], () => {
-  if (form.value.totalAmount > 0 && form.value.periods > 0) {
+  if (form.value.totalAmount > 0 && Number.isInteger(form.value.periods) && form.value.periods > 0) {
     form.value.perPeriod = Math.floor(form.value.totalAmount / form.value.periods)
   } else {
     form.value.perPeriod = 0
@@ -217,14 +258,22 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
   pagination.reset()
 })
 
-// Loads credit-card options used by installment filters and forms.
-async function fetchCreditCards() {
-  const result = await api.creditCards.list({ pageSize: 999 })
-  creditCards.value = result.items
+// 載入信用卡交易篩選與表單使用的信用卡選項。
+async function fetchCreditCards(): Promise<void> {
+  creditCardLoading.value = true
+  creditCardError.value = null
+  try {
+    const result = await api.creditCards.list({ pageSize: 999 })
+    creditCards.value = result.items
+  } catch (error) {
+    creditCardError.value = error instanceof ApiError ? error.userMessage : '信用卡選項載入失敗，請重試。'
+  } finally {
+    creditCardLoading.value = false
+  }
 }
 
-// Resets the standalone installment form and starts a fresh logical submission.
-function openCreate() {
+// 重設 standalone 信用卡交易表單並開始新的邏輯送出。
+function openCreate(): void {
   standaloneInstallmentIdempotency.clear()
   editingItem.value = null
   form.value = {
@@ -239,8 +288,8 @@ function openCreate() {
   modalOpen.value = true
 }
 
-// Loads a server installment into the edit form without optimistic changes.
-function openEdit(item: Installment) {
+// 將伺服器信用卡交易載入編輯表單，不先進行 optimistic 變更。
+function openEdit(item: Installment): void {
   editingItem.value = item
   form.value = {
     transactionId: item.transactionId,
@@ -254,8 +303,8 @@ function openEdit(item: Installment) {
   modalOpen.value = true
 }
 
-// Saves a standalone installment with one idempotent command or updates an existing schedule atomically.
-async function save() {
+// 以單一冪等命令建立或原子更新信用卡交易付款時程。
+async function save(): Promise<void> {
   const errs = formErrors.value
   if (Object.keys(errs).length > 0) return
 
@@ -269,7 +318,7 @@ async function save() {
         purchaseDate: form.value.purchaseDate,
         description: form.value.description,
       } })
-      toast.success('分期已更新')
+      toast.success('信用卡交易已更新')
     } else {
       const createRequest = {
         transactionId: form.value.transactionId,
@@ -282,30 +331,30 @@ async function save() {
       const idempotencyKey = standaloneInstallmentIdempotency.prepare(createRequest)
       await mutation.submit({ operation: 'create', data: createRequest, idempotencyKey })
       standaloneInstallmentIdempotency.clear()
-      toast.success('分期已建立')
+      toast.success('信用卡交易已建立')
     }
     modalOpen.value = false
     mutationSucceeded = true
   } catch (e) {
-    toast.error(e instanceof ApiError ? e.userMessage : '儲存失敗')
+      toast.error(e instanceof ApiError ? e.userMessage : '信用卡交易儲存失敗')
   }
 
   if (mutationSucceeded) {
     await installmentListQuery.refresh()
     if (installmentListQuery.status.value === 'stale') {
-      toast.error('已儲存，但分期列表重新整理失敗')
+      toast.error('已儲存，但信用卡交易列表重新整理失敗')
     }
   }
 }
 
-// Opens the delete confirmation for one installment ID.
-function confirmDelete(id: number) {
+// 開啟指定信用卡交易的刪除確認視窗。
+function confirmDelete(id: number): void {
   deletingId.value = id
   confirmOpen.value = true
 }
 
-// Confirms installment deletion before refreshing the current query identity.
-async function doDelete() {
+// 確認刪除信用卡交易後重新整理目前查詢。
+async function doDelete(): Promise<void> {
   if (deletingId.value !== null) {
     const id = deletingId.value
     confirmOpen.value = false
@@ -313,10 +362,10 @@ async function doDelete() {
 
     try {
       await deleteMutation.submit(id)
-      toast.success('分期已刪除')
+       toast.success('信用卡交易已刪除')
       await installmentListQuery.refresh()
       if (installmentListQuery.status.value === 'stale') {
-        toast.error('已刪除，但分期列表重新整理失敗')
+         toast.error('已刪除，但信用卡交易列表重新整理失敗')
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.userMessage : '刪除失敗')
@@ -324,22 +373,22 @@ async function doDelete() {
   }
 }
 
-// Selects an installment ID and opens its independently owned schedule query.
-function openSchedule(item: Installment) {
+// 選取信用卡交易並開啟獨立擁有的付款時程查詢。
+function openSchedule(item: Installment): void {
   scheduleInstallmentId.value = item.id
   scheduleOpen.value = true
 }
 
-// Opens the payment dialog with an explicit target state rather than a toggle.
-function confirmMarkPayment(paymentId: number, isPaid: boolean) {
+// 以明確目標狀態開啟付款確認視窗，而不是依賴 toggle。
+function confirmMarkPayment(paymentId: number, isPaid: boolean): void {
   payingPaymentId.value = paymentId
   markingAsPaid.value = !isPaid
   paidDate.value = timeZone.getToday()
   paymentConfirmOpen.value = true
 }
 
-// Applies the confirmed paid or unpaid target state and refreshes derived installment values.
-async function doMarkPayment() {
+// 套用確認後的已繳或未繳狀態並重新整理衍生信用卡交易資料。
+async function doMarkPayment(): Promise<void> {
   if (!scheduleInstallment.value || payingPaymentId.value === null) return
 
   const id = scheduleInstallment.value.id
@@ -368,26 +417,26 @@ async function doMarkPayment() {
     }
     await installmentListQuery.refresh()
     if (installmentListQuery.status.value === 'stale') {
-      toast.error('付款狀態已更新，但分期列表重新整理失敗')
+       toast.error('付款狀態已更新，但信用卡交易列表重新整理失敗')
     }
   } catch (e) {
-    toast.error(e instanceof ApiError ? e.userMessage : '標記失敗')
+     toast.error(e instanceof ApiError ? e.userMessage : '信用卡付款狀態更新失敗')
   }
 }
 
-// Formats the linked card label for an installment row.
+// 格式化信用卡交易列表中的信用卡名稱。
 function getCardDisplay(inst: Installment): string {
   if (inst.card) return `${inst.card.bankName} (${inst.card.lastFourDigits})`
   return '-'
 }
 
-// Formats optional installment dates without inventing a fallback date.
-function formatDate(dateStr: string | undefined | null) {
+// 格式化可選日期，不自行捏造缺少的日期。
+function formatDate(dateStr: string | undefined | null): string {
   if (!dateStr) return '-'
   return formatDateOnly(dateStr)
 }
 
-// Calculates the paid-period percentage for an installment row.
+// 計算信用卡交易已繳期數的進度百分比。
 function progressPercent(inst: Installment): number {
   if (inst.periods === 0) return 0
   return Math.round(((inst.periods - inst.remainingPeriods) / inst.periods) * 100)
@@ -402,10 +451,10 @@ onMounted(async () => {
   <div class="p-4 lg:p-6">
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-text-primary">信用卡分期</h1>
-        <p class="text-xs text-text-secondary mt-1">分期付款管理 · Installments</p>
+        <h1 class="text-2xl font-bold text-text-primary">信用卡交易</h1>
+        <p class="text-xs text-text-secondary mt-1">刷卡消費與付款管理 · Credit Card Transactions</p>
       </div>
-      <Button @click="openCreate">+ 新增分期</Button>
+      <Button @click="openCreate">+ 新增交易</Button>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -415,7 +464,7 @@ onMounted(async () => {
             <Icon name="receipt" :size="22" class="text-text-on-accent" />
           </div>
           <div>
-            <p class="text-xs text-text-secondary">總分期筆數</p>
+            <p class="text-xs text-text-secondary">總交易筆數</p>
             <p class="text-xl font-bold text-text-primary">{{ stats.total ?? '—' }} 筆</p>
           </div>
         </div>
@@ -499,6 +548,18 @@ onMounted(async () => {
       </Card>
     </div>
 
+    <div v-if="creditCardLoading || creditCardError" class="mb-6">
+      <Card>
+        <div v-if="creditCardLoading" role="status" aria-live="polite" class="py-2 text-center text-sm text-text-tertiary">
+          正在載入信用卡選項...
+        </div>
+        <div v-else role="alert" class="flex items-center justify-between gap-3 text-sm text-color-warning-text">
+          <span>{{ creditCardError }}</span>
+          <Button type="button" variant="ghost" @click="fetchCreditCards">重試信用卡選項</Button>
+        </div>
+      </Card>
+    </div>
+
     <Card>
       <div class="flex flex-wrap items-center gap-3 mb-4">
         <span class="text-sm font-medium text-text-primary">日期</span>
@@ -519,6 +580,7 @@ onMounted(async () => {
         <span class="text-sm font-medium text-text-primary ml-2">信用卡</span>
         <select
           v-model="filterCardId"
+          :disabled="creditCardLoading || Boolean(creditCardError)"
           class="px-3 py-2 border border-border-strong rounded-lg text-sm text-text-primary bg-bg-card focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-accent-primary"
         >
           <option value="">全部</option>
@@ -543,7 +605,7 @@ onMounted(async () => {
         :retry="installmentListQuery.retry"
       >
         <template #empty>
-          <div class="text-center text-text-tertiary py-4">尚無分期資料</div>
+          <div class="text-center text-text-tertiary py-4">尚無信用卡交易資料</div>
         </template>
         <tr v-for="(item, idx) in installments" :key="item.id" class="border-b border-border-default hover:bg-bg-raised">
           <td class="py-3 px-4 text-text-secondary text-sm w-[60px]">{{ (pagination.page.value - 1) * pagination.pageSize.value + idx + 1 }}</td>
@@ -551,7 +613,7 @@ onMounted(async () => {
           <td class="py-3 px-4 text-text-primary text-sm">{{ item.description }}</td>
           <td class="py-3 px-4 text-text-primary text-sm">{{ getCardDisplay(item) }}</td>
           <td class="py-3 px-4 text-text-primary font-bold text-sm w-[130px] text-right">{{ formatMoney(item.totalAmount) }}</td>
-          <td class="py-3 px-4 text-text-primary text-sm w-[60px]">{{ item.periods }} 期</td>
+           <td class="py-3 px-4 text-text-primary text-sm w-[140px]">{{ formatPeriodLabel(item.periods) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm w-[120px] text-right">{{ formatMoney(item.perPeriod) }}</td>
           <td class="py-3 px-4 text-text-primary text-sm w-[90px]">{{ item.remainingPeriods }}</td>
           <td class="py-3 px-4 w-[90px]">
@@ -614,16 +676,17 @@ onMounted(async () => {
       </div>
     </Card>
 
-    <Modal :open="modalOpen" :title="editingItem ? '編輯分期' : '新增分期'" @update:open="modalOpen = $event">
+    <Modal :open="modalOpen" :title="editingItem ? '編輯信用卡交易' : '新增信用卡交易'" @update:open="modalOpen = $event">
       <form class="space-y-4" @submit.prevent="save">
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">交易描述</label>
-          <Input v-model="form.description" :error="formErrors.description" />
+          <label for="credit-card-transaction-description" class="block text-sm font-medium text-text-primary mb-1">交易描述</label>
+          <Input id="credit-card-transaction-description" v-model="form.description" :error="formErrors.description" />
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">總金額</label>
+            <label for="credit-card-transaction-total-amount" class="block text-sm font-medium text-text-primary mb-1">總金額</label>
             <Input
+              id="credit-card-transaction-total-amount"
               :model-value="form.totalAmount || ''"
               type="number"
               step="0.01"
@@ -634,33 +697,37 @@ onMounted(async () => {
             <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           </div>
           <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">期數</label>
+            <label for="credit-card-transaction-periods" class="block text-sm font-medium text-text-primary mb-1">期數</label>
             <Input
-              :model-value="form.periods || ''"
+              id="credit-card-transaction-periods"
+              :model-value="form.periods"
               type="number"
-               :min="2"
+              step="1"
+              :min="1"
               :disabled="hasPaidPayments"
               :error="formErrors.periods"
-               @update:model-value="form.periods = Number($event) || 2"
+              @update:model-value="form.periods = Number.isFinite(Number($event)) ? Number($event) : 0"
             />
             <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           </div>
         </div>
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">信用卡</label>
+          <label for="credit-card-transaction-card" class="block text-sm font-medium text-text-primary mb-1">信用卡</label>
           <Select
+            id="credit-card-transaction-card"
             :model-value="form.cardId ?? ''"
             :options="cardOptions"
             placeholder="選擇信用卡"
-            :disabled="hasPaidPayments"
+            :disabled="hasPaidPayments || creditCardLoading || Boolean(creditCardError)"
             @update:model-value="form.cardId = Number($event) || null"
           />
           <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           <p v-else-if="formErrors.cardId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.cardId }}</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">刷卡日期</label>
+          <label for="credit-card-transaction-date" class="block text-sm font-medium text-text-primary mb-1">刷卡日期</label>
           <input
+            id="credit-card-transaction-date"
             v-model="form.purchaseDate"
             type="date"
             :disabled="hasPaidPayments"
@@ -668,6 +735,18 @@ onMounted(async () => {
           />
           <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           <p v-else-if="formErrors.purchaseDate" class="mt-1 text-xs text-color-expense-text">{{ formErrors.purchaseDate }}</p>
+        </div>
+        <div v-if="schedulePreview.length > 0" data-testid="credit-card-transaction-schedule-preview" class="rounded-lg border border-border-default bg-bg-raised p-3">
+          <div class="flex items-center justify-between gap-3 mb-2">
+            <h3 class="text-sm font-semibold text-text-primary">付款時程預覽</h3>
+            <span class="text-xs text-text-secondary">{{ formatPeriodLabel(form.periods) }}</span>
+          </div>
+          <div class="space-y-2 text-xs">
+            <div v-for="payment in schedulePreview" :key="payment.period" class="flex items-center justify-between gap-3 text-text-secondary">
+              <span>第 {{ payment.period }} 期 · {{ formatDate(payment.dueDate) }}</span>
+              <span class="font-medium text-text-primary">{{ formatMoney(payment.amount) }}</span>
+            </div>
+          </div>
         </div>
         <div class="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>
@@ -685,7 +764,7 @@ onMounted(async () => {
       <div v-if="scheduleInstallment" class="space-y-4">
         <div class="flex items-center justify-between text-sm">
           <span class="text-text-secondary">
-            {{ scheduleInstallment.description }} · {{ scheduleInstallment.periods }} 期
+            {{ scheduleInstallment.description }} · {{ formatPeriodLabel(scheduleInstallment.periods) }}
           </span>
           <span class="font-medium text-text-primary">{{ formatMoney(scheduleInstallment.totalAmount) }}</span>
         </div>
@@ -741,8 +820,8 @@ onMounted(async () => {
 
     <ConfirmDialog
       :open="confirmOpen"
-      title="刪除分期"
-      description="確定要刪除此分期記錄嗎？相關的付款記錄也將一併刪除。"
+       title="刪除信用卡交易"
+       description="確定要刪除此信用卡交易嗎？相關的付款記錄也將一併刪除。"
       variant="danger"
       @update:open="confirmOpen = $event"
       @confirm="doDelete"

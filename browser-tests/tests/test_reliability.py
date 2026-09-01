@@ -65,31 +65,6 @@ def route_json(route: Route, payload: Any, status: int = 200) -> None:
     )
 
 
-# 回傳交易頁建立分期所需的最小類別、支付方式與信用卡資料。
-def _installment_purchase_options(route: Route) -> None:
-    path = urlparse(route.request.url).path
-    if path.endswith("/categories"):
-        route_json(route, {
-            "items": [{"id": 1, "name": "餐飲", "type": "Expense", "icon": "", "color": "#4F759D", "sortOrder": 1}],
-            "total": 1,
-            "page": 1,
-            "pageSize": 999,
-        })
-        return
-    if path.endswith("/payment-methods"):
-        route_json(route, {
-            "items": [{"id": 2, "name": "信用卡", "systemCode": "credit-card", "icon": "", "color": "#4F759D"}],
-            "total": 1,
-            "page": 1,
-            "pageSize": 999,
-        })
-        return
-    if path.endswith("/credit-cards"):
-        route_json(route, {"items": [CARD], "total": 1, "page": 1, "pageSize": 999})
-        return
-    route.fallback()
-
-
 # 回傳一般交易建立所需的最小分類與支付方式資料。
 def _ordinary_entry_options(route: Route) -> None:
     path = urlparse(route.request.url).path
@@ -109,22 +84,19 @@ def _ordinary_entry_options(route: Route) -> None:
             "pageSize": 999,
         })
         return
-    if path.endswith("/credit-cards"):
-        route_json(route, {"items": [], "total": 0, "page": 1, "pageSize": 999})
-        return
     route.fallback()
 
 
 # 驗證 Dashboard 的獨立區塊在分期 API 失敗時仍保留成功資料。
 def test_dashboard_partial_failure(mocked_page: Page) -> None:
     def installments_failure(route: Route) -> None:
-        route_json(route, {"title": "Installments unavailable"}, status=503)
+        route_json(route, {"title": "Credit card transactions unavailable"}, status=503)
 
     mocked_page.route("**/api/installments**", installments_failure)
     mocked_page.goto("/dashboard")
 
     expect(mocked_page.get_by_text("提款合計")).to_be_visible()
-    expect(mocked_page.get_by_role("alert")).to_contain_text("Installments unavailable")
+    expect(mocked_page.get_by_role("alert")).to_contain_text("Credit card transactions unavailable")
 
 
 # 驗證持股結構報表的延遲載入、組合篩選、空結果、快照缺少與行動版明細可存取。
@@ -276,7 +248,7 @@ def test_stock_market_risk_market_edit_period_and_mobile_matrix(mocked_page: Pag
     mocked_page.route("**/api/stocks**", stocks)
     mocked_page.goto("/stocks")
     expect(mocked_page.get_by_text("待辨識")).to_be_visible()
-    mocked_page.locator("tbody tr").first.locator("button").first.click()
+    mocked_page.get_by_test_id("stock-edit-1").click()
     dialog = mocked_page.get_by_role("dialog")
     dialog.locator("select").first.select_option("Tpex")
     dialog.get_by_role("button", name="儲存").click()
@@ -555,7 +527,7 @@ def test_interrupted_installment_request_recovers(mocked_page: Page) -> None:
     mocked_page.goto("/installments")
     mocked_page.get_by_role("button", name="重試").first.click()
 
-    expect(mocked_page.get_by_text("尚無分期資料")).to_be_visible()
+    expect(mocked_page.get_by_text("尚無信用卡交易資料")).to_be_visible()
     assert attempts == 2
 
 
@@ -591,51 +563,10 @@ def test_explicit_payment_state(mocked_page: Page) -> None:
     assert paid_request["paidDate"]
 
 
-# 驗證 unchanged uncertain retry 會重用同一個 installment purchase key。
-def test_installment_purchase_retry_reuses_idempotency_key(mocked_page: Page) -> None:
-    keys: list[str | None] = []
-    attempts = 0
-
-    mocked_page.route("**/api/categories**", _installment_purchase_options)
-    mocked_page.route("**/api/payment-methods**", _installment_purchase_options)
-    mocked_page.route("**/api/credit-cards**", _installment_purchase_options)
-
-    def purchase_request(route: Route) -> None:
-        nonlocal attempts
-        attempts += 1
-        keys.append(route.request.headers.get("idempotency-key"))
-        if attempts == 1:
-            route.abort("failed")
-            return
-        route_json(route, {"transaction": {}, "installment": {}})
-
-    mocked_page.route("**/api/installment-purchases**", purchase_request)
-    mocked_page.goto("/expenses")
-    mocked_page.get_by_role("button", name=re.compile("新增")).first.click()
-
-    form = mocked_page.locator("form").last
-    form.locator("#transaction-amount").fill("300")
-    form.locator("#transaction-description").fill("測試分期")
-    form.locator("#transaction-category").select_option("1")
-    form.locator("#transaction-payment-method").select_option("2")
-    form.locator("#transaction-payment-mode").select_option("installment")
-    form.locator("#transaction-installment-periods").fill("3")
-    form.locator("#transaction-installment-card").select_option("3")
-    form.get_by_role("button", name="建立支出與分期").click()
-    assert attempts == 1
-
-    form.get_by_role("button", name="使用相同資料重試").click()
-    expect(mocked_page.get_by_text("交易與分期已建立")).to_be_visible()
-    assert attempts == 2
-    assert keys[0] is not None
-    assert keys[0] == keys[1]
-
-
 # 驗證交易表單能以鍵盤完成基本輸入，並提供可程式化的標籤、錯誤與狀態。
 def test_transaction_entry_keyboard_and_accessibility(mocked_page: Page) -> None:
     mocked_page.route("**/api/categories**", _ordinary_entry_options)
     mocked_page.route("**/api/payment-methods**", _ordinary_entry_options)
-    mocked_page.route("**/api/credit-cards**", _ordinary_entry_options)
     mocked_page.goto("/expenses")
     mocked_page.get_by_role("button", name=re.compile("新增")).first.click()
 
@@ -656,7 +587,46 @@ def test_transaction_entry_keyboard_and_accessibility(mocked_page: Page) -> None
     form.locator("#transaction-payment-method").select_option("11")
     form.get_by_role("button", name="建立支出").press("Enter")
 
-    expect(mocked_page.get_by_role("status")).to_contain_text("交易已建立")
+    expect(mocked_page.get_by_role("status").last).to_contain_text("交易已建立")
+
+
+# 驗證普通交易入口不顯示信用卡控制項，也不載入信用卡參考資料。
+def test_transaction_entry_excludes_credit_card_path(mocked_page: Page) -> None:
+    credit_card_requests: list[str] = []
+
+    # 回應含信用卡的支付方式清單，確認畫面只過濾而非依賴後端移除。
+    def ordinary_options_with_credit_card(route: Route) -> None:
+        path = urlparse(route.request.url).path
+        if path.endswith("/payment-methods"):
+            route_json(route, {
+                "items": [
+                    {"id": 2, "name": "信用卡", "systemCode": "credit-card", "icon": "", "color": "#4F759D"},
+                    {"id": 11, "name": "現金", "systemCode": "cash", "icon": "", "color": "#4F759D"},
+                ],
+                "total": 2,
+                "page": 1,
+                "pageSize": 999,
+            })
+            return
+        _ordinary_entry_options(route)
+
+    # 將意外的信用卡資料請求記錄下來，讓測試失敗而非依賴未處理網路。
+    def unexpected_credit_card_request(route: Route) -> None:
+        credit_card_requests.append(route.request.url)
+        route_json(route, {"items": [], "total": 0, "page": 1, "pageSize": 999})
+
+    mocked_page.route("**/api/categories**", ordinary_options_with_credit_card)
+    mocked_page.route("**/api/payment-methods**", ordinary_options_with_credit_card)
+    mocked_page.route("**/api/credit-cards**", unexpected_credit_card_request)
+    mocked_page.goto("/expenses")
+    mocked_page.get_by_role("button", name=re.compile("新增")).first.click()
+
+    form = mocked_page.locator("form").last
+    expect(form.locator("#transaction-payment-method option").filter(has_text="信用卡")).to_have_count(0)
+    expect(form.locator("#transaction-payment-mode")).to_have_count(0)
+    expect(form.locator("#transaction-installment-card")).to_have_count(0)
+    expect(form.locator("#transaction-installment-periods")).to_have_count(0)
+    assert credit_card_requests == []
 
 
 # 驗證窄螢幕交易表單採單欄、無水平溢位且主操作仍可觸及。
@@ -664,7 +634,6 @@ def test_transaction_entry_mobile_layout(mocked_page: Page) -> None:
     mocked_page.set_viewport_size({"width": 375, "height": 800})
     mocked_page.route("**/api/categories**", _ordinary_entry_options)
     mocked_page.route("**/api/payment-methods**", _ordinary_entry_options)
-    mocked_page.route("**/api/credit-cards**", _ordinary_entry_options)
     mocked_page.goto("/expenses")
     mocked_page.get_by_role("button", name=re.compile("新增")).first.click()
 
@@ -702,10 +671,10 @@ def test_dashboard_period_switch_clears_old_rows(mocked_page: Page) -> None:
         nonlocal pending_route, transaction_calls
         transaction_calls += 1
         query = parse_qs(urlparse(route.request.url).query)
-        if query.get("startDate") == ["2026-08-01"] and transaction_calls == 1:
+        if transaction_calls == 1:
             route_json(route, {"items": [old_transaction], "total": 1, "page": 1, "pageSize": 50, "summary": {"totalAmount": 10, "totalIncome": 0, "totalExpense": 10, "count": 1, "dailyAverage": 10, "maxAmount": 10}})
             return
-        if query.get("startDate") == ["2026-07-01"]:
+        if transaction_calls == 2:
             route_json(route, {"items": [previous_transaction], "total": 1, "page": 1, "pageSize": 50, "summary": {"totalAmount": 10, "totalIncome": 0, "totalExpense": 10, "count": 1, "dailyAverage": 10, "maxAmount": 10}})
             return
         pending_route = route

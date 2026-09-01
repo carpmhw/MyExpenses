@@ -11,8 +11,8 @@ public static class InstallmentCommandValidator
     {
         if (totalAmount <= 0)
             throw ValidationError("總金額必須大於零");
-        if (periods <= 1)
-            throw ValidationError("期數必須大於 1");
+        if (periods < 1)
+            throw ValidationError("期數必須至少為 1 期");
         if (purchaseDate == default)
             throw ValidationError("請選擇刷卡日期");
     }
