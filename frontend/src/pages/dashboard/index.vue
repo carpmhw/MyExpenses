@@ -137,17 +137,22 @@ const recentExpenses = computed(() =>
 const recentInstallments = computed(() =>
   [...activeInstallments.value]
     .sort((a, b) => {
-      const da = a.transaction?.date ?? a.createdAt
-      const db = b.transaction?.date ?? b.createdAt
+      const da = a.transaction?.date ?? a.purchaseDate
+      const db = b.transaction?.date ?? b.purchaseDate
       return new Date(db).getTime() - new Date(da).getTime()
     })
     .slice(0, 4)
 )
 
-// 格式化分期資料列顯示的已繳期數進度。
+// 格式化信用卡交易資料列顯示的已繳期數進度。
 function progressLabel(i: Installment): string {
   const paid = i.periods - i.remainingPeriods
   return `${paid}/${i.periods}`
+}
+
+// 將一期信用卡交易顯示為一次付清，其餘期數保留一般文字。
+function formatPeriodLabel(periods: number): string {
+  return periods === 1 ? '1 期（一次付清）' : `${periods} 期`
 }
 
 // 將 date-only 值格式化為 Dashboard 月日標籤。
@@ -156,10 +161,6 @@ function formatDateMMDD(d: string): string {
   return formatted.includes('/') ? formatted.slice(5) : d
 }
 
-// 依設定的系統時區將事件時間格式化為月日標籤。
-function formatEventDateMMDD(timestamp: string): string {
-  return timeZone.formatDateTime(timestamp).slice(5)
-}
 </script>
 
 <template>
@@ -174,7 +175,7 @@ function formatEventDateMMDD(timestamp: string): string {
             <span class="text-xs text-text-secondary">{{ year }} 年 {{ month }} 月</span>
           </div>
         </div>
-        <p class="text-sm text-text-secondary">追蹤您的提款、支出與信用卡分期，隨時掌握財務狀態。</p>
+        <p class="text-sm text-text-secondary">追蹤您的提款、支出與信用卡交易，隨時掌握財務狀態。</p>
       </div>
       <div class="flex items-center gap-2">
         <div class="flex items-center gap-1 bg-bg-card border border-border-subtle rounded-lg px-3 py-2">
@@ -295,7 +296,7 @@ function formatEventDateMMDD(timestamp: string): string {
               <Icon name="CreditCard" :size="18" class="text-color-credit-hero-fg" />
             </div>
             <div>
-              <p class="text-xs text-text-on-hero-muted">本期分期</p>
+              <p class="text-xs text-text-on-hero-muted">本期信用卡應繳</p>
                <p class="text-base font-bold text-text-on-dark">{{ formatSummaryAmount(installmentMonthlyDue) }}</p>
             </div>
           </div>
@@ -407,7 +408,7 @@ function formatEventDateMMDD(timestamp: string): string {
           </QueryState>
         </div>
 
-        <!-- Installment Card -->
+        <!-- Credit card transaction card -->
         <div data-testid="dashboard-activity-card" class="min-w-0 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
           <QueryState
             :status="installmentsQuery.status.value"
@@ -422,12 +423,12 @@ function formatEventDateMMDD(timestamp: string): string {
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <p class="text-base font-bold text-color-credit-text">信用卡分期</p>
+                  <p class="text-base font-bold text-color-credit-text">信用卡交易</p>
                   <span class="bg-bg-card text-color-credit-text text-[10px] font-semibold rounded-full px-2 py-0.5">
                     {{ dashboardSummary ? dashboardSummary.activeInstallmentCount : '—' }} 筆
                   </span>
                 </div>
-                <p class="text-xs text-color-credit-text">Credit Card Installments</p>
+                <p class="text-xs text-color-credit-text">Credit Card Transactions</p>
               </div>
             </div>
             <div class="text-right">
@@ -454,13 +455,13 @@ function formatEventDateMMDD(timestamp: string): string {
             class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-bg-raised transition-colors"
             @click="router.push('/installments')"
           >
-            <span class="text-xs text-text-secondary w-10">{{ i.transaction?.date ? formatDateMMDD(i.transaction.date) : formatEventDateMMDD(i.createdAt) }}</span>
+            <span class="text-xs text-text-secondary w-10">{{ formatDateMMDD(i.purchaseDate) }}</span>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-text-primary truncate">{{ i.description || '—' }}</p>
             </div>
             <span class="text-xs text-text-secondary text-right w-14">{{ formatMoney(i.totalAmount) }}</span>
             <span class="w-12 flex justify-center">
-              <span class="text-[11px] font-semibold text-color-credit-text bg-color-credit-bg rounded px-2 py-0.5">{{ i.periods }} 期</span>
+              <span class="text-[11px] font-semibold text-color-credit-text bg-color-credit-bg rounded px-2 py-0.5">{{ formatPeriodLabel(i.periods) }}</span>
             </span>
             <span class="text-xs font-semibold text-text-primary text-center w-12">{{ progressLabel(i) }}</span>
             <span class="text-sm font-bold text-color-credit-text text-right w-16">{{ formatMoney(i.perPeriod) }}</span>
@@ -469,7 +470,7 @@ function formatEventDateMMDD(timestamp: string): string {
             v-if="recentInstallments.length === 0"
             class="px-5 py-6 text-center text-xs text-text-tertiary border-t border-border-subtle"
           >
-            尚無分期記錄
+            尚無信用卡交易記錄
           </div>
           </QueryState>
         </div>
@@ -506,7 +507,7 @@ function formatEventDateMMDD(timestamp: string): string {
         <div class="bg-bg-card rounded-xl border border-border-subtle px-4 py-3">
           <div class="flex items-center gap-2">
             <Icon name="CreditCard" :size="15" class="text-color-credit-text" />
-            <p class="text-xs text-text-secondary">信用卡分期</p>
+            <p class="text-xs text-text-secondary">信用卡應繳</p>
           </div>
           <p class="mt-1 text-lg font-bold text-color-credit-text">{{ formatSummaryAmount(installmentMonthlyDue) }}</p>
           <p class="text-[11px] text-text-tertiary">{{ dashboardSummary ? dashboardSummary.installmentDuePaymentCount : '—' }} 筆未繳應付款</p>

@@ -1,13 +1,10 @@
 import type {
   Category,
-  CreditCard,
-  InstallmentPurchaseRequest,
   PaymentMethod,
   Transaction,
 } from '../types'
 
 export type TransactionType = 'Income' | 'Expense'
-export type TransactionPaymentMode = 'one-time' | 'installment'
 
 export interface TransactionFormValues {
   type: TransactionType
@@ -17,15 +14,11 @@ export interface TransactionFormValues {
   description: string
   notes: string
   paymentMethodId: number | null
-  paymentMode: TransactionPaymentMode
-  installmentCardId: number | null
-  installmentPeriods: number
 }
 
 export interface TransactionFormOptions {
   categories: Category[]
   paymentMethods: PaymentMethod[]
-  creditCards: CreditCard[]
   editing?: Transaction | null
 }
 
@@ -34,7 +27,6 @@ export type TransactionUpdateData = Partial<Pick<Transaction, 'type' | 'amount' 
 
 export type TransactionFormCommand =
   | { kind: 'create'; data: TransactionData }
-  | { kind: 'purchase'; data: InstallmentPurchaseRequest }
   | { kind: 'update'; id: number; data: TransactionUpdateData }
 
 export type TransactionFormErrors = Record<string, string>
@@ -64,13 +56,10 @@ export function createInitialTransactionForm(
     description: '',
     notes: '',
     paymentMethodId: null,
-    paymentMode: 'one-time',
-    installmentCardId: null,
-    installmentPeriods: 3,
   }
 }
 
-// 將既有交易轉成不含分期編輯狀態的表單值。
+// 將既有交易轉成普通交易編輯表單值。
 export function createTransactionFormFromItem(item: Transaction): TransactionFormValues {
   return {
     type: item.type,
@@ -80,9 +69,6 @@ export function createTransactionFormFromItem(item: Transaction): TransactionFor
     description: item.description || '',
     notes: item.notes || '',
     paymentMethodId: item.paymentMethodId,
-    paymentMode: 'one-time',
-    installmentCardId: null,
-    installmentPeriods: 3,
   }
 }
 
@@ -91,7 +77,18 @@ export function cloneTransactionForm(values: TransactionFormValues): Transaction
   return { ...values }
 }
 
-// 清理交易類型與支付方式切換後不再相容的網域狀態。
+// 判斷目前編輯的交易是否需要保留歷史信用卡支付方式。
+function isHistoricalCreditCardPayment(
+  values: TransactionFormValues,
+  options: TransactionFormOptions,
+): boolean {
+  if (!options.editing || options.editing.paymentMethodId !== values.paymentMethodId) return false
+  const paymentMethod = options.paymentMethods.find(item => item.id === values.paymentMethodId)
+    ?? options.editing.paymentMethod ?? undefined
+  return isCreditCardPaymentMethod(paymentMethod)
+}
+
+// 清理交易類型與支付方式切換後不再相容的普通交易狀態。
 export function normalizeTransactionForm(
   values: TransactionFormValues,
   options: TransactionFormOptions,
@@ -99,27 +96,12 @@ export function normalizeTransactionForm(
   const next = cloneTransactionForm(values)
   const category = options.categories.find(item => item.id === next.categoryId)
   const paymentMethod = options.paymentMethods.find(item => item.id === next.paymentMethodId)
-  const creditCard = isCreditCardPaymentMethod(paymentMethod)
+  const preserveHistoricalCreditCard = isHistoricalCreditCardPayment(next, options)
 
   if (!category || category.type !== next.type) next.categoryId = null
 
-  if (next.type === 'Income' || !creditCard || options.editing) {
-    if (next.type === 'Income' && creditCard) next.paymentMethodId = null
-    next.paymentMode = 'one-time'
-    next.installmentCardId = null
-    next.installmentPeriods = 3
-  }
-
-  if (next.paymentMode !== 'installment') {
-    next.installmentCardId = null
-    next.installmentPeriods = 3
-  }
-
-  if (!isCreditCardPaymentMethod(options.paymentMethods.find(item => item.id === next.paymentMethodId))) {
-    next.paymentMode = 'one-time'
-    next.installmentCardId = null
-    next.installmentPeriods = 3
-  }
+  if (isCreditCardPaymentMethod(paymentMethod) && !preserveHistoricalCreditCard)
+    next.paymentMethodId = null
 
   return next
 }
@@ -133,22 +115,16 @@ export function validateTransactionForm(
   const errors: TransactionFormErrors = {}
   const category = options.categories.find(item => item.id === normalized.categoryId)
   const paymentMethod = options.paymentMethods.find(item => item.id === normalized.paymentMethodId)
-  const isCreditCard = isCreditCardPaymentMethod(paymentMethod)
+  const historicalPaymentMethod = options.editing?.paymentMethodId === normalized.paymentMethodId
+    ? options.editing.paymentMethod
+    : undefined
 
   if (!normalized.date) errors.date = '請選擇日期'
   if (!Number.isFinite(normalized.amount) || normalized.amount <= 0) errors.amount = '金額必須大於零'
   if (!category || category.type !== normalized.type) errors.categoryId = '請選擇相符的類別'
   if (!normalized.description.trim()) errors.description = '請填寫項目名稱'
-  if (normalized.paymentMethodId !== null && !paymentMethod) errors.paymentMethodId = '支付方式無效，請重新選擇'
-
-  if (!options.editing && normalized.type === 'Expense' && isCreditCard && normalized.paymentMode === 'installment') {
-    if (!normalized.installmentCardId || !options.creditCards.some(card => card.id === normalized.installmentCardId)) {
-      errors.installmentCardId = '請選擇信用卡'
-    }
-    if (!Number.isInteger(normalized.installmentPeriods) || normalized.installmentPeriods < 2) {
-      errors.installmentPeriods = '期數必須至少為 2 期'
-    }
-  }
+  if (normalized.paymentMethodId !== null && !paymentMethod && !historicalPaymentMethod)
+    errors.paymentMethodId = '支付方式無效，請重新選擇'
 
   return errors
 }
@@ -176,33 +152,11 @@ export function buildTransactionCommand(
     return { values: normalized, errors: {}, command: { kind: 'update', id: options.editing.id, data: transaction } }
   }
 
-  const paymentMethod = options.paymentMethods.find(item => item.id === normalized.paymentMethodId)
-  if (normalized.type === 'Expense' && isCreditCardPaymentMethod(paymentMethod) && normalized.paymentMode === 'installment') {
-    const data: InstallmentPurchaseRequest = {
-      transaction: {
-        type: 'Expense',
-        amount: normalized.amount,
-        date: normalized.date,
-        categoryId: normalized.categoryId!,
-        description: normalized.description.trim(),
-        notes: normalized.notes.trim() || null,
-        paymentMethodId: normalized.paymentMethodId ?? undefined,
-      },
-      installment: {
-        cardId: normalized.installmentCardId!,
-        periods: normalized.installmentPeriods,
-      },
-    }
-    return { values: normalized, errors: {}, command: { kind: 'purchase', data } }
-  }
-
   return { values: normalized, errors: {}, command: { kind: 'create', data: transaction } }
 }
 
 // 依目前有效命令產生一致的送出按鈕文字。
 export function getTransactionActionLabel(values: TransactionFormValues, editing: boolean): string {
   if (editing) return '儲存變更'
-  if (values.type === 'Income') return '建立收入'
-  if (values.paymentMode === 'installment') return '建立支出與分期'
-  return '建立支出'
+  return values.type === 'Income' ? '建立收入' : '建立支出'
 }

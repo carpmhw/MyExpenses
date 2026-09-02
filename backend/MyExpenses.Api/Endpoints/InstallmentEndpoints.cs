@@ -215,14 +215,7 @@ public static class InstallmentEndpoints
 
         if (hasDateFilter)
         {
-            if (hasExplicitStatus)
-            {
-                if (dateStart.HasValue)
-                    query = query.Where(installment => installment.PurchaseDate >= dateStart.Value);
-                if (dateEnd.HasValue)
-                    query = query.Where(installment => installment.PurchaseDate <= dateEnd.Value);
-            }
-            else if (dateStart.HasValue && dateEnd.HasValue)
+            if (dateStart.HasValue && dateEnd.HasValue)
             {
                 query = query.Where(installment =>
                     (installment.PurchaseDate >= dateStart.Value && installment.PurchaseDate <= dateEnd.Value)

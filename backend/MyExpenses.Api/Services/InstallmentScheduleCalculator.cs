@@ -7,8 +7,8 @@ public static class InstallmentScheduleCalculator
     {
         if (totalAmount <= 0)
             throw new ArgumentException("總金額必須大於零", nameof(totalAmount));
-        if (periods <= 1)
-            throw new ArgumentException("期數必須大於 1", nameof(periods));
+        if (periods < 1)
+            throw new ArgumentException("期數必須至少為 1 期", nameof(periods));
 
         var perPeriod = Math.Floor(totalAmount / periods);
         var remainder = totalAmount - perPeriod * periods;

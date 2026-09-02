@@ -37,7 +37,7 @@ const router = createRouter({
       path: '/installments',
       name: 'installments',
       component: () => import('../pages/installments/index.vue'),
-      meta: { title: '信用卡分期' },
+      meta: { title: '信用卡交易' },
     },
     {
       path: '/reports',

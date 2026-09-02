@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch, onScopeDispose, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError, api } from '../../api'
-import type { Category, Transaction, PaymentMethod, CreditCard } from '../../types'
+import type { Category, Transaction, PaymentMethod } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -14,7 +14,6 @@ import { usePagination } from '../../composables/usePagination'
 import { formatMoney } from '../../utils/format'
 import { addCalendarDays, getCurrentMonthRange } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
-import { createIdempotencyKeyState } from '../../utils/idempotency'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { useAsyncMutation } from '../../composables/useAsyncMutation'
 import {
@@ -34,13 +33,10 @@ const pagination = usePagination(1, 15)
 
 const categories = ref<Category[]>([])
 const paymentMethods = ref<PaymentMethod[]>([])
-const creditCards = ref<CreditCard[]>([])
 const categoriesLoading = ref(false)
 const paymentMethodsLoading = ref(false)
-const creditCardsLoading = ref(false)
 const categoriesError = ref<string | null>(null)
 const paymentMethodsError = ref<string | null>(null)
-const creditCardsError = ref<string | null>(null)
 
 const activeTab = ref<'all' | 'Income' | 'Expense'>((route.query.type as 'all' | 'Income' | 'Expense') || 'all')
 const search = ref((route.query.search as string) || '')
@@ -77,7 +73,7 @@ const form = ref<TransactionFormValues>(createInitialTransactionForm(timeZone.ge
 const formKey = ref(0)
 const submissionError = ref<string | null>(null)
 const submissionNotice = ref<string | null>(null)
-const uncertainSubmissionKind = ref<'ordinary' | 'purchase' | null>(null)
+const uncertainSubmission = ref(false)
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
@@ -93,11 +89,8 @@ const columns = [
   { key: 'notes', label: '備註' },
 ]
 
-const installmentPurchaseIdempotency = createIdempotencyKeyState()
-
 type TransactionMutationInput =
   | Extract<TransactionFormCommand, { kind: 'create' }>
-  | (Extract<TransactionFormCommand, { kind: 'purchase' }> & { idempotencyKey: string })
   | Extract<TransactionFormCommand, { kind: 'update' }>
 
 const transactionQuery = useAsyncQuery({
@@ -136,7 +129,6 @@ const transactionListError = computed(() => transactionQuery.status.value === 's
 const transactionMutation = useAsyncMutation<TransactionMutationInput, unknown>({
   mutate: input => {
     if (input.kind === 'create') return api.transactions.create(input.data)
-    if (input.kind === 'purchase') return api.installmentPurchases.create(input.data, input.idempotencyKey)
     return api.transactions.update(input.id, input.data)
   },
   classifyError: error => ({ uncertain: !(error instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0)) }),
@@ -150,10 +142,7 @@ const deleteMutation = useAsyncMutation<number, void>({
 const referenceDataLoading = computed(() => categoriesLoading.value || paymentMethodsLoading.value)
 const referenceDataReady = computed(() => !referenceDataLoading.value && !categoriesError.value && !paymentMethodsError.value)
 const referenceDataError = computed(() => categoriesError.value || paymentMethodsError.value ? '分類或支付方式資料載入失敗，請重試。' : null)
-const creditCardDataReady = computed(() => !creditCardsLoading.value && !creditCardsError.value)
-const creditCardDataError = computed(() => creditCardsError.value ? '信用卡資料載入失敗，請重試。' : null)
-const submissionUncertain = computed(() => uncertainSubmissionKind.value !== null)
-const submissionRetryAllowed = computed(() => uncertainSubmissionKind.value === 'purchase')
+const submissionUncertain = computed(() => uncertainSubmission.value)
 
 watch(() => transactionQuery.data.value?.total, total => {
   if (total !== undefined) pagination.total.value = total
@@ -264,8 +253,7 @@ function openCreate() {
   )
   submissionError.value = null
   submissionNotice.value = null
-  uncertainSubmissionKind.value = null
-  installmentPurchaseIdempotency.begin()
+  uncertainSubmission.value = false
   transactionMutation.reset()
   formKey.value += 1
   modalOpen.value = true
@@ -277,8 +265,7 @@ function openEdit(item: Transaction) {
   form.value = createTransactionFormFromItem(item)
   submissionError.value = null
   submissionNotice.value = null
-  uncertainSubmissionKind.value = null
-  installmentPurchaseIdempotency.begin()
+  uncertainSubmission.value = false
   transactionMutation.reset()
   formKey.value += 1
   modalOpen.value = true
@@ -288,32 +275,21 @@ function openEdit(item: Transaction) {
 async function save(command: TransactionFormCommand) {
   submissionError.value = null
   submissionNotice.value = null
-  uncertainSubmissionKind.value = null
+  uncertainSubmission.value = false
   let mutationSucceeded = false
   try {
-    let input: TransactionMutationInput
-    if (command.kind === 'purchase') {
-      const idempotencyKey = installmentPurchaseIdempotency.prepare(command.data)
-      input = { ...command, idempotencyKey }
-    } else input = command
-
-    await transactionMutation.submit(input)
-    uncertainSubmissionKind.value = null
+    await transactionMutation.submit(command)
+    uncertainSubmission.value = false
     if (command.kind === 'update') toast.success('交易已更新')
-    else if (command.kind === 'purchase') {
-      installmentPurchaseIdempotency.clear()
-      toast.success('交易與分期已建立')
-    } else toast.success('交易已建立')
+    else toast.success('交易已建立')
     modalOpen.value = false
     mutationSucceeded = true
   } catch (e) {
     if (transactionMutation.uncertain.value) {
-      uncertainSubmissionKind.value = command.kind === 'purchase' ? 'purchase' : 'ordinary'
-      submissionNotice.value = command.kind === 'purchase'
-        ? '無法確認交易與分期是否已建立；可使用相同資料安全重試。'
-        : '無法確認交易是否已建立；請先重新整理交易列表，避免重複送出。'
+      uncertainSubmission.value = true
+      submissionNotice.value = '無法確認交易是否已建立；請先重新整理交易列表，避免重複送出。'
     } else {
-      uncertainSubmissionKind.value = null
+      uncertainSubmission.value = false
       submissionError.value = e instanceof ApiError ? e.userMessage : '儲存失敗'
       toast.error(submissionError.value)
     }
@@ -371,23 +347,9 @@ async function fetchPaymentMethods() {
   }
 }
 
-// 載入信用卡選項並保留分期表單可呈現的錯誤狀態。
-async function fetchCreditCards() {
-  creditCardsLoading.value = true
-  creditCardsError.value = null
-  try {
-    const result = await api.creditCards.list({ pageSize: 999 })
-    creditCards.value = result.items
-  } catch (error) {
-    creditCardsError.value = error instanceof ApiError ? error.userMessage : '信用卡資料載入失敗，請重試。'
-  } finally {
-    creditCardsLoading.value = false
-  }
-}
-
-// 重試交易表單所需的所有參考資料查詢。
+// 重試普通交易表單所需的分類與支付方式資料查詢。
 async function retryReferenceData() {
-  await Promise.all([fetchCategories(), fetchPaymentMethods(), fetchCreditCards()])
+  await Promise.all([fetchCategories(), fetchPaymentMethods()])
 }
 
 // 送出期間拒絕外部關閉事件，避免遺失正在處理的交易狀態。
@@ -653,17 +615,13 @@ onMounted(() => {
         :initial-value="form"
         :categories="categories"
         :payment-methods="paymentMethods"
-        :credit-cards="creditCards"
         :editing="editingItem"
         :submitting="saving"
         :reference-data-ready="referenceDataReady"
         :reference-data-error="referenceDataError"
-        :credit-card-data-ready="creditCardDataReady"
-        :credit-card-data-error="creditCardDataError"
         :submission-error="submissionError"
         :submission-notice="submissionNotice"
         :submission-uncertain="submissionUncertain"
-        :submission-retry-allowed="submissionRetryAllowed"
         @submit="save"
         @cancel="modalOpen = false"
         @retry-reference-data="retryReferenceData"
