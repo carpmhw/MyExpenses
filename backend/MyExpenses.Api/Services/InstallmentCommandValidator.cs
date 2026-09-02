@@ -6,13 +6,15 @@ namespace MyExpenses.Api.Services;
 /// <summary>Centralizes cross-field validation shared by installment financial commands.</summary>
 public static class InstallmentCommandValidator
 {
-    /// <summary>Validates amount, period count, and date-only schedule fields.</summary>
+    private const int MaxSchedulePeriods = 60;
+
+    /// <summary>驗證金額、期數上限與日期等分期排程欄位。</summary>
     public static void ValidateSchedule(decimal totalAmount, int periods, DateOnly purchaseDate)
     {
         if (totalAmount <= 0)
             throw ValidationError("總金額必須大於零");
-        if (periods < 1)
-            throw ValidationError("期數必須至少為 1 期");
+        if (periods is < 1 or > MaxSchedulePeriods)
+            throw ValidationError("期數必須為 1 至 60 期");
         if (purchaseDate == default)
             throw ValidationError("請選擇刷卡日期");
     }

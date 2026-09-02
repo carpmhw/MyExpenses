@@ -20,6 +20,8 @@ MyExpenses 集中管理日常收支、信用卡交易、多幣別帳戶、股票
 - **自動化排程**：執行財務快照、即時股價更新與歷史行情同步，並保留執行狀態。
 - **MCP 整合**：以具 scopes 的 API token 授權 AI agent 查詢資料、建立交易及復原交易。
 
+信用卡交易新建與付款時程重建的期數限制為 1 至 60 期。變更前已存在的超過 60 期分期仍可查詢及標記既有付款，但不可重建超限時程。舊版 composite 命令建立的 `Transaction` 與 `Installment` 是獨立的歷史紀錄；兩者可分別編輯、刪除或還原，`TransactionId` 僅保留為歷史關聯，不會觸發同步或級聯生命週期。
+
 ## 技術架構
 
 - **Backend**：.NET 10、ASP.NET Core Minimal APIs、EF Core 10、SQLite

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -95,6 +96,102 @@ public class InstallmentPurchaseContractTests
         Assert.Equal(3, await app.CountPaymentsAsync());
     }
 
+    /// <summary>驗證 composite endpoint 接受六十期並建立完整付款時程。</summary>
+    [Fact]
+    public async Task PostInstallmentPurchase_AcceptsSixtyPeriods()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.PostAsJsonAsync("/api/installment-purchases", new
+        {
+            transaction = new
+            {
+                amount = 6000m,
+                date = "2026-06-20",
+                description = "六十期 composite",
+                categoryId = app.CategoryId,
+                paymentMethodId = app.PaymentMethodId,
+            },
+            installment = new { cardId = app.CardId, periods = 60 },
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(1, await app.CountTransactionsAsync());
+        Assert.Equal(1, await app.CountInstallmentsAsync());
+        Assert.Equal(60, await app.CountPaymentsAsync());
+        Assert.Equal(1, await app.CountIdempotencyRecordsAsync());
+    }
+
+    /// <summary>驗證 composite endpoint 接受一期並只建立一筆付款紀錄。</summary>
+    [Fact]
+    public async Task PostInstallmentPurchase_AcceptsOnePeriod()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.PostAsJsonAsync(
+            "/api/installment-purchases",
+            CreatePurchaseRequest(app, 100m, 1));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(1, await app.CountTransactionsAsync());
+        Assert.Equal(1, await app.CountInstallmentsAsync());
+        Assert.Equal(1, await app.CountPaymentsAsync());
+    }
+
+    /// <summary>驗證 composite endpoint 拒絕零期且不留下任何交易資料或冪等收據。</summary>
+    [Fact]
+    public async Task PostInstallmentPurchase_RejectsZeroPeriodsAtomically()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.PostAsJsonAsync("/api/installment-purchases", new
+        {
+            transaction = new
+            {
+                amount = 6000m,
+                date = "2026-06-20",
+                description = "零期 composite",
+                categoryId = app.CategoryId,
+                paymentMethodId = app.PaymentMethodId,
+            },
+            installment = new { cardId = app.CardId, periods = 0 },
+        });
+
+        await AssertInvalidPeriodResponseAsync(response);
+        await app.AssertNoInstallmentCommandRowsAsync();
+    }
+
+    /// <summary>驗證 composite endpoint 拒絕超過六十期且不留下任何交易資料或冪等收據。</summary>
+    [Fact]
+    public async Task PostInstallmentPurchase_RejectsMoreThanSixtyPeriodsAtomically()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.PostAsJsonAsync("/api/installment-purchases", new
+        {
+            transaction = new
+            {
+                amount = 6100m,
+                date = "2026-06-20",
+                description = "超過上限 composite",
+                categoryId = app.CategoryId,
+                paymentMethodId = app.PaymentMethodId,
+            },
+            installment = new { cardId = app.CardId, periods = 61 },
+        });
+
+        await AssertInvalidPeriodResponseAsync(response);
+        await app.AssertNoInstallmentCommandRowsAsync();
+    }
+
     /// <summary>Verifies retrying an identical idempotent purchase does not duplicate financial records.</summary>
     [Fact]
     public async Task PostInstallmentPurchase_RetryReturnsExistingAggregate()
@@ -158,6 +255,49 @@ public class InstallmentPurchaseContractTests
         }
         Assert.Equal(1, await app.CountInstallmentsAsync());
         Assert.Equal(3, await app.CountPaymentsAsync());
+    }
+
+    /// <summary>驗證 standalone endpoint 接受六十期並建立完整付款時程。</summary>
+    [Fact]
+    public async Task PostStandaloneInstallment_AcceptsSixtyPeriods()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.PostAsJsonAsync("/api/installments", new
+        {
+            cardId = app.CardId,
+            totalAmount = 6000m,
+            periods = 60,
+            purchaseDate = "2026-06-20",
+            description = "六十期 standalone",
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(60, await app.CountPaymentsAsync());
+        Assert.Equal(1, await app.CountIdempotencyRecordsAsync());
+    }
+
+    /// <summary>驗證 standalone endpoint 拒絕超過六十期且不留下分期資料或冪等收據。</summary>
+    [Fact]
+    public async Task PostStandaloneInstallment_RejectsMoreThanSixtyPeriodsAtomically()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client.PostAsJsonAsync("/api/installments", new
+        {
+            cardId = app.CardId,
+            totalAmount = 6100m,
+            periods = 61,
+            purchaseDate = "2026-06-20",
+            description = "超過上限 standalone",
+        });
+
+        await AssertInvalidPeriodResponseAsync(response);
+        await app.AssertNoInstallmentCommandRowsAsync();
     }
 
     /// <summary>驗證一期信用卡交易只建立一筆完整金額的待繳付款並可結清。</summary>
@@ -227,6 +367,223 @@ public class InstallmentPurchaseContractTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(1, await app.CountInstallmentsAsync());
         Assert.Equal(3, await app.CountPaymentsAsync());
+    }
+
+    /// <summary>驗證更新 endpoint 接受六十期並重建完整未繳付款時程。</summary>
+    [Fact]
+    public async Task PutInstallment_AcceptsSixtyPeriods()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var createResponse = await client.PostAsJsonAsync("/api/installments", new
+        {
+            cardId = app.CardId,
+            totalAmount = 100m,
+            periods = 1,
+            purchaseDate = "2026-06-20",
+            description = "更新至六十期",
+        });
+        using var createdBody = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var installmentId = createdBody.RootElement.GetProperty("id").GetInt32();
+
+        var response = await client.PutAsJsonAsync($"/api/installments/{installmentId}", new
+        {
+            cardId = app.CardId,
+            totalAmount = 6000m,
+            periods = 60,
+            purchaseDate = "2026-07-20",
+            description = "更新至六十期",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(60, await app.CountPaymentsAsync());
+    }
+
+    /// <summary>驗證更新 endpoint 拒絕超過六十期並保留原分期與付款時程。</summary>
+    [Fact]
+    public async Task PutInstallment_RejectsMoreThanSixtyPeriodsWithoutChangingSchedule()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var createResponse = await client.PostAsJsonAsync("/api/installments", new
+        {
+            cardId = app.CardId,
+            totalAmount = 100m,
+            periods = 3,
+            purchaseDate = "2026-06-20",
+            description = "保留原排程",
+        });
+        using var createdBody = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var installmentId = createdBody.RootElement.GetProperty("id").GetInt32();
+
+        var response = await client.PutAsJsonAsync($"/api/installments/{installmentId}", new
+        {
+            cardId = app.CardId,
+            totalAmount = 6100m,
+            periods = 61,
+            purchaseDate = "2026-07-20",
+            description = "不應保存",
+        });
+
+        await AssertInvalidPeriodResponseAsync(response);
+        Assert.Equal(1, await app.CountInstallmentsAsync());
+        Assert.Equal(3, await app.CountPaymentsAsync());
+        var installment = await app.GetInstallmentValuesAsync();
+        Assert.Equal(3, installment.Periods);
+        Assert.Equal(100m, installment.TotalAmount);
+        Assert.Equal("保留原排程", installment.Description);
+    }
+
+    /// <summary>驗證既有超過六十期的分期仍可查詢、標記付款，但不可重建超限排程。</summary>
+    [Fact]
+    public async Task LegacyInstallmentOverSixtyPeriods_RemainsReadableAndPayableButCannotBeRebuilt()
+    {
+        await using var app = await CreateAppAsync();
+        var installmentId = await app.SeedLegacyInstallmentAsync(61);
+        var client = app.App.GetTestClient();
+
+        var getResponse = await client.GetAsync($"/api/installments/{installmentId}");
+
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+        using (var body = JsonDocument.Parse(await getResponse.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal(61, body.RootElement.GetProperty("periods").GetInt32());
+            Assert.Equal(61, body.RootElement.GetProperty("payments").GetArrayLength());
+        }
+
+        using var listBody = JsonDocument.Parse(await (await client.GetAsync("/api/installments?page=1&pageSize=15")).Content.ReadAsStringAsync());
+        Assert.Contains(
+            listBody.RootElement.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("id").GetInt32() == installmentId);
+
+        var paymentId = await app.GetFirstPaymentIdAsync(installmentId);
+        var markResponse = await client.PatchAsJsonAsync(
+            $"/api/installments/{installmentId}/payments/{paymentId}",
+            new { isPaid = true, paidDate = "2026-06-20" });
+
+        Assert.Equal(HttpStatusCode.OK, markResponse.StatusCode);
+        using (var markedBody = JsonDocument.Parse(await markResponse.Content.ReadAsStringAsync()))
+            Assert.Equal(60, markedBody.RootElement.GetProperty("remainingPeriods").GetInt32());
+
+        var rebuildResponse = await client.PutAsJsonAsync($"/api/installments/{installmentId}", new
+        {
+            cardId = app.CardId,
+            totalAmount = 6100m,
+            periods = 61,
+            purchaseDate = "2026-06-20",
+            description = "不應重建超限排程",
+        });
+
+        await AssertInvalidPeriodResponseAsync(rebuildResponse);
+        Assert.Equal(61, await app.CountPaymentsAsync());
+        Assert.Equal(1, await app.CountPaidPaymentsAsync());
+    }
+
+    /// <summary>驗證編輯歷史 composite 的交易不會修改分期或付款紀錄。</summary>
+    [Fact]
+    public async Task LegacyComposite_EditingTransactionLeavesInstallmentAndPaymentsUnchanged()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var createResponse = await client.PostAsJsonAsync(
+            "/api/installment-purchases",
+            CreatePurchaseRequest(app, 1200m));
+        using var createdBody = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var transactionId = createdBody.RootElement.GetProperty("transaction").GetProperty("id").GetInt32();
+        var installmentId = createdBody.RootElement.GetProperty("installment").GetProperty("id").GetInt32();
+        var originalInstallment = await app.GetInstallmentSnapshotAsync(installmentId);
+
+        var updateResponse = await client.PutAsJsonAsync($"/api/transactions/{transactionId}", new
+        {
+            type = TransactionType.Expense,
+            amount = 1350m,
+            date = "2026-07-20",
+            description = "交易已獨立修改",
+            categoryId = app.CategoryId,
+            paymentMethodId = app.PaymentMethodId,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+        var updatedInstallment = await app.GetInstallmentSnapshotAsync(installmentId);
+        var updatedTransaction = await app.GetTransactionSnapshotAsync(transactionId);
+        Assert.Equal(1350m, updatedTransaction.Amount);
+        Assert.Equal(new DateOnly(2026, 7, 20), updatedTransaction.Date);
+        Assert.Equal("交易已獨立修改", updatedTransaction.Description);
+        AssertInstallmentSnapshotEqual(originalInstallment, updatedInstallment);
+    }
+
+    /// <summary>驗證編輯歷史 composite 的分期與重建排程不會修改關聯交易。</summary>
+    [Fact]
+    public async Task LegacyComposite_EditingInstallmentLeavesTransactionUnchanged()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var createResponse = await client.PostAsJsonAsync(
+            "/api/installment-purchases",
+            CreatePurchaseRequest(app, 1200m));
+        using var createdBody = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var transactionId = createdBody.RootElement.GetProperty("transaction").GetProperty("id").GetInt32();
+        var installmentId = createdBody.RootElement.GetProperty("installment").GetProperty("id").GetInt32();
+        var originalTransaction = await app.GetTransactionSnapshotAsync(transactionId);
+
+        var updateResponse = await client.PutAsJsonAsync($"/api/installments/{installmentId}", new
+        {
+            cardId = app.CardId,
+            totalAmount = 1300m,
+            periods = 4,
+            purchaseDate = "2026-07-20",
+            description = "分期已獨立修改",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+        var updatedTransaction = await app.GetTransactionSnapshotAsync(transactionId);
+        var updatedInstallment = await app.GetInstallmentSnapshotAsync(installmentId);
+        Assert.Equal(originalTransaction, updatedTransaction);
+        Assert.Equal(1300m, updatedInstallment.TotalAmount);
+        Assert.Equal(4, updatedInstallment.Periods);
+        Assert.Equal(4, updatedInstallment.Payments.Count);
+        Assert.Equal("分期已獨立修改", updatedInstallment.Description);
+    }
+
+    /// <summary>驗證交易軟刪除與還原不影響歷史分期，且刪除分期只刪除自己的付款紀錄。</summary>
+    [Fact]
+    public async Task LegacyComposite_DeleteAndRestoreRemainIndependent()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var createResponse = await client.PostAsJsonAsync(
+            "/api/installment-purchases",
+            CreatePurchaseRequest(app, 1200m));
+        using var createdBody = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var transactionId = createdBody.RootElement.GetProperty("transaction").GetProperty("id").GetInt32();
+        var installmentId = createdBody.RootElement.GetProperty("installment").GetProperty("id").GetInt32();
+        var originalInstallment = await app.GetInstallmentSnapshotAsync(installmentId);
+
+        var deleteTransactionResponse = await client.DeleteAsync($"/api/transactions/{transactionId}");
+
+        Assert.Equal(HttpStatusCode.NoContent, deleteTransactionResponse.StatusCode);
+        AssertInstallmentSnapshotEqual(originalInstallment, await app.GetInstallmentSnapshotAsync(installmentId));
+        Assert.Equal(3, await app.CountPaymentsForInstallmentAsync(installmentId));
+        Assert.NotNull((await app.GetTransactionSnapshotAsync(transactionId)).DeletedAt);
+
+        var restoreResponse = await client.PostAsync($"/api/transactions/{transactionId}/undo", null);
+
+        Assert.Equal(HttpStatusCode.OK, restoreResponse.StatusCode);
+        AssertInstallmentSnapshotEqual(originalInstallment, await app.GetInstallmentSnapshotAsync(installmentId));
+        Assert.Null((await app.GetTransactionSnapshotAsync(transactionId)).DeletedAt);
+
+        var deleteInstallmentResponse = await client.DeleteAsync($"/api/installments/{installmentId}");
+
+        Assert.Equal(HttpStatusCode.NoContent, deleteInstallmentResponse.StatusCode);
+        Assert.Equal(0, await app.CountPaymentsForInstallmentAsync(installmentId));
+        var remainingTransaction = await app.GetTransactionSnapshotAsync(transactionId);
+        Assert.Null(remainingTransaction.DeletedAt);
+        Assert.Equal(1200m, remainingTransaction.Amount);
     }
 
     /// <summary>Verifies payment PATCH accepts an explicit target state and repeated requests are no-ops.</summary>
@@ -406,7 +763,7 @@ public class InstallmentPurchaseContractTests
     }
 
     /// <summary>Builds a valid composite purchase request for endpoint tests.</summary>
-    private static object CreatePurchaseRequest(TestApp app, decimal amount)
+    private static object CreatePurchaseRequest(TestApp app, decimal amount, int periods = 3)
         => new
         {
             transaction = new
@@ -418,7 +775,7 @@ public class InstallmentPurchaseContractTests
                 categoryId = app.CategoryId,
                 paymentMethodId = app.PaymentMethodId,
             },
-            installment = new { cardId = app.CardId, periods = 3 },
+            installment = new { cardId = app.CardId, periods },
         };
 
     /// <summary>Creates a minimal endpoint host for installment purchase contract tests.</summary>
@@ -436,6 +793,10 @@ public class InstallmentPurchaseContractTests
         builder.Services.Configure<TimeZoneOptions>(_ => { });
         builder.Services.AddSingleton<TimeZoneService>();
         builder.Services.AddScoped<InstallmentCommandService>();
+        builder.Services.ConfigureHttpJsonOptions(options =>
+        {
+            options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+        });
 
         var app = builder.Build();
         using (var scope = app.Services.CreateScope())
@@ -465,6 +826,7 @@ public class InstallmentPurchaseContractTests
             db.AddRange(category, paymentMethod, card);
             await db.SaveChangesAsync();
 
+            app.MapTransactionEndpoints();
             app.MapInstallmentEndpoints();
             await app.StartAsync();
             return new TestApp(app, connection, category.Id, paymentMethod.Id, card.Id);
@@ -503,12 +865,135 @@ public class InstallmentPurchaseContractTests
             return await db.InstallmentPayments.CountAsync();
         }
 
+        /// <summary>計算目前資料庫中的冪等收據數量。</summary>
+        public async Task<int> CountIdempotencyRecordsAsync()
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.IdempotencyRecords.CountAsync();
+        }
+
+        /// <summary>確認失敗的分期命令未建立任何交易、分期、付款或冪等收據。</summary>
+        public async Task AssertNoInstallmentCommandRowsAsync()
+        {
+            Assert.Equal(0, await CountTransactionsAsync());
+            Assert.Equal(0, await CountInstallmentsAsync());
+            Assert.Equal(0, await CountPaymentsAsync());
+            Assert.Equal(0, await CountIdempotencyRecordsAsync());
+        }
+
+        /// <summary>讀取目前分期欄位供 endpoint 契約測試檢查保存內容。</summary>
+        public async Task<(int Periods, decimal TotalAmount, string? Description)> GetInstallmentValuesAsync()
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var installment = await db.Installments.SingleAsync();
+            return (installment.Periods, installment.TotalAmount, installment.Description);
+        }
+
         /// <summary>Counts unpaid payment rows for target-state assertions.</summary>
         public async Task<int> CountUnpaidPaymentsAsync()
         {
             await using var scope = App.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             return await db.InstallmentPayments.CountAsync(payment => !payment.IsPaid);
+        }
+
+        /// <summary>計算目前資料庫中的已繳付款數量。</summary>
+        public async Task<int> CountPaidPaymentsAsync()
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.InstallmentPayments.CountAsync(payment => payment.IsPaid);
+        }
+
+        /// <summary>讀取指定分期及付款欄位，供歷史獨立性測試比對前後狀態。</summary>
+        public async Task<InstallmentSnapshot> GetInstallmentSnapshotAsync(int installmentId)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var installment = await db.Installments
+                .Include(item => item.Payments)
+                .SingleAsync(item => item.Id == installmentId);
+            return new InstallmentSnapshot(
+                installment.TransactionId,
+                installment.TotalAmount,
+                installment.Periods,
+                installment.PurchaseDate,
+                installment.Description,
+                installment.Payments
+                    .OrderBy(payment => payment.Period)
+                    .Select(payment => new InstallmentPaymentSnapshot(
+                        payment.Period,
+                        payment.Amount,
+                        payment.PaidDate,
+                        payment.IsPaid,
+                        payment.DueDate))
+                    .ToList());
+        }
+
+        /// <summary>讀取交易的可變欄位與軟刪除狀態，供歷史獨立性測試比對。</summary>
+        public async Task<TransactionSnapshot> GetTransactionSnapshotAsync(int transactionId)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var transaction = await db.Transactions
+                .IgnoreQueryFilters()
+                .SingleAsync(item => item.Id == transactionId);
+            return new TransactionSnapshot(
+                transaction.Amount,
+                transaction.Date,
+                transaction.Description,
+                transaction.Notes,
+                transaction.DeletedAt);
+        }
+
+        /// <summary>計算指定分期目前仍保留的付款紀錄數量。</summary>
+        public async Task<int> CountPaymentsForInstallmentAsync(int installmentId)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.InstallmentPayments.CountAsync(payment => payment.InstallmentId == installmentId);
+        }
+
+        /// <summary>建立變更前的超過六十期分期資料及其完整付款紀錄。</summary>
+        public async Task<int> SeedLegacyInstallmentAsync(int periods)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var installment = new Installment
+            {
+                CardId = CardId,
+                TotalAmount = periods * 100m,
+                Periods = periods,
+                PerPeriod = 100m,
+                PurchaseDate = new DateOnly(2026, 6, 20),
+                Description = "歷史超限分期",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Installments.Add(installment);
+            await db.SaveChangesAsync();
+            db.InstallmentPayments.AddRange(Enumerable.Range(1, periods).Select(period => new InstallmentPayment
+            {
+                InstallmentId = installment.Id,
+                Period = period,
+                Amount = 100m,
+                DueDate = new DateOnly(2026, 7, 23).AddMonths(period - 1),
+            }));
+            await db.SaveChangesAsync();
+            return installment.Id;
+        }
+
+        /// <summary>讀取指定歷史分期的第一筆付款識別碼。</summary>
+        public async Task<int> GetFirstPaymentIdAsync(int installmentId)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.InstallmentPayments
+                .Where(payment => payment.InstallmentId == installmentId)
+                .OrderBy(payment => payment.Period)
+                .Select(payment => payment.Id)
+                .FirstAsync();
         }
 
         /// <summary>Stops the test host and releases its in-memory database connection.</summary>
@@ -518,5 +1003,51 @@ public class InstallmentPurchaseContractTests
             await App.DisposeAsync();
             await Connection.DisposeAsync();
         }
+    }
+
+    /// <summary>保存歷史分期的可變欄位與付款快照。</summary>
+    private sealed record InstallmentSnapshot(
+        int? TransactionId,
+        decimal TotalAmount,
+        int Periods,
+        DateOnly PurchaseDate,
+        string? Description,
+        IReadOnlyList<InstallmentPaymentSnapshot> Payments);
+
+    /// <summary>保存單筆分期付款的欄位快照。</summary>
+    private sealed record InstallmentPaymentSnapshot(
+        int Period,
+        decimal Amount,
+        DateOnly? PaidDate,
+        bool IsPaid,
+        DateOnly? DueDate);
+
+    /// <summary>保存交易可變欄位與軟刪除狀態快照。</summary>
+    private sealed record TransactionSnapshot(
+        decimal Amount,
+        DateOnly Date,
+        string? Description,
+        string? Notes,
+        DateTime? DeletedAt);
+
+    /// <summary>驗證期數越界回傳一致的安全錯誤訊息。</summary>
+    private static async Task AssertInvalidPeriodResponseAsync(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("期數必須為 1 至 60 期", body.RootElement.GetProperty("detail").GetString());
+    }
+
+    /// <summary>逐欄比對歷史分期及其付款快照，避免集合參照相等造成誤判。</summary>
+    private static void AssertInstallmentSnapshotEqual(
+        InstallmentSnapshot expected,
+        InstallmentSnapshot actual)
+    {
+        Assert.Equal(expected.TransactionId, actual.TransactionId);
+        Assert.Equal(expected.TotalAmount, actual.TotalAmount);
+        Assert.Equal(expected.Periods, actual.Periods);
+        Assert.Equal(expected.PurchaseDate, actual.PurchaseDate);
+        Assert.Equal(expected.Description, actual.Description);
+        Assert.Equal(expected.Payments, actual.Payments);
     }
 }

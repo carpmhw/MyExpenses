@@ -107,6 +107,7 @@ function validateDateRange(): void {
 
 const modalOpen = ref(false)
 const editingItem = ref<Installment | null>(null)
+const MAX_INSTALLMENT_PERIODS = 60
 const form = ref({
   transactionId: null as number | null,
   cardId: null as number | null,
@@ -196,7 +197,9 @@ const hasPaidPayments = computed(() =>
 const formErrors = computed(() => {
   const errs: Record<string, string> = {}
   if (!form.value.totalAmount || form.value.totalAmount <= 0) errs.totalAmount = '總金額必須大於零'
-  if (!Number.isInteger(form.value.periods) || form.value.periods < 1) errs.periods = '期數必須至少為 1 期'
+  if (!Number.isInteger(form.value.periods) || form.value.periods < 1 || form.value.periods > MAX_INSTALLMENT_PERIODS) {
+    errs.periods = '期數必須為 1 至 60 期'
+  }
   if (!form.value.cardId) errs.cardId = '請選擇信用卡'
   if (!form.value.purchaseDate) errs.purchaseDate = '請選擇刷卡日期'
   if (!form.value.description?.trim()) errs.description = '請填寫交易描述'
@@ -211,7 +214,7 @@ interface SchedulePreviewPayment {
 
 // 依後端相同的拆分規則計算信用卡交易付款預覽金額。
 function calculatePreviewAmounts(totalAmount: number, periods: number): number[] {
-  if (!Number.isFinite(totalAmount) || totalAmount <= 0 || !Number.isInteger(periods) || periods < 1) return []
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0 || !Number.isInteger(periods) || periods < 1 || periods > MAX_INSTALLMENT_PERIODS) return []
   const perPeriod = Math.floor(totalAmount / periods)
   const remainder = totalAmount - perPeriod * periods
   return Array.from({ length: periods }, (_, index) => index === periods - 1 ? perPeriod + remainder : perPeriod)
@@ -243,7 +246,7 @@ const schedulePreview = computed<SchedulePreviewPayment[]>(() => {
 })
 
 watch([() => form.value.totalAmount, () => form.value.periods], () => {
-  if (form.value.totalAmount > 0 && Number.isInteger(form.value.periods) && form.value.periods > 0) {
+  if (form.value.totalAmount > 0 && Number.isInteger(form.value.periods) && form.value.periods > 0 && form.value.periods <= MAX_INSTALLMENT_PERIODS) {
     form.value.perPeriod = Math.floor(form.value.totalAmount / form.value.periods)
   } else {
     form.value.perPeriod = 0
@@ -286,6 +289,12 @@ function openCreate(): void {
     description: '',
   }
   modalOpen.value = true
+}
+
+// 關閉信用卡交易表單時捨棄本次開啟期間的冪等命令狀態。
+function handleModalOpenChange(open: boolean): void {
+  modalOpen.value = open
+  if (!open) standaloneInstallmentIdempotency.clear()
 }
 
 // 將伺服器信用卡交易載入編輯表單，不先進行 optimistic 變更。
@@ -676,7 +685,7 @@ onMounted(async () => {
       </div>
     </Card>
 
-    <Modal :open="modalOpen" :title="editingItem ? '編輯信用卡交易' : '新增信用卡交易'" @update:open="modalOpen = $event">
+    <Modal :open="modalOpen" :title="editingItem ? '編輯信用卡交易' : '新增信用卡交易'" @update:open="handleModalOpenChange">
       <form class="space-y-4" @submit.prevent="save">
         <div>
           <label for="credit-card-transaction-description" class="block text-sm font-medium text-text-primary mb-1">交易描述</label>
@@ -704,10 +713,12 @@ onMounted(async () => {
               type="number"
               step="1"
               :min="1"
+              :max="MAX_INSTALLMENT_PERIODS"
               :disabled="hasPaidPayments"
               :error="formErrors.periods"
               @update:model-value="form.periods = Number.isFinite(Number($event)) ? Number($event) : 0"
             />
+            <p v-if="!hasPaidPayments && !formErrors.periods" class="mt-1 text-xs text-text-tertiary">期數必須為 1 至 60 期</p>
             <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           </div>
         </div>
@@ -749,7 +760,7 @@ onMounted(async () => {
           </div>
         </div>
         <div class="flex justify-end gap-3 pt-2">
-          <Button variant="ghost" type="button" @click="modalOpen = false">取消</Button>
+          <Button variant="ghost" type="button" @click="handleModalOpenChange(false)">取消</Button>
           <Button type="submit" :loading="saving">儲存</Button>
         </div>
       </form>

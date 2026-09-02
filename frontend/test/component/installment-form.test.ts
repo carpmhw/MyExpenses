@@ -123,24 +123,40 @@ describe('信用卡交易表單', () => {
     wrapper.unmount()
   })
 
-  it('接受一期並拒絕零期與非整數期數', async () => {
+  it('接受六十期並拒絕超過上限、零期與非整數期數', async () => {
     const create = vi.spyOn(api.installments, 'create').mockResolvedValue(onePeriodInstallment)
     const { wrapper, dialog } = await openCreateForm()
     fillOnePeriodForm(dialog)
 
     const periods = dialog.querySelector<HTMLInputElement>('#credit-card-transaction-periods')!
     expect(periods.min).toBe('1')
+    expect(periods.max).toBe('60')
     setInput(periods, '0')
     dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
     await flushPromises()
-    expect(dialog.textContent).toContain('期數必須至少為 1 期')
+    expect(dialog.textContent).toContain('期數必須為 1 至 60 期')
     expect(create).not.toHaveBeenCalled()
 
     setInput(periods, '1.5')
     dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
     await flushPromises()
-    expect(dialog.textContent).toContain('期數必須至少為 1 期')
+    expect(dialog.textContent).toContain('期數必須為 1 至 60 期')
     expect(create).not.toHaveBeenCalled()
+
+    setInput(periods, '61')
+    await flushPromises()
+    expect(dialog.querySelector('[data-testid="credit-card-transaction-schedule-preview"]')).toBeNull()
+    dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+    await flushPromises()
+    expect(dialog.textContent).toContain('期數必須為 1 至 60 期')
+    expect(create).not.toHaveBeenCalled()
+
+    setInput(periods, '60')
+    await flushPromises()
+    expect(dialog.querySelectorAll('[data-testid="credit-card-transaction-schedule-preview"]')).toHaveLength(1)
+    dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+    await flushPromises()
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ periods: 60 }), expect.any(String))
     wrapper.unmount()
   })
 
@@ -178,6 +194,52 @@ describe('信用卡交易表單', () => {
 
     expect(create).toHaveBeenCalledTimes(2)
     expect(create.mock.calls[0]?.[1]).toBe(create.mock.calls[1]?.[1])
+    wrapper.unmount()
+  })
+
+  it('同一表單改變內容後重試時使用新的冪等鍵', async () => {
+    const create = vi.spyOn(api.installments, 'create')
+      .mockRejectedValueOnce(new Error('network interrupted'))
+      .mockResolvedValueOnce(onePeriodInstallment)
+    const { wrapper, dialog } = await openCreateForm()
+    fillOnePeriodForm(dialog)
+
+    const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!
+    submit.click()
+    await flushPromises()
+    setInput(dialog.querySelector<HTMLInputElement>('#credit-card-transaction-description')!, '變更後的內容')
+    submit.click()
+    await flushPromises()
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(create.mock.calls[0]?.[1]).not.toBe(create.mock.calls[1]?.[1])
+    wrapper.unmount()
+  })
+
+  it('關閉後重開信用卡交易表單時使用新的冪等鍵', async () => {
+    const create = vi.spyOn(api.installments, 'create')
+      .mockRejectedValueOnce(new Error('network interrupted'))
+      .mockResolvedValueOnce(onePeriodInstallment)
+    const { wrapper, dialog } = await openCreateForm()
+    fillOnePeriodForm(dialog)
+
+    const submit = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!
+    submit.click()
+    await flushPromises()
+    dialog.querySelector<HTMLButtonElement>('button[type="button"]')!.click()
+    await flushPromises()
+
+    const createButton = wrapper.findAll('button').find(button => button.text().includes('新增'))
+    expect(createButton).toBeDefined()
+    await createButton!.trigger('click')
+    await flushPromises()
+    const reopenedDialog = document.body.querySelector('[role="dialog"]') as HTMLElement
+    fillOnePeriodForm(reopenedDialog)
+    reopenedDialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+    await flushPromises()
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(create.mock.calls[0]?.[1]).not.toBe(create.mock.calls[1]?.[1])
     wrapper.unmount()
   })
 
