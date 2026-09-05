@@ -12,6 +12,40 @@ namespace MyExpenses.Api.Tests.Endpoints;
 
 public sealed class ScheduleEndpointsTests
 {
+    /// <summary>驗證自動快照設定允許零或一筆，多筆時拒絕任意選取且不改寫資料。</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task AutoSnapshotConfig_RequiresAtMostOneRow(int count)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = CreateDb(connection);
+        for (var index = 0; index < count; index++)
+            db.AutoSnapshotConfigs.Add(new AutoSnapshotConfig { IsEnabled = false });
+        await db.SaveChangesAsync();
+        var repository = new ScheduledJobExecutionRepository(db);
+
+        if (count > 1)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => ScheduleEndpoints.GetOverviewAsync(
+                db, repository, CreateTimeZoneService(), TimeProvider.System));
+        }
+        else
+        {
+            var overview = await ScheduleEndpoints.GetOverviewAsync(
+                db, repository, CreateTimeZoneService(), TimeProvider.System);
+            Assert.False(Assert.Single(overview, item => item.JobKey == ScheduledJobKey.AutomaticSnapshot).IsEnabled);
+        }
+
+        var result = await new AutomaticSnapshotWorkflow(db).RunAsync(
+            new DateTime(2026, 9, 6, 0, 0, 0, DateTimeKind.Utc), new DateOnly(2026, 9, 6));
+        Assert.Equal(count > 1 ? ScheduledJobWorkflowOutcome.Failed : ScheduledJobWorkflowOutcome.NoWork, result.Outcome);
+        Assert.Equal(count, await db.AutoSnapshotConfigs.CountAsync());
+        Assert.Equal(0, await db.SnapshotBatches.CountAsync());
+    }
+
     /// <summary>驗證總覽回傳三個 descriptor 並對停用快照省略 next run。</summary>
     [Fact]
     public async Task GetOverviewAsync_ReturnsThreeDescriptorsAndLatestExecution()

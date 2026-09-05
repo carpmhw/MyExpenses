@@ -59,7 +59,7 @@ public static class ScheduleEndpoints
     {
         var config = await db.AutoSnapshotConfigs
             .AsNoTracking()
-            .FirstOrDefaultAsync();
+            .SingleOrDefaultAsync();
         var nowUtc = DateTime.SpecifyKind(timeProvider.GetUtcNow().UtcDateTime, DateTimeKind.Utc);
         var descriptors = BusinessScheduleDescriptorFactory.Create(
             config,

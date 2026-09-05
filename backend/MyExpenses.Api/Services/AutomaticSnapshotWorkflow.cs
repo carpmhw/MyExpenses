@@ -32,7 +32,7 @@ public sealed class AutomaticSnapshotWorkflow
         try
         {
             await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-            var config = await _db.AutoSnapshotConfigs.FirstOrDefaultAsync(cancellationToken);
+            var config = await _db.AutoSnapshotConfigs.SingleOrDefaultAsync(cancellationToken);
             if (config is null || !config.IsEnabled)
                 return ScheduledJobWorkflowResult.NoWork("NotDue");
             var validConfig = config;

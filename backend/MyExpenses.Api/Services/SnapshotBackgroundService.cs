@@ -52,7 +52,7 @@ public class SnapshotBackgroundService : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var config = await db.AutoSnapshotConfigs.FirstOrDefaultAsync(cancellationToken);
+        var config = await db.AutoSnapshotConfigs.SingleOrDefaultAsync(cancellationToken);
         var isInitialCheck = Interlocked.Exchange(ref _initialCheckCompleted, 1) == 0;
         if (config is null || !config.IsEnabled)
             return;

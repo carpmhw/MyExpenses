@@ -9,6 +9,7 @@ configure_nginx_mode() {
     mode_config='/etc/nginx/conf.d/00-myexpenses-mode.conf'
     mode=${MYEXPENSES_DEPLOYMENT_MODE:-Local}
     trusted_edge_networks="127.0.0.1/32 ${MYEXPENSES_TRUSTED_EDGE_NETWORKS:-}"
+    emitted_networks=' '
 
     {
         printf '%s\n' 'geo $myexpenses_trusted_edge {' '    default 0;'
@@ -19,6 +20,11 @@ configure_nginx_mode() {
                     exit 1
                     ;;
             esac
+            # 預設 loopback 與自訂清單可能重複，避免 nginx geo 重複網路警告。
+            case "$emitted_networks" in
+                *" $edge_network "*) continue ;;
+            esac
+            emitted_networks="$emitted_networks$edge_network "
             printf '    %s 1;\n' "$edge_network"
         done
         printf '%s\n' '}'
