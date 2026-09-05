@@ -79,6 +79,7 @@ public class TimeZoneDefaultsEndpointsTests
             options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
         builder.Services.AddSingleton<TimeProvider>(new FixedTimeProvider(new DateTime(2098, 12, 31, 16, 30, 0, DateTimeKind.Utc)));
         builder.Services.AddSingleton<TimeZoneService>();
+        builder.Services.AddScoped<TransactionCommandService>();
 
         var app = builder.Build();
         app.MapTransactionEndpoints();

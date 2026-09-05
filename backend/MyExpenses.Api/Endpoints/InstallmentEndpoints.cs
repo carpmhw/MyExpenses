@@ -16,6 +16,7 @@ public static class InstallmentEndpoints
             InstallmentPurchaseRequest request,
             [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
             InstallmentCommandService commandService,
+            HttpContext httpContext,
             CancellationToken cancellationToken) =>
         {
             try
@@ -24,6 +25,8 @@ public static class InstallmentEndpoints
                     request,
                     idempotencyKey,
                     cancellationToken);
+                if (result.Replayed)
+                    httpContext.Response.Headers["X-Idempotent-Replay"] = "true";
                 return Results.Created($"/api/installments/{result.Installment.Id}", result);
             }
             catch (FinancialCommandException exception)
@@ -72,6 +75,7 @@ public static class InstallmentEndpoints
             CreateStandaloneInstallmentRequest request,
             [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
             InstallmentCommandService commandService,
+            HttpContext httpContext,
             CancellationToken cancellationToken) =>
         {
             try
@@ -80,6 +84,8 @@ public static class InstallmentEndpoints
                     request,
                     idempotencyKey,
                     cancellationToken);
+                if (installment.Replayed)
+                    httpContext.Response.Headers["X-Idempotent-Replay"] = "true";
                 return Results.Created($"/api/installments/{installment.Id}", installment);
             }
             catch (FinancialCommandException exception)
@@ -250,7 +256,10 @@ public static class InstallmentEndpoints
         => Results.Problem(
             statusCode: exception.StatusCode,
             title: exception.Title,
-            detail: exception.Detail);
+            detail: exception.Detail,
+            extensions: exception.Code is null
+                ? null
+                : new Dictionary<string, object?> { ["code"] = exception.Code });
 }
 
 public sealed record InstallmentListResponse(

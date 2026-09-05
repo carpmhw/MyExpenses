@@ -129,7 +129,44 @@ npm start
 
 `MYEXPENSES_API_URL` 必須是 reverse-proxy origin，且不可附加 `/api`；Remote 應使用 HTTPS。API token 只會在建立時顯示明文，不可提交至 repository 或寫入公開 log。
 
-最小 scopes：`transactions:read`、`transactions:write`、`transactions:undo`、`categories:read`、`payment-methods:read`、`reports:read`。MCP 不需要 `transactions:delete`。
+完整工具集使用的 scopes：`transactions:read`、`transactions:write`、`transactions:undo`、`categories:read`、`payment-methods:read`、`reports:read`、`credit-cards:read`、`agent-context:read`。不使用還原或月摘要時可省略 `transactions:undo` 或 `reports:read`；純查帳不需要寫入權限。MCP 不需要 `transactions:delete`。既有 token 不會自動取得新增 scopes，請在 UI 建立具所需 scopes 的新 token。
+
+新增記帳採兩階段 envelope：先呼叫 `prepare_bookkeeping_entry`，再將回傳的 `arguments` 原樣交給 `create_transaction` 或 `create_credit_card_transaction`。準備階段會以後端 `agent-context` 固定系統時區日期、解析分類／付款方式／信用卡並產生 UUID `requestId`；`ready` 不代表已寫入。缺資料時回傳 `needs_input`，不會建立交易或 receipt。
+
+工具口徑如下：
+
+- `search_transactions` 查詢普通原始帳目，預設保留卡費；`repaymentOnly=true` 才套用 `Expense + living + Description 包含「信用卡帳單」`。
+- `search_consumption` 查詢跨來源消費，信用卡依購買日計入總額，排除卡費並回傳完整 filtered summary、period、timezone、coverage 與 warnings。
+- `get_financial_summary` 仍是普通財務月摘要，不可用來回答跨來源消費總額。
+- 信用卡消費使用獨立 `credit_card_purchase` intent，不建立平行普通交易；卡費繳款使用 `credit_card_repayment` intent，僅建立普通 living 支出，不更新付款狀態。
+
+重試必須保留整個 prepared envelope 與原 `requestId`。API 回覆 `replayed` 時可安全視為同一筆；連線中斷或 timeout 時 MCP 回傳 `outcome_unknown`，不得自動產生新 key。原 envelope 遺失時先查詢核對，不可用相同金額／描述猜測為同一筆。
+
+支援 `mcpServers` 的 stdio client 設定範例（OpenClaw 請先核對所用版本的 MCP adapter；`${MYEXPENSES_API_TOKEN}` 是否展開由 client 決定，不是 Node 或 JSON 的功能）：
+
+```json
+{
+  "mcpServers": {
+    "myexpenses": {
+      "command": "node",
+      "args": ["/path/to/MyExpenses/backend/myexpenses-mcp-server/dist/index.js"],
+      "env": {
+        "MYEXPENSES_API_URL": "https://expenses.example.com",
+        "MYEXPENSES_API_TOKEN": "${MYEXPENSES_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+使用 secret manager 或 client 支援的環境變數注入 token，不要讓字面值 `${MYEXPENSES_API_TOKEN}` 被當成真實 token。完整的準備／執行、部署回退及固定日期範例見 [MCP 使用文件](backend/myexpenses-mcp-server/README.md)。
+
+執行 MCP 驗證：
+
+```bash
+npm --prefix backend/myexpenses-mcp-server ci
+npm --prefix backend/myexpenses-mcp-server test
+```
 
 ## 備份與還原
 

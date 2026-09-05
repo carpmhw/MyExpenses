@@ -51,6 +51,61 @@ public class EndpointInputValidationTests
         Assert.Equal(PaginationPolicy.MaxPageSize, body.RootElement.GetArrayLength());
     }
 
+    /// <summary>驗證 repaymentOnly 只篩出生活分類且描述含信用卡帳單的普通支出。</summary>
+    [Fact]
+    public async Task GetTransactions_RepaymentOnlyUsesExactCardBillPredicate()
+    {
+        await using var app = await CreateAppAsync();
+        using (var scope = app.App.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var living = new Category { Name = "生活", Type = CategoryType.Expense, SystemCode = "living" };
+            var other = new Category { Name = "其他", Type = CategoryType.Expense, SystemCode = "other-expense" };
+            db.Categories.AddRange(living, other);
+            await db.SaveChangesAsync();
+            db.Transactions.AddRange(
+                new Transaction
+                {
+                    Type = TransactionType.Expense,
+                    Amount = 3000m,
+                    Date = new DateOnly(2026, 9, 5),
+                    Description = "信用卡帳單 9 月",
+                    CategoryId = living.Id,
+                },
+                new Transaction
+                {
+                    Type = TransactionType.Expense,
+                    Amount = 200m,
+                    Date = new DateOnly(2026, 9, 5),
+                    Description = "一般生活用品",
+                    CategoryId = living.Id,
+                },
+                new Transaction
+                {
+                    Type = TransactionType.Expense,
+                    Amount = 100m,
+                    Date = new DateOnly(2026, 9, 5),
+                    Description = "備註關鍵字不應排除",
+                    Notes = "信用卡帳單",
+                    CategoryId = other.Id,
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var repaymentOnly = await app.App.GetTestClient().GetAsync(
+            "/api/transactions?repaymentOnly=true&startDate=2026-09-01&endDate=2026-09-30");
+        var defaultSearch = await app.App.GetTestClient().GetAsync(
+            "/api/transactions?startDate=2026-09-01&endDate=2026-09-30");
+
+        await AssertStatusCodeAsync(HttpStatusCode.OK, repaymentOnly);
+        await AssertStatusCodeAsync(HttpStatusCode.OK, defaultSearch);
+        using var repaymentBody = JsonDocument.Parse(await repaymentOnly.Content.ReadAsStringAsync());
+        using var defaultBody = JsonDocument.Parse(await defaultSearch.Content.ReadAsStringAsync());
+        Assert.Equal(1, repaymentBody.RootElement.GetProperty("items").GetArrayLength());
+        Assert.Equal(3000m, repaymentBody.RootElement.GetProperty("summary").GetProperty("totalExpense").GetDecimal());
+        Assert.Equal(3, defaultBody.RootElement.GetProperty("items").GetArrayLength());
+    }
+
     /// <summary>Verifies installment creation rejects zero periods before per-period calculations.</summary>
     [Fact]
     public async Task PostInstallment_RejectsZeroPeriods()
@@ -103,6 +158,7 @@ public class EndpointInputValidationTests
         builder.Services.Configure<TimeZoneOptions>(_ => { });
         builder.Services.AddSingleton<TimeZoneService>();
         builder.Services.AddScoped<InstallmentCommandService>();
+        builder.Services.AddScoped<TransactionCommandService>();
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;

@@ -1,4 +1,6 @@
 using System.Net;
+using System.Data.Common;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -12,8 +14,7 @@ public sealed class InstallmentCommandService
 {
     private const string InstallmentPurchaseOperation = "installment-purchase";
     private const string StandaloneInstallmentOperation = "standalone-installment";
-    private static readonly SemaphoreSlim CreateCommandGate = new(1, 1);
-
+    private static readonly ConditionalWeakTable<DbConnection, SemaphoreSlim> CreateCommandGates = new();
     private readonly AppDbContext _db;
     private readonly TimeZoneService _timeZoneService;
 
@@ -33,18 +34,21 @@ public sealed class InstallmentCommandService
         if (request is null)
             throw ValidationError("分期消費資料不可為空");
 
-        await CreateCommandGate.WaitAsync(cancellationToken);
+        var commandGate = CreateCommandGates.GetValue(
+            _db.Database.GetDbConnection(),
+            static _ => new SemaphoreSlim(1, 1));
+        await commandGate.WaitAsync(cancellationToken);
         try
         {
             return await CreateInstallmentPurchaseCoreAsync(request, idempotencyKey, cancellationToken);
         }
         finally
         {
-            CreateCommandGate.Release();
+            commandGate.Release();
         }
     }
 
-    /// <summary>Executes the composite purchase while the in-process command gate is held.</summary>
+    /// <summary>持有程序內命令閘門時執行複合消費，或重播已提交的收據。</summary>
     private async Task<InstallmentPurchaseResponse> CreateInstallmentPurchaseCoreAsync(
         InstallmentPurchaseRequest request,
         string? idempotencyKey,
@@ -55,7 +59,7 @@ public sealed class InstallmentCommandService
         var hash = IdempotencyRequestHasher.Compute(normalized);
         var existing = await FindReceiptAsync(key, InstallmentPurchaseOperation, hash, cancellationToken);
         if (existing is not null)
-            return await LoadPurchaseResponseAsync(existing, cancellationToken);
+            return (await LoadPurchaseResponseAsync(existing, cancellationToken)) with { Replayed = true };
 
         var transactionRequest = request.Transaction ?? throw ValidationError("交易資料不可為空");
         var installmentRequest = request.Installment ?? throw ValidationError("分期資料不可為空");
@@ -82,7 +86,7 @@ public sealed class InstallmentCommandService
             if (existing is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
-                return await LoadPurchaseResponseAsync(existing, cancellationToken);
+                return (await LoadPurchaseResponseAsync(existing, cancellationToken)) with { Replayed = true };
             }
 
             var createdTransaction = new Transaction
@@ -141,7 +145,7 @@ public sealed class InstallmentCommandService
             _db.ChangeTracker.Clear();
             existing = await FindReceiptAsync(key, InstallmentPurchaseOperation, hash, cancellationToken);
             if (existing is not null)
-                return await LoadPurchaseResponseAsync(existing, cancellationToken);
+                return (await LoadPurchaseResponseAsync(existing, cancellationToken)) with { Replayed = true };
 
             throw ConflictError("分期消費無法完成，請稍後重試");
         }
@@ -156,14 +160,17 @@ public sealed class InstallmentCommandService
         if (request is null)
             throw ValidationError("分期資料不可為空");
 
-        await CreateCommandGate.WaitAsync(cancellationToken);
+        var commandGate = CreateCommandGates.GetValue(
+            _db.Database.GetDbConnection(),
+            static _ => new SemaphoreSlim(1, 1));
+        await commandGate.WaitAsync(cancellationToken);
         try
         {
             return await CreateStandaloneInstallmentCoreAsync(request, idempotencyKey, cancellationToken);
         }
         finally
         {
-            CreateCommandGate.Release();
+            commandGate.Release();
         }
     }
 
@@ -178,7 +185,7 @@ public sealed class InstallmentCommandService
         var hash = IdempotencyRequestHasher.Compute(normalized);
         var existing = await FindReceiptAsync(key, StandaloneInstallmentOperation, hash, cancellationToken);
         if (existing is not null)
-            return await LoadInstallmentAsync(existing.InstallmentId, cancellationToken);
+            return (await LoadInstallmentAsync(existing.InstallmentId, cancellationToken)) with { Replayed = true };
 
         InstallmentCommandValidator.ValidateSchedule(request.TotalAmount, request.Periods, request.PurchaseDate);
         if (!request.CardId.HasValue)
@@ -204,7 +211,7 @@ public sealed class InstallmentCommandService
             if (existing is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
-                return await LoadInstallmentAsync(existing.InstallmentId, cancellationToken);
+                return (await LoadInstallmentAsync(existing.InstallmentId, cancellationToken)) with { Replayed = true };
             }
 
             var installment = new Installment
@@ -243,7 +250,7 @@ public sealed class InstallmentCommandService
             _db.ChangeTracker.Clear();
             existing = await FindReceiptAsync(key, StandaloneInstallmentOperation, hash, cancellationToken);
             if (existing is not null)
-                return await LoadInstallmentAsync(existing.InstallmentId, cancellationToken);
+                return (await LoadInstallmentAsync(existing.InstallmentId, cancellationToken)) with { Replayed = true };
 
             throw ConflictError("分期無法完成，請稍後重試");
         }
@@ -513,7 +520,7 @@ public sealed class InstallmentCommandService
         CancellationToken cancellationToken)
     {
         if (!receipt.TransactionId.HasValue || !receipt.InstallmentId.HasValue)
-            throw ConflictError("Idempotency receipt 缺少結果識別碼");
+            throw ResultUnavailableError();
         return await LoadPurchaseResponseAsync(receipt.TransactionId.Value, receipt.InstallmentId.Value, cancellationToken);
     }
 
@@ -526,7 +533,9 @@ public sealed class InstallmentCommandService
         var transaction = await _db.Transactions
             .Include(item => item.Category)
             .Include(item => item.PaymentMethod)
-            .FirstAsync(item => item.Id == transactionId, cancellationToken);
+            .FirstOrDefaultAsync(item => item.Id == transactionId, cancellationToken);
+        if (transaction is null)
+            throw ResultUnavailableError();
         var installment = await LoadInstallmentAsync(installmentId, cancellationToken);
         return new InstallmentPurchaseResponse(ToTransactionResponse(transaction), installment);
     }
@@ -541,7 +550,9 @@ public sealed class InstallmentCommandService
             .Include(item => item.Transaction).ThenInclude(item => item!.PaymentMethod)
             .Include(item => item.Card)
             .Include(item => item.Payments.OrderBy(payment => payment.Period))
-            .FirstAsync(item => item.Id == installmentId.Value, cancellationToken);
+            .FirstOrDefaultAsync(item => item.Id == installmentId.Value, cancellationToken);
+        if (installment is null)
+            throw ResultUnavailableError();
         return ToInstallmentResponse(installment);
     }
 
@@ -614,4 +625,12 @@ public sealed class InstallmentCommandService
     /// <summary>Creates a conflict failure for an idempotency or persistence conflict.</summary>
     private static FinancialCommandException ConflictError(string detail)
         => new((int)HttpStatusCode.Conflict, "Financial command conflict", detail);
+
+    /// <summary>建立已提交但結果已不存在的安全重播錯誤。</summary>
+    private static FinancialCommandException ResultUnavailableError()
+        => new(
+            (int)HttpStatusCode.Gone,
+            "Financial result unavailable",
+            "Idempotent financial result is no longer available",
+            "result_unavailable");
 }

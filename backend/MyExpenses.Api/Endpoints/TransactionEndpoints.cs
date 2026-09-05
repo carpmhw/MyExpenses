@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -14,9 +15,9 @@ public static class TransactionEndpoints
         var group = app.MapGroup("/api/transactions");
 
         group.MapGet("/", async (int? categoryId, DateOnly? startDate, DateOnly? endDate,
-            string? search, TransactionType? type, int? page, int? pageSize, int? limit, AppDbContext db) =>
+            string? search, TransactionType? type, bool? repaymentOnly, int? page, int? pageSize, int? limit, AppDbContext db) =>
         {
-            var query = BuildFilteredQuery(db, categoryId, startDate, endDate, search, type);
+            var query = BuildFilteredQuery(db, categoryId, startDate, endDate, search, type, repaymentOnly);
 
             var safeLimit = PaginationPolicy.NormalizeLimit(limit);
             if (safeLimit.HasValue)
@@ -38,7 +39,8 @@ public static class TransactionEndpoints
                 type,
                 page,
                 pageSize,
-                db));
+                db,
+                repaymentOnly));
         })
         .RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
 
@@ -49,68 +51,30 @@ public static class TransactionEndpoints
         })
         .RequireApiTokenScope(ApiTokenScopes.TransactionsRead);
 
-        group.MapPost("/", async (CreateTransactionRequest request, AppDbContext db, TimeZoneService timeZoneService) =>
+        group.MapPost("/", async (
+            CreateTransactionRequest request,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+            TransactionCommandService commandService,
+            HttpContext httpContext,
+            CancellationToken cancellationToken) =>
         {
-            int? resolvedCategoryId = request.CategoryId;
-
-            if (resolvedCategoryId.HasValue)
+            try
             {
-                var categoryExists = await db.Categories.AnyAsync(c => c.Id == resolvedCategoryId.Value);
-                if (!categoryExists) return Results.BadRequest($"CategoryId '{resolvedCategoryId}' not found");
+                var result = await commandService.CreateAsync(request, idempotencyKey, cancellationToken);
+                if (result.Replayed)
+                    httpContext.Response.Headers["X-Idempotent-Replay"] = "true";
+                return Results.Created($"/api/transactions/{result.Transaction.Id}", result.Transaction);
             }
-
-            if (resolvedCategoryId is null && !string.IsNullOrEmpty(request.CategoryCode))
+            catch (FinancialCommandException exception)
             {
-                var cat = await db.Categories.FirstOrDefaultAsync(c => c.SystemCode == request.CategoryCode);
-                if (cat is null) return Results.BadRequest($"CategoryCode '{request.CategoryCode}' not found");
-                resolvedCategoryId = cat.Id;
-                request.Type ??= cat.Type == CategoryType.Income ? TransactionType.Income : TransactionType.Expense;
+                return Results.Problem(
+                    statusCode: exception.StatusCode,
+                    title: exception.Title,
+                    detail: exception.Detail,
+                    extensions: exception.Code is null
+                        ? null
+                        : new Dictionary<string, object?> { ["code"] = exception.Code });
             }
-
-            if (resolvedCategoryId is null && !string.IsNullOrEmpty(request.Category))
-            {
-                var cat = await db.Categories.FirstOrDefaultAsync(c => c.Name == request.Category);
-                if (cat is null) return Results.BadRequest($"Category '{request.Category}' not found");
-                resolvedCategoryId = cat.Id;
-                request.Type ??= cat.Type == CategoryType.Income ? TransactionType.Income : TransactionType.Expense;
-            }
-
-            if (request.Type is null)
-                return Results.BadRequest("Transaction type is required");
-            if (resolvedCategoryId is null)
-                return Results.BadRequest("Category is required");
-
-            int? resolvedPaymentMethodId = request.PaymentMethodId;
-
-            if (resolvedPaymentMethodId is null && !string.IsNullOrEmpty(request.PaymentMethodCode))
-            {
-                var pm = await db.PaymentMethods.FirstOrDefaultAsync(p => p.SystemCode == request.PaymentMethodCode);
-                if (pm is not null) resolvedPaymentMethodId = pm.Id;
-            }
-
-            if (resolvedPaymentMethodId is null && !string.IsNullOrEmpty(request.PaymentMethod))
-            {
-                var pm = await db.PaymentMethods.FirstOrDefaultAsync(p => p.Name == request.PaymentMethod);
-                if (pm is not null) resolvedPaymentMethodId = pm.Id;
-            }
-
-            var transaction = new Transaction
-            {
-                Type = request.Type.Value,
-                Amount = request.Amount,
-                Date = request.Date ?? timeZoneService.GetLocalDate(),
-                Description = request.Description,
-                Notes = request.Notes,
-                CategoryId = resolvedCategoryId.Value,
-                PaymentMethodId = resolvedPaymentMethodId
-            };
-
-            db.Transactions.Add(transaction);
-            await db.SaveChangesAsync();
-
-            await db.Entry(transaction).Reference(t => t.Category).LoadAsync();
-            await db.Entry(transaction).Reference(t => t.PaymentMethod).LoadAsync();
-            return Results.Created($"/api/transactions/{transaction.Id}", transaction);
         })
         .RequireApiTokenScope(ApiTokenScopes.TransactionsWrite);
 
@@ -205,9 +169,10 @@ public static class TransactionEndpoints
         TransactionType? type,
         int? page,
         int? pageSize,
-        AppDbContext db)
+        AppDbContext db,
+        bool? repaymentOnly = null)
     {
-        var query = BuildFilteredQuery(db, categoryId, startDate, endDate, search, type);
+        var query = BuildFilteredQuery(db, categoryId, startDate, endDate, search, type, repaymentOnly);
         var totalIncome = await query
             .Where(transaction => transaction.Type == TransactionType.Income)
             .SumAsync(transaction => (decimal?)transaction.Amount) ?? 0m;
@@ -254,7 +219,8 @@ public static class TransactionEndpoints
         DateOnly? startDate,
         DateOnly? endDate,
         string? search,
-        TransactionType? type)
+        TransactionType? type,
+        bool? repaymentOnly)
     {
         var query = db.Transactions.AsQueryable();
 
@@ -272,6 +238,14 @@ public static class TransactionEndpoints
         }
         if (type.HasValue)
             query = query.Where(transaction => transaction.Type == type.Value);
+        if (repaymentOnly == true)
+        {
+            query = query.Where(transaction =>
+                transaction.Type == TransactionType.Expense
+                && transaction.Category.SystemCode == "living"
+                && transaction.Description != null
+                && transaction.Description.Contains("信用卡帳單"));
+        }
 
         return query;
     }

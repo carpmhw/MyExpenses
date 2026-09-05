@@ -1,11 +1,16 @@
 using MyExpenses.Api.Models;
+using System.Text.Json.Serialization;
 
 namespace MyExpenses.Api.Models.Responses;
 
 /// <summary>Returns the canonical aggregate created by an installment purchase command.</summary>
 public sealed record InstallmentPurchaseResponse(
     TransactionCommandResponse Transaction,
-    InstallmentCommandResponse Installment);
+    InstallmentCommandResponse Installment)
+{
+    [JsonIgnore]
+    public bool Replayed { get; init; }
+}
 
 /// <summary>Returns the canonical installment aggregate after a command completes.</summary>
 public sealed record InstallmentCommandResponse(
@@ -22,7 +27,11 @@ public sealed record InstallmentCommandResponse(
     string? Description,
     TransactionCommandResponse? Transaction,
     CreditCardCommandResponse? Card,
-    IReadOnlyList<InstallmentPaymentCommandResponse> Payments);
+    IReadOnlyList<InstallmentPaymentCommandResponse> Payments)
+{
+    [JsonIgnore]
+    public bool Replayed { get; init; }
+}
 
 /// <summary>Returns only non-cyclic transaction fields needed by an installment command response.</summary>
 public sealed record TransactionCommandResponse(

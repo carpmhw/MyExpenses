@@ -11,6 +11,8 @@ public static class ApiTokenScopes
     public const string CategoriesRead = "categories:read";
     public const string PaymentMethodsRead = "payment-methods:read";
     public const string ReportsRead = "reports:read";
+    public const string CreditCardsRead = "credit-cards:read";
+    public const string AgentContextRead = "agent-context:read";
 
     /// <summary>Parses serialized API token scopes and fails closed to an empty set on invalid input.</summary>
     public static IReadOnlySet<string> Parse(string? serializedScopes)
