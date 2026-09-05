@@ -115,7 +115,7 @@ Data Protection keys、SQLite database 與 backups 都使用 persistent volumes�
 
 ## MCP Server
 
-MCP Server 需要 Node.js 20 以上，以及在 MyExpenses UI 建立的 API token：
+透過 stdio 讓 AI agent 查詢帳目與消費、建立及復原交易。需要 Node.js 20 以上，以及在 MyExpenses UI 建立的 API token。
 
 ```bash
 cd backend/myexpenses-mcp-server
@@ -127,9 +127,11 @@ export MYEXPENSES_API_TOKEN=TOKEN_CREATED_IN_MYEXPENSES
 npm start
 ```
 
-`MYEXPENSES_API_URL` 必須是 reverse-proxy origin，且不可附加 `/api`；Remote 應使用 HTTPS。API token 只會在建立時顯示明文，不可提交至 repository 或寫入公開 log。
+- **連線**：`MYEXPENSES_API_URL` 使用 reverse-proxy origin，不加 `/api`；Remote 使用 HTTPS。
+- **授權**：依所需工具授予最小 scopes，純查帳不需寫入權限。Token 僅在建立時顯示，不可提交至 repository 或公開 log。
+- **Client 設定**：由 stdio client 執行 `node <專案絕對路徑>/backend/myexpenses-mcp-server/dist/index.js`，並注入上述兩個環境變數。
 
-最小 scopes：`transactions:read`、`transactions:write`、`transactions:undo`、`categories:read`、`payment-methods:read`、`reports:read`。MCP 不需要 `transactions:delete`。
+完整 scopes、記帳流程、查詢規則與驗證方式見 [MCP 使用文件](backend/myexpenses-mcp-server/README.md)。
 
 ## 備份與還原
 

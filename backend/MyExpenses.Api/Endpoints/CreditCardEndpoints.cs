@@ -27,10 +27,11 @@ public static class CreditCardEndpoints
                 .ToListAsync();
 
             return Results.Ok(new { items, total, page = p, pageSize = ps });
-        });
+        }).RequireApiTokenScope(ApiTokenScopes.CreditCardsRead);
 
         group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
-            await db.CreditCards.FindAsync(id) is CreditCard c ? Results.Ok(c) : Results.NotFound());
+            await db.CreditCards.FindAsync(id) is CreditCard c ? Results.Ok(c) : Results.NotFound())
+            .RequireApiTokenScope(ApiTokenScopes.CreditCardsRead);
 
         group.MapPost("/", async (CreditCard card, AppDbContext db) =>
         {

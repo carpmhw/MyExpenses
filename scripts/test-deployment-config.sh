@@ -126,6 +126,40 @@ assert_no_reusable_production_secrets() {
     done
 }
 
+# 執行真實設定函數，驗證預設與自訂信任網路只輸出一次。
+assert_nginx_networks_are_unique() (
+    entrypoint=$1
+    test_dir=$(mktemp -d)
+    trap 'rm -rf "$test_dir"' EXIT
+    awk -v output="$test_dir/mode.conf" '
+        /^configure_nginx_mode\(\)/ { in_function = 1 }
+        in_function {
+            gsub("/etc/nginx/conf.d/00-myexpenses-mode.conf", output)
+            print
+        }
+        in_function && /^}/ { exit }
+    ' "$ROOT_DIR/$entrypoint" > "$test_dir/configure.sh"
+    printf '\nconfigure_nginx_mode\n' >> "$test_dir/configure.sh"
+
+    for networks in '' '127.0.0.1/32' '127.0.0.1/32,192.0.2.0/24 192.0.2.0/24,::1/128,::1/128'; do
+        for mode in Local Lan Remote; do
+            MYEXPENSES_DEPLOYMENT_MODE="$mode" MYEXPENSES_TRUSTED_EDGE_NETWORKS="$networks" \
+                sh -eu "$test_dir/configure.sh" || fail "$entrypoint 設定產生失敗"
+            [ "$(grep -Fc '    127.0.0.1/32 1;' "$test_dir/mode.conf")" -eq 1 ] || \
+                fail "$entrypoint 重複輸出 loopback 信任網路"
+            if [ "$networks" != '' ] && [ "$networks" != '127.0.0.1/32' ]; then
+                [ "$(grep -Fc '    192.0.2.0/24 1;' "$test_dir/mode.conf")" -eq 1 ] || \
+                    fail "$entrypoint 未保留唯一自訂 IPv4 網路"
+                [ "$(grep -Fc '    ::1/128 1;' "$test_dir/mode.conf")" -eq 1 ] || \
+                    fail "$entrypoint 未保留唯一自訂 IPv6 網路"
+            fi
+        done
+    done
+    if MYEXPENSES_TRUSTED_EDGE_NETWORKS='invalid;network' sh -eu "$test_dir/configure.sh" 2>/dev/null; then
+        fail "$entrypoint 未拒絕無效信任網路"
+    fi
+)
+
 # 執行 Compose、網路邊界、health proxy 與 secret 檢查。
 main() {
     cd "$ROOT_DIR"
@@ -196,6 +230,9 @@ main() {
     assert_contains entrypoint.single.sh "-w '%{http_code}'"
     assert_contains scripts/smoke-deployment.sh "--write-out '%{http_code}'"
     assert_no_reusable_production_secrets
+
+    assert_nginx_networks_are_unique frontend/entrypoint.sh
+    assert_nginx_networks_are_unique entrypoint.single.sh
 
     assert_compose_requires_secrets docker-compose.yml
     assert_compose_requires_secrets docker-compose.single.yml

@@ -222,6 +222,8 @@ builder.Services.AddSingleton<IExchangeRateService>(services =>
         services.GetRequiredService<IExchangeRateProvider>(),
         services.GetRequiredService<TimeProvider>()));
 builder.Services.AddScoped<InstallmentCommandService>();
+builder.Services.AddScoped<TransactionCommandService>();
+builder.Services.AddScoped<ConsumptionQueryService>();
 builder.Services.AddScoped<StockLedgerService>();
 builder.Services.AddScoped<ScheduledJobExecutionRepository>();
 builder.Services.AddScoped<ScheduledJobExecutionRecoveryService>();
@@ -289,6 +291,8 @@ app.MapCategoryEndpoints();
 app.MapTransactionEndpoints();
 app.MapInstallmentEndpoints();
 app.MapCreditCardEndpoints();
+app.MapAgentContextEndpoints();
+app.MapConsumptionEndpoints();
 app.MapCreditCardBillEndpoints();
 app.MapBankAccountEndpoints();
 app.MapStockEndpoints();

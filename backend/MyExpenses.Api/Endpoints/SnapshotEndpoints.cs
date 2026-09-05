@@ -216,13 +216,13 @@ public static class SnapshotEndpoints
 
         group.MapGet("/auto-schedule", async (AppDbContext db) =>
         {
-            var config = await db.AutoSnapshotConfigs.FirstOrDefaultAsync();
+            var config = await db.AutoSnapshotConfigs.SingleOrDefaultAsync();
             return config is not null ? Results.Ok(config) : Results.NotFound();
         });
 
         group.MapPut("/auto-schedule", async (AutoSnapshotConfig input, AppDbContext db) =>
         {
-            var config = await db.AutoSnapshotConfigs.FirstOrDefaultAsync();
+            var config = await db.AutoSnapshotConfigs.SingleOrDefaultAsync();
             if (config is null) return Results.NotFound();
 
             var validation = AutoSnapshotScheduleValidator.Validate(input);

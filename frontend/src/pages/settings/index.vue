@@ -59,6 +59,8 @@ const mcpDefaultScopes = [
   'categories:read',
   'payment-methods:read',
   'reports:read',
+  'credit-cards:read',
+  'agent-context:read',
 ]
 
 const apiTokenScopeOptions = [
@@ -69,6 +71,8 @@ const apiTokenScopeOptions = [
   { value: 'categories:read', label: '分類讀取', description: '查詢收支分類' },
   { value: 'payment-methods:read', label: '支付方式讀取', description: '查詢支付方式' },
   { value: 'reports:read', label: '報表讀取', description: '查詢月摘要報表' },
+  { value: 'credit-cards:read', label: '信用卡讀取', description: '查詢信用卡候選與明細' },
+  { value: 'agent-context:read', label: 'Agent 日期讀取', description: '取得系統目前日期與時區' },
 ]
 
 const newTokenScopes = ref<string[]>([...mcpDefaultScopes])

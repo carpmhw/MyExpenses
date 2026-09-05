@@ -205,11 +205,36 @@ public class InstallmentPurchaseContractTests
         var first = await client.PostAsJsonAsync("/api/installment-purchases", request);
         var second = await client.PostAsJsonAsync("/api/installment-purchases", request);
 
-        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
-        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        Assert.True(first.StatusCode == HttpStatusCode.Created,
+            $"Expected first Created, got {first.StatusCode}: {await first.Content.ReadAsStringAsync()}");
+        Assert.True(second.StatusCode == HttpStatusCode.Created,
+            $"Expected second Created, got {second.StatusCode}: {await second.Content.ReadAsStringAsync()}");
+        Assert.Equal("true", second.Headers.GetValues("X-Idempotent-Replay").Single());
         Assert.Equal(1, await app.CountTransactionsAsync());
         Assert.Equal(1, await app.CountInstallmentsAsync());
         Assert.Equal(3, await app.CountPaymentsAsync());
+    }
+
+    /// <summary>驗證 composite receipt 指向的交易被軟刪除後重播會安全回傳 410。</summary>
+    [Fact]
+    public async Task PostInstallmentPurchase_ReplayAfterTransactionSoftDelete_ReturnsGone()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        var key = Guid.NewGuid().ToString();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", key);
+        var first = await client.PostAsJsonAsync("/api/installment-purchases", CreatePurchaseRequest(app, 1200m));
+        using var body = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        var transactionId = body.RootElement.GetProperty("transaction").GetProperty("id").GetInt32();
+
+        await app.SoftDeleteTransactionAsync(transactionId);
+        var replay = await client.PostAsJsonAsync("/api/installment-purchases", CreatePurchaseRequest(app, 1200m));
+
+        Assert.Equal(HttpStatusCode.Gone, replay.StatusCode);
+        using var replayBody = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
+        Assert.Equal("result_unavailable", replayBody.RootElement.GetProperty("code").GetString());
+        Assert.Equal(1, await app.CountTransactionsIncludingDeletedAsync());
+        Assert.Equal(1, await app.CountInstallmentsAsync());
     }
 
     /// <summary>Verifies reusing an idempotency key with a different payload returns a conflict.</summary>
@@ -255,6 +280,93 @@ public class InstallmentPurchaseContractTests
         }
         Assert.Equal(1, await app.CountInstallmentsAsync());
         Assert.Equal(3, await app.CountPaymentsAsync());
+    }
+
+    /// <summary>驗證同一 key 改用不同 financial operation 時不會建立第二筆結果。</summary>
+    [Fact]
+    public async Task IdempotencyKey_CannotBeReusedAcrossStandaloneAndCompositeOperations()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var standalone = await client.PostAsJsonAsync("/api/installments", new
+        {
+            cardId = app.CardId,
+            totalAmount = 100m,
+            periods = 1,
+            purchaseDate = "2026-06-20",
+            description = "跨 operation",
+        });
+        var composite = await client.PostAsJsonAsync(
+            "/api/installment-purchases",
+            CreatePurchaseRequest(app, 100m, 1));
+
+        Assert.Equal(HttpStatusCode.Created, standalone.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, composite.StatusCode);
+        Assert.Equal(0, await app.CountTransactionsAsync());
+        Assert.Equal(1, await app.CountInstallmentsAsync());
+        Assert.Equal(1, await app.CountIdempotencyRecordsAsync());
+    }
+
+    /// <summary>驗證 standalone receipt 指向的分期被刪除後重播會安全回傳 410。</summary>
+    [Fact]
+    public async Task PostStandaloneInstallment_ReplayAfterInstallmentDelete_ReturnsGone()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        var key = Guid.NewGuid().ToString();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", key);
+        var request = new
+        {
+            cardId = app.CardId,
+            totalAmount = 100m,
+            periods = 3,
+            purchaseDate = "2026-06-20",
+            description = "刪除後重播",
+        };
+        var first = await client.PostAsJsonAsync("/api/installments", request);
+        using var body = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        var installmentId = body.RootElement.GetProperty("id").GetInt32();
+
+        await app.DeleteInstallmentAsync(installmentId);
+        var replay = await client.PostAsJsonAsync("/api/installments", request);
+
+        Assert.Equal(HttpStatusCode.Gone, replay.StatusCode);
+        Assert.False(replay.Headers.Contains("X-Idempotent-Replay"));
+        Assert.Equal(0, await app.CountInstallmentsAsync());
+        Assert.Equal(1, await app.CountIdempotencyRecordsAsync());
+    }
+
+    /// <summary>驗證 standalone 分期被編輯後重播仍回傳目前資料與原始識別碼。</summary>
+    [Fact]
+    public async Task PostStandaloneInstallment_ReplayAfterEditReturnsCurrentData()
+    {
+        await using var app = await CreateAppAsync();
+        var client = app.App.GetTestClient();
+        var key = Guid.NewGuid().ToString();
+        client.DefaultRequestHeaders.Add("Idempotency-Key", key);
+        var request = new
+        {
+            cardId = app.CardId,
+            totalAmount = 100m,
+            periods = 3,
+            purchaseDate = "2026-06-20",
+            description = "原始描述",
+        };
+
+        var first = await client.PostAsJsonAsync("/api/installments", request);
+        using var firstBody = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        var installmentId = firstBody.RootElement.GetProperty("id").GetInt32();
+        await app.UpdateInstallmentDescriptionAsync(installmentId, "編輯後描述");
+
+        var replay = await client.PostAsJsonAsync("/api/installments", request);
+
+        Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
+        Assert.Equal("true", replay.Headers.GetValues("X-Idempotent-Replay").Single());
+        using var replayBody = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
+        Assert.Equal(installmentId, replayBody.RootElement.GetProperty("id").GetInt32());
+        Assert.Equal("編輯後描述", replayBody.RootElement.GetProperty("description").GetString());
     }
 
     /// <summary>驗證 standalone endpoint 接受六十期並建立完整付款時程。</summary>
@@ -793,6 +905,7 @@ public class InstallmentPurchaseContractTests
         builder.Services.Configure<TimeZoneOptions>(_ => { });
         builder.Services.AddSingleton<TimeZoneService>();
         builder.Services.AddScoped<InstallmentCommandService>();
+        builder.Services.AddScoped<TransactionCommandService>();
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
@@ -849,6 +962,14 @@ public class InstallmentPurchaseContractTests
             return await db.Transactions.CountAsync();
         }
 
+        /// <summary>計算包含軟刪除資料的交易數量，確認重播沒有重建資料。</summary>
+        public async Task<int> CountTransactionsIncludingDeletedAsync()
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await db.Transactions.IgnoreQueryFilters().CountAsync();
+        }
+
         /// <summary>Counts persisted installments for atomicity assertions.</summary>
         public async Task<int> CountInstallmentsAsync()
         {
@@ -871,6 +992,38 @@ public class InstallmentPurchaseContractTests
             await using var scope = App.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             return await db.IdempotencyRecords.CountAsync();
+        }
+
+        /// <summary>將指定普通交易標記為軟刪除以測試 receipt 重播邊界。</summary>
+        public async Task SoftDeleteTransactionAsync(int transactionId)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var transaction = await db.Transactions
+                .IgnoreQueryFilters()
+                .SingleAsync(item => item.Id == transactionId);
+            transaction.DeletedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
+        /// <summary>刪除指定分期以測試 receipt 重播邊界。</summary>
+        public async Task DeleteInstallmentAsync(int installmentId)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var installment = await db.Installments.SingleAsync(item => item.Id == installmentId);
+            db.Installments.Remove(installment);
+            await db.SaveChangesAsync();
+        }
+
+        /// <summary>修改分期描述以驗證 receipt replay 使用目前 canonical 資料。</summary>
+        public async Task UpdateInstallmentDescriptionAsync(int installmentId, string description)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var installment = await db.Installments.SingleAsync(item => item.Id == installmentId);
+            installment.Description = description;
+            await db.SaveChangesAsync();
         }
 
         /// <summary>確認失敗的分期命令未建立任何交易、分期、付款或冪等收據。</summary>
