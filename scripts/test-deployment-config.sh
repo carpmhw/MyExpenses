@@ -40,6 +40,92 @@ assert_service_has_no_ports() {
     fi
 }
 
+# 驗證 backend-bearing image 使用可追蹤且一致的 OCI source/revision 契約。
+assert_image_metadata_contract() {
+    for file in backend/Dockerfile Dockerfile.single; do
+        assert_contains "$file" 'ARG VCS_REF=unknown'
+        assert_contains "$file" 'org.opencontainers.image.revision="${VCS_REF}"'
+        assert_contains "$file" 'org.opencontainers.image.source="https://github.com/carpmhw/MyExpenses"'
+    done
+
+    for file in docker-compose.yml docker-compose.single.yml; do
+        assert_contains "$file" 'VCS_REF: "${VCS_REF:-unknown}"'
+    done
+
+    checker=$ROOT_DIR/scripts/verify-image-metadata.sh
+    [ -x "$checker" ] || fail 'scripts/verify-image-metadata.sh 不存在或不可執行'
+    sh -n "$checker" || fail 'scripts/verify-image-metadata.sh shell syntax invalid'
+    assert_contains scripts/verify-image-metadata.sh 'org.opencontainers.image.revision'
+    assert_contains scripts/verify-image-metadata.sh 'org.opencontainers.image.source'
+}
+
+# 驗證正式 image metadata checker 會拒絕未知、錯誤及互相不一致的來源。
+assert_image_metadata_rejects_invalid() (
+    test_dir=$(mktemp -d)
+    trap 'rm -rf "$test_dir"' EXIT
+fake_docker="$test_dir/docker"
+    cat >"$fake_docker" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" != 'inspect' ]; then
+    exit 1
+fi
+target=${4:-}
+format=${3:-}
+case "$format" in
+    *'.Image'*)
+        case "$target" in
+            second) printf '%s\n' "${SECOND_IMAGE_ID:-}" ;;
+            *) printf '%s\n' "${BACKEND_IMAGE_ID:-}" ;;
+        esac
+        ;;
+    *'Config.Labels'*)
+        case "$target" in
+            second) printf '%s\n' "${SECOND_CONTAINER_METADATA:-}" ;;
+            "$SECOND_IMAGE_ID") printf '%s\n' "${SECOND_IMAGE_METADATA:-}" ;;
+            sha256:*) printf '%s\n' "${FAKE_IMAGE_METADATA:-}" ;;
+            *) printf '%s\n' "${FAKE_CONTAINER_METADATA:-}" ;;
+        esac
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+EOF
+    chmod +x "$fake_docker"
+
+    revision=0123456789abcdef0123456789abcdef01234567
+    image_id=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    second_image_id=sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+    source_url=https://github.com/carpmhw/MyExpenses
+
+    if DOCKER_BIN="$fake_docker" BACKEND_IMAGE_ID="$image_id" FAKE_IMAGE_METADATA="unknown|$source_url" \
+        "$ROOT_DIR/scripts/verify-image-metadata.sh" "$revision" "$image_id" backend 2>/dev/null; then
+        fail 'image metadata checker 接受 unknown revision'
+    fi
+    if DOCKER_BIN="$fake_docker" BACKEND_IMAGE_ID="$image_id" FAKE_IMAGE_METADATA="$revision|wrong-source" \
+        "$ROOT_DIR/scripts/verify-image-metadata.sh" "$revision" "$image_id" backend 2>/dev/null; then
+        fail 'image metadata checker 接受錯誤 source'
+    fi
+    if DOCKER_BIN="$fake_docker" BACKEND_IMAGE_ID="$image_id" SECOND_IMAGE_ID="$second_image_id" \
+        FAKE_IMAGE_METADATA="$revision|$source_url" SECOND_IMAGE_METADATA="$revision|$source_url" \
+        "$ROOT_DIR/scripts/verify-image-metadata.sh" "$revision" "$image_id" backend second 2>/dev/null; then
+        fail 'image metadata checker 接受不一致 image ID'
+    fi
+    if DOCKER_BIN="$fake_docker" BACKEND_IMAGE_ID="$image_id" \
+        FAKE_IMAGE_METADATA='|' FAKE_CONTAINER_METADATA="$revision|$source_url" \
+        "$ROOT_DIR/scripts/verify-image-metadata.sh" "$revision" "$image_id" backend 2>/dev/null; then
+        fail 'image metadata checker 信任可偽造的 container labels'
+    fi
+    if DOCKER_BIN="$fake_docker" FAKE_METADATA="$image_id|$revision|$source_url" \
+        "$ROOT_DIR/scripts/verify-image-metadata.sh" "$revision" bad-image-id backend 2>/dev/null; then
+        fail 'image metadata checker 接受無效 expected image ID'
+    fi
+    DOCKER_BIN="$fake_docker" BACKEND_IMAGE_ID="$image_id" SECOND_IMAGE_ID="$image_id" \
+        FAKE_IMAGE_METADATA="$revision|$source_url" SECOND_IMAGE_METADATA="$revision|$source_url" \
+        "$ROOT_DIR/scripts/verify-image-metadata.sh" "$revision" "$image_id" backend second || \
+        fail 'image metadata checker 拒絕一致且有效的來源'
+)
+
 # 驗證 Compose 在缺少 operator secret 時會 fail fast。
 assert_compose_requires_secrets() {
     file=$1
@@ -49,6 +135,19 @@ assert_compose_requires_secrets() {
     if env -u MYEXPENSES_JWT_SECRET \
         docker compose -f "$ROOT_DIR/$file" config >/dev/null 2>&1; then
         fail "$file 在缺少 operator secrets 時仍可通過 compose config"
+    fi
+}
+
+# 驗證 Development diagnostic Compose 也不接受缺少的 bootstrap secret。
+assert_compose_requires_bootstrap_secret() {
+    file=$1
+    command -v docker >/dev/null 2>&1 || return 0
+    docker compose version >/dev/null 2>&1 || return 0
+
+    if MYEXPENSES_JWT_SECRET='test-jwt-secret-that-is-longer-than-32-characters' \
+        env -u MYEXPENSES_BOOTSTRAP_SECRET \
+        docker compose -p myexpenses-config-test -f "$ROOT_DIR/$file" config >/dev/null 2>&1; then
+        fail "$file 在缺少 bootstrap secret 時仍可通過 compose config"
     fi
 }
 
@@ -195,6 +294,18 @@ main() {
     assert_not_contains docker-compose.single.yml '5000:5000'
     assert_contains docker-compose.single.yml 'X-Forwarded-Proto: https'
 
+    assert_contains docker-compose.development.yml 'ASPNETCORE_ENVIRONMENT: Development'
+    assert_contains docker-compose.development.yml 'VCS_REF: "${VCS_REF:-unknown}"'
+    assert_contains docker-compose.development.yml 'myexpenses-development-data:/app/data'
+    assert_contains docker-compose.development.yml 'myexpenses-development-backups:/app/data/backups'
+    assert_contains docker-compose.development.yml 'myexpenses-development-dataprotection:/app/keys'
+    assert_contains docker-compose.development.yml 'MYEXPENSES_JWT_SECRET:?'
+    assert_contains docker-compose.development.yml 'MYEXPENSES_BOOTSTRAP_SECRET:?'
+    assert_not_contains docker-compose.development.yml 'ASPNETCORE_ENVIRONMENT=Production'
+    assert_not_contains docker-compose.development.yml 'myexpenses-data:/app/data'
+    assert_not_contains docker-compose.development.yml 'myexpenses-backups:/app/data/backups'
+    assert_not_contains docker-compose.development.yml 'myexpenses-dataprotection:/app/keys'
+
     assert_contains frontend/nginx.conf 'location = /health/live'
     assert_contains frontend/nginx.conf 'location = /health/ready'
     assert_contains frontend/nginx.conf 'proxy_pass http://backend:5000/health/ready;'
@@ -222,6 +333,8 @@ main() {
     assert_contains backend/Dockerfile 'X-Forwarded-Proto: https'
     assert_contains Dockerfile.single 'HEALTHCHECK'
     assert_contains Dockerfile.single "-w '%{http_code}'"
+    assert_image_metadata_contract
+    assert_image_metadata_rejects_invalid
     assert_contains docker-compose.yml "-w '%{http_code}'"
     assert_contains docker-compose.yml 'X-Forwarded-Proto: https'
     assert_contains docker-compose.single.yml "-w '%{http_code}'"
@@ -236,10 +349,13 @@ main() {
 
     assert_compose_requires_secrets docker-compose.yml
     assert_compose_requires_secrets docker-compose.single.yml
+    assert_compose_requires_secrets docker-compose.development.yml
+    assert_compose_requires_bootstrap_secret docker-compose.development.yml
     assert_compose_allows_missing_bootstrap_secret docker-compose.yml
     assert_compose_allows_missing_bootstrap_secret docker-compose.single.yml
     assert_compose_is_valid docker-compose.yml
     assert_compose_is_valid docker-compose.single.yml
+    assert_compose_is_valid docker-compose.development.yml
     assert_compose_overrides_are_preserved docker-compose.yml
     assert_compose_overrides_are_preserved docker-compose.single.yml
 

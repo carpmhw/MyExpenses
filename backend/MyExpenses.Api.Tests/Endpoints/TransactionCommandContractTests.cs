@@ -368,7 +368,8 @@ public class TransactionCommandContractTests
     /// <summary>建立使用 SQLite 記憶體資料庫的交易 endpoint 測試 host。</summary>
     private static async Task<TestApp> CreateAppAsync()
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connectionString = $"Data Source=transaction-test-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -376,7 +377,7 @@ public class TransactionCommandContractTests
             EnvironmentName = Environments.Development,
         });
         builder.WebHost.UseTestServer();
-        builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
+        builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
         builder.Services.Configure<TimeZoneOptions>(options => options.Default = "Asia/Taipei");
         builder.Services.AddSingleton<TimeZoneService>();
         builder.Services.AddScoped<TransactionCommandService>();

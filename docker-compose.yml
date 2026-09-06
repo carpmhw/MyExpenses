@@ -3,6 +3,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        VCS_REF: "${VCS_REF:-unknown}"
     expose:
       - "5000"
     volumes:

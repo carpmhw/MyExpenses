@@ -1,0 +1,38 @@
+# 只供 Query 10103 診斷使用的 backend stack；不得掛載 Production volumes。
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        VCS_REF: "${VCS_REF:-unknown}"
+    ports:
+      - "${MYEXPENSES_DIAGNOSTIC_BIND_ADDRESS:-127.0.0.1}:${MYEXPENSES_DIAGNOSTIC_HTTP_PORT:-18080}:5000"
+    volumes:
+      - myexpenses-development-data:/app/data
+      - myexpenses-development-backups:/app/data/backups
+      - myexpenses-development-dataprotection:/app/keys
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Data Source=/app/data/MyExpenses.db"
+      DataProtection__ApplicationName: MyExpenses-Development-Diagnostic
+      DataProtection__KeyDirectory: /app/keys
+      Deployment__Mode: Local
+      Deployment__BindAddress: 127.0.0.1
+      Deployment__PublicOrigin: "http://127.0.0.1:${MYEXPENSES_DIAGNOSTIC_HTTP_PORT:-18080}"
+      Deployment__SecureCookies: "false"
+      Jwt__Secret: "${MYEXPENSES_JWT_SECRET:?MYEXPENSES_JWT_SECRET must be provided}"
+      Bootstrap__Secret: "${MYEXPENSES_BOOTSTRAP_SECRET:?MYEXPENSES_BOOTSTRAP_SECRET must be provided}"
+      Auth__CookieSecure: "false"
+      TZ: "${TZ:-Asia/Taipei}"
+    healthcheck:
+      test: ["CMD-SHELL", "test \"$(curl --fail --silent --show-error --max-time 4 -H 'X-Forwarded-Proto: https' -o /dev/null -w '%{http_code}' http://127.0.0.1:5000/health/ready)\" = \"200\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+volumes:
+  myexpenses-development-data:
+  myexpenses-development-backups:
+  myexpenses-development-dataprotection:

@@ -113,6 +113,8 @@ export Deployment__TrustedNetworks__0=172.20.0.0/16
 
 Data Protection keys、SQLite database 與 backups 都使用 persistent volumes。遺失 keys 會讓既有 browser sessions 失效，但不會刪除財務資料。
 
+映像來源驗證與警告排查流程見 [映像來源與 Query 10103 診斷](docs/image-provenance-query-10103.md)。
+
 ## MCP Server
 
 透過 stdio 讓 AI agent 查詢帳目與消費、建立及復原交易。需要 Node.js 20 以上，以及在 MyExpenses UI 建立的 API token。
