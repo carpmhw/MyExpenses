@@ -18,6 +18,8 @@ public static class InstallmentIntegrityPreflight
             .GroupBy(payment => new { payment.InstallmentId, payment.Period })
             .Where(group => group.Count() > 1)
             .Select(group => new { group.Key.InstallmentId, group.Key.Period })
+            .OrderBy(group => group.InstallmentId)
+            .ThenBy(group => group.Period)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (duplicate is not null)

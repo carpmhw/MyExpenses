@@ -50,7 +50,10 @@ DataProtectionRegistration.Add(
     builder.Environment.IsProduction());
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(connectionString));
+{
+    options.UseSqlite(connectionString);
+    EfCoreQueryWarningPolicy.Configure(options, builder.Environment.IsProduction());
+});
 
 var sqliteConnection = new SqliteConnectionStringBuilder(connectionString);
 var databasePath = sqliteConnection.DataSource;

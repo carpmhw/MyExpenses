@@ -440,6 +440,9 @@ FodyWeavers.xsd
 .superpowers/
 openspec
 docs
+!/docs/
+/docs/*
+!/docs/image-provenance-query-10103.md
 
 # OS files
 .DS_Store
