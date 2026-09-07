@@ -305,7 +305,7 @@ function formatDateMMDD(d: string): string {
       </QueryState>
 
       <!-- Cards Row -->
-      <div class="grid grid-cols-1 gap-5 xl:grid-cols-[340px_minmax(0,1fr)_minmax(0,1fr)]">
+      <div class="grid grid-cols-1 gap-5 xl:grid-cols-[340px_minmax(0,0.8fr)_minmax(0,1.2fr)]">
         <!-- Withdraw Card -->
         <div data-testid="dashboard-activity-card" class="min-w-0 bg-bg-card rounded-2xl border border-border-subtle overflow-hidden flex flex-col">
           <QueryState
@@ -314,8 +314,8 @@ function formatDateMMDD(d: string): string {
             :last-success-at="withdrawalsQuery.lastSuccessAt.value"
             :retry="withdrawalsQuery.retry"
           >
-          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-income-panel-start to-color-income-panel-end">
-            <div class="flex items-center gap-3.5 flex-1 min-w-0">
+          <div class="flex min-h-[104px] items-center gap-4 max-sm:flex-col max-sm:items-stretch max-sm:min-h-[148px] xl:max-2xl:flex-col xl:max-2xl:items-stretch xl:max-2xl:min-h-[148px] px-5 py-4 bg-gradient-to-br from-color-income-panel-start to-color-income-panel-end">
+            <div class="flex items-center gap-3.5 flex-none min-w-0 max-sm:flex-none xl:max-2xl:flex-none">
               <div class="w-11 h-11 rounded-xl bg-color-income flex items-center justify-center shrink-0">
                 <Icon name="TrendingDown" :size="22" class="text-text-on-accent" />
               </div>
@@ -327,9 +327,9 @@ function formatDateMMDD(d: string): string {
                 <p class="text-xs text-color-income-text">Withdrawals</p>
               </div>
             </div>
-            <div class="text-right">
+            <div class="flex-1 min-w-0 text-right">
                <p class="text-[10px] text-color-income-text">本期提款合計</p>
-              <p class="text-2xl font-bold text-color-income-text">{{ formatSummaryAmount(totalWithdrawals) }}</p>
+              <p class="text-2xl font-bold text-color-income-text truncate" :title="formatSummaryAmount(totalWithdrawals)">{{ formatSummaryAmount(totalWithdrawals) }}</p>
             </div>
           </div>
           <div
@@ -363,8 +363,8 @@ function formatDateMMDD(d: string): string {
             :last-success-at="expensesQuery.lastSuccessAt.value"
             :retry="expensesQuery.retry"
           >
-          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-expense-panel-start to-color-expense-panel-end">
-            <div class="flex items-center gap-3.5 flex-1 min-w-0">
+          <div class="flex min-h-[104px] items-center gap-4 max-sm:flex-col max-sm:items-stretch max-sm:min-h-[148px] xl:max-2xl:flex-col xl:max-2xl:items-stretch xl:max-2xl:min-h-[148px] px-5 py-4 bg-gradient-to-br from-color-expense-panel-start to-color-expense-panel-end">
+            <div class="flex items-center gap-3.5 flex-1 min-w-0 max-sm:flex-none xl:max-2xl:flex-none">
               <div class="w-11 h-11 rounded-xl bg-color-expense-action flex items-center justify-center shrink-0">
                 <Icon name="Receipt" :size="22" class="text-color-expense-action-text" />
               </div>
@@ -416,22 +416,22 @@ function formatDateMMDD(d: string): string {
             :last-success-at="installmentsQuery.lastSuccessAt.value"
             :retry="installmentsQuery.retry"
           >
-          <div class="flex items-center gap-4 px-5 py-4 bg-gradient-to-br from-color-credit-panel-start to-color-credit-panel-end">
-            <div class="flex items-center gap-3.5 flex-1 min-w-0">
+          <div class="flex min-h-[104px] items-center gap-4 max-sm:flex-col max-sm:items-stretch max-sm:min-h-[148px] xl:max-2xl:flex-col xl:max-2xl:items-stretch xl:max-2xl:min-h-[148px] px-5 py-4 bg-gradient-to-br from-color-credit-panel-start to-color-credit-panel-end">
+            <div class="flex items-center gap-3.5 flex-1 min-w-0 max-sm:flex-none xl:max-2xl:flex-none">
               <div class="w-11 h-11 rounded-xl bg-color-credit flex items-center justify-center shrink-0">
                 <Icon name="CreditCard" :size="22" class="text-text-on-accent" />
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <p class="text-base font-bold text-color-credit-text">信用卡交易</p>
+                  <p class="whitespace-nowrap text-base font-bold text-color-credit-text">信用卡交易</p>
                   <span class="bg-bg-card text-color-credit-text text-[10px] font-semibold rounded-full px-2 py-0.5">
                     {{ dashboardSummary ? dashboardSummary.activeInstallmentCount : '—' }} 筆
                   </span>
                 </div>
-                <p class="text-xs text-color-credit-text">Credit Card Transactions</p>
+                <p class="whitespace-nowrap text-xs text-color-credit-text">Credit Card Transactions</p>
               </div>
             </div>
-            <div class="text-right">
+            <div class="shrink-0 text-right max-sm:self-end">
               <button
                 class="text-[10px] text-color-credit-text hover:text-text-primary underline underline-offset-2 cursor-pointer"
                 @click="router.push('/installments')"
@@ -441,30 +441,30 @@ function formatDateMMDD(d: string): string {
               <p class="text-2xl font-bold text-color-credit-text">{{ formatSummaryAmount(installmentMonthlyDue) }}</p>
             </div>
           </div>
-          <div class="flex items-center gap-2 px-5 py-2.5 bg-bg-raised border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
-            <span class="w-10">日期</span>
-            <span class="flex-1">項目 / 摘要</span>
-            <span class="text-right w-14">總額</span>
-            <span class="text-center w-12">期數</span>
-            <span class="text-center w-12">已繳</span>
-            <span class="text-right w-16">本期</span>
+          <div class="flex items-center gap-2 px-5 py-2.5 bg-bg-raised border-t border-border-subtle text-[10px] font-semibold text-text-tertiary uppercase tracking-wider max-sm:flex-wrap max-sm:gap-0.5 max-sm:px-3 xl:max-2xl:flex-wrap">
+            <span class="w-10 shrink-0 max-sm:w-8 xl:max-2xl:w-8">日期</span>
+            <span class="flex-1 min-w-0 max-sm:order-last max-sm:basis-full max-sm:w-full max-sm:flex-none xl:max-2xl:order-last xl:max-2xl:basis-full xl:max-2xl:w-full xl:max-2xl:flex-none">項目 / 摘要</span>
+            <span class="text-right w-14 shrink-0 max-sm:w-12 xl:max-2xl:w-12">總額</span>
+            <span class="text-center w-24 shrink-0 max-sm:w-24 xl:max-2xl:w-24">期數</span>
+            <span class="text-center w-12 shrink-0 max-sm:w-8 xl:max-2xl:w-8">已繳</span>
+            <span class="text-right w-16 shrink-0 max-sm:w-16 xl:max-2xl:w-16">本期</span>
           </div>
           <div
             v-for="i in recentInstallments"
             :key="i.id"
-            class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-bg-raised transition-colors"
+            class="flex items-center gap-2 px-5 py-3 border-t border-border-subtle cursor-pointer hover:bg-bg-raised transition-colors max-sm:flex-wrap max-sm:gap-1 max-sm:px-3 xl:max-2xl:flex-wrap"
             @click="router.push('/installments')"
           >
-            <span class="text-xs text-text-secondary w-10">{{ formatDateMMDD(i.purchaseDate) }}</span>
-            <div class="flex-1 min-w-0">
+            <span class="text-xs text-text-secondary w-10 shrink-0 max-sm:w-8 xl:max-2xl:w-8">{{ formatDateMMDD(i.purchaseDate) }}</span>
+            <div class="flex-1 min-w-0 max-sm:order-last max-sm:basis-full max-sm:w-full max-sm:flex-none xl:max-2xl:order-last xl:max-2xl:basis-full xl:max-2xl:w-full xl:max-2xl:flex-none">
               <p class="text-sm font-semibold text-text-primary truncate">{{ i.description || '—' }}</p>
             </div>
-            <span class="text-xs text-text-secondary text-right w-14">{{ formatMoney(i.totalAmount) }}</span>
-            <span class="w-12 flex justify-center">
-              <span class="text-[11px] font-semibold text-color-credit-text bg-color-credit-bg rounded px-2 py-0.5">{{ formatPeriodLabel(i.periods) }}</span>
+            <span class="text-xs text-text-secondary text-right w-14 shrink-0 max-sm:w-12 xl:max-2xl:w-12 truncate" :title="formatMoney(i.totalAmount)">{{ formatMoney(i.totalAmount) }}</span>
+            <span class="w-24 shrink-0 max-sm:w-24 xl:max-2xl:w-24 flex justify-center">
+              <span class="whitespace-nowrap text-[11px] font-semibold text-color-credit-text bg-color-credit-bg rounded px-1 py-0.5">{{ formatPeriodLabel(i.periods) }}</span>
             </span>
-            <span class="text-xs font-semibold text-text-primary text-center w-12">{{ progressLabel(i) }}</span>
-            <span class="text-sm font-bold text-color-credit-text text-right w-16">{{ formatMoney(i.perPeriod) }}</span>
+            <span class="text-xs font-semibold text-text-primary text-center w-12 shrink-0 max-sm:w-8 xl:max-2xl:w-8">{{ progressLabel(i) }}</span>
+            <span class="text-sm font-bold text-color-credit-text text-right w-16 shrink-0 max-sm:w-16 xl:max-2xl:w-16 truncate" :title="formatMoney(i.perPeriod)">{{ formatMoney(i.perPeriod) }}</span>
           </div>
           <div
             v-if="recentInstallments.length === 0"

@@ -369,15 +369,23 @@ function openEdit(item: StockListItem) {
   modalOpen.value = true
 }
 
-// 以目前第一檔持股作為新增交易的預設標的，實際欄位由 transaction modal 管理。
+/** 依目前頁面脈絡解析新增交易的預設股票，且不修改任何篩選或 options state。 */
+function resolveDefaultTransactionStockId(): number | undefined {
+  if (activeTab.value === 'ledger' && ledgerStockId.value !== null)
+    return ledgerStockId.value
+  return stockOptions.value[0]?.id ?? stocks.value[0]?.id
+}
+
+/** 依明確股票、Ledger 篩選與 fallback 開啟新增交易表單，預設型別維持 Buy。 */
 function openTransaction(
-  stockId = stockOptions.value[0]?.id ?? stocks.value[0]?.id,
+  stockId?: number,
   type: EditableStockTransactionType = 'Buy',
 ): void {
-  if (!stockId) return
+  const resolvedStockId = stockId ?? resolveDefaultTransactionStockId()
+  if (!resolvedStockId) return
   transactionEditing.value = null
   transactionError.value = ''
-  transactionStockId.value = stockId
+  transactionStockId.value = resolvedStockId
   transactionInitialType.value = type
   transactionModalOpen.value = true
   void loadStockOptions()

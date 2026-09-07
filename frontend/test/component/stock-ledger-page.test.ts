@@ -2,39 +2,51 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ApiError, api } from '../../src/api'
 import StocksPage from '../../src/pages/stocks/index.vue'
-import type { StockListItem } from '../../src/types'
+import StockTransactionLedger from '../../src/components/stocks/StockTransactionLedger.vue'
+import type { StockListItem, StockOption, StockTransactionListItem } from '../../src/types'
 import { mountWithAppProviders } from '../support/render'
 import { deferred } from '../support/deferred'
 
+// 等待 Vue watcher 與非同步 API mock 完成，讓 Teleport 內容穩定後再斷言。
 async function flushPromises(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
 }
 
+// 建立可指定識別欄位的持股 fixture，讓回歸測試能區分股票 A 與 B。
+function createStockListItem(
+  id: number,
+  name: string,
+  symbol: string,
+  overrides: Partial<StockListItem> = {},
+): StockListItem {
+  return {
+    id,
+    name,
+    symbol,
+    market: 'Twse',
+    instrumentType: 'Stock',
+    shares: id === 1 ? 10 : 20,
+    buyPrice: id === 1 ? 500 : 700,
+    currentPrice: id === 1 ? 600 : 800,
+    broker: id === 1 ? '甲券商' : '乙券商',
+    lastPriceUpdate: null,
+    grossMarketValue: id === 1 ? 6000 : 16000,
+    buyCommission: 0,
+    sellCommission: 0,
+    securitiesTransactionTax: 0,
+    estimatedNetSellValue: id === 1 ? 6000 : 16000,
+    estimatedGainLoss: id === 1 ? 1000 : 2000,
+    hasLedger: true,
+    ...overrides,
+  }
+}
+
 // 建立股票頁測試用持股 response，允許覆寫 projection 與 identity 欄位。
 function createStockListResponse(hasLedger = true, overrides: Partial<StockListItem> = {}) {
   return {
-    items: [{
-      id: 1,
-      name: '台積電',
-      symbol: '2330',
-      market: 'Twse' as const,
-      instrumentType: 'Stock' as const,
-      shares: 10,
-      buyPrice: 500,
-      currentPrice: 600,
-      broker: '甲券商',
-      lastPriceUpdate: null,
-      grossMarketValue: 6000,
-      buyCommission: 0,
-      sellCommission: 0,
-      securitiesTransactionTax: 0,
-      estimatedNetSellValue: 6000,
-      estimatedGainLoss: 1000,
-      hasLedger,
-      ...overrides,
-    }],
+    items: [createStockListItem(1, '台積電', '2330', { hasLedger, ...overrides })],
     total: 1,
     page: 1,
     pageSize: 15,
@@ -43,7 +55,47 @@ function createStockListResponse(hasLedger = true, overrides: Partial<StockListI
   }
 }
 
-function createLedgerResponse() {
+// 建立兩檔股票 fixture，持股首筆順序可與完整 options 順序刻意錯開。
+function createTwoStockFixture(firstHoldingId: 1 | 2 = 1): {
+  stocks: ReturnType<typeof createStockListResponse>
+  options: StockOption[]
+} {
+  const stockA = createStockListItem(1, '台積電', '2330')
+  const stockB = createStockListItem(2, '聯發科', '2454')
+  const items = firstHoldingId === 1 ? [stockA, stockB] : [stockB, stockA]
+  return {
+    stocks: {
+      items,
+      total: 2,
+      page: 1,
+      pageSize: 15,
+      totalEstimatedNetSellValue: 22000,
+      totalEstimatedGainLoss: 3000,
+    },
+    options: [stockA, stockB].map(stock => ({
+      id: stock.id,
+      name: stock.name,
+      symbol: stock.symbol,
+      broker: stock.broker,
+      shares: stock.shares,
+      hasLedger: stock.hasLedger,
+    })),
+  }
+}
+
+// 建立沒有股票的 response，供新增交易無有效 Stock ID 的 guard 測試使用。
+function createEmptyStockListResponse() {
+  return {
+    ...createStockListResponse(),
+    items: [],
+    total: 0,
+    totalEstimatedNetSellValue: 0,
+    totalEstimatedGainLoss: 0,
+  }
+}
+
+// 建立股票交易紀錄 fixture，允許測試覆寫既有交易的股票與型別。
+function createLedgerResponse(overrides: Partial<StockTransactionListItem> = {}) {
   return {
     items: [{
       id: 1,
@@ -70,11 +122,40 @@ function createLedgerResponse() {
       remainingShares: 10,
       remainingCostBasis: 5000,
       executionAveragePrice: 500,
+      ...overrides,
     }],
     total: 1,
     page: 1,
     pageSize: 20,
   }
+}
+
+// 關閉目前 Teleport 到 body 的交易 Modal，避免後續入口受到前一個表單影響。
+function closeTransactionModal(): void {
+  const form = document.body.querySelector<HTMLFormElement>('[data-testid="stock-transaction-form"]')
+  const cancelButton = Array.from(form?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+    .find(button => button.textContent?.trim() === '取消')
+  if (!cancelButton) throw new Error('Missing transaction cancel button')
+  cancelButton.click()
+}
+
+// 以原生 input event 設定交易表單欄位，符合既有 component test 的輸入慣例。
+function setTransactionInput(testId: string, value: string): void {
+  const input = document.body.querySelector<HTMLInputElement>(`[data-testid="${testId}"]`)
+  if (!input) throw new Error(`Missing ${testId}`)
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+// 填入不依賴費稅估算服務的有效買入交易資料。
+function fillManualBuyTransaction(): void {
+  const manualButton = document.body.querySelector<HTMLButtonElement>('[data-testid="transaction-cost-manual"]')
+  if (!manualButton) throw new Error('Missing manual transaction cost button')
+  manualButton.click()
+  setTransactionInput('transaction-shares', '2')
+  setTransactionInput('transaction-price', '610')
+  setTransactionInput('transaction-fee', '0')
+  setTransactionInput('transaction-tax', '0')
 }
 
 describe('StocksPage ledger contract', () => {
@@ -524,6 +605,258 @@ describe('StocksPage ledger contract', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="new-stock-transaction"]').exists()).toBe(true)
+  })
+
+  // 驗證 Ledger 篩選非第一筆股票時，Ledger 內新增入口預選篩選標的並維持 Buy。
+  it('defaults a ledger-created transaction to the filtered stock', async () => {
+    const fixture = createTwoStockFixture()
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+    vi.spyOn(api.stocks, 'options').mockResolvedValue(fixture.options)
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse({
+      stockId: 2,
+      stockName: '聯發科',
+      symbol: '2454',
+      broker: '乙券商',
+    }))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-stock-filter"]').setValue('2')
+    await wrapper.get('[data-testid="ledger-date-start"]').setValue('2026-01-01')
+    await wrapper.get('[data-testid="ledger-date-end"]').setValue('2026-08-01')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-new-transaction"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('2')
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-type"]')?.value).toBe('Buy')
+    expect(document.body.querySelector<HTMLInputElement>('[data-testid="transaction-trade-date"]')?.value).not.toBe('2026-08-01')
+    wrapper.unmount()
+  })
+
+  // 驗證頁首新增入口在 Ledger 篩選後與 Ledger 內入口使用相同的股票預選規則。
+  it('defaults the header transaction entry to the filtered stock', async () => {
+    const fixture = createTwoStockFixture()
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+    vi.spyOn(api.stocks, 'options').mockResolvedValue(fixture.options)
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse({
+      stockId: 2,
+      stockName: '聯發科',
+      symbol: '2454',
+      broker: '乙券商',
+    }))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-stock-filter"]').setValue('2')
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('2')
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-type"]')?.value).toBe('Buy')
+    wrapper.unmount()
+  })
+
+  // 驗證 Ledger 選擇全部股票時，已載入的完整 options 首筆優先於持股列表首筆。
+  it('prefers the first loaded stock option over the first holding', async () => {
+    const fixture = createTwoStockFixture(2)
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+    vi.spyOn(api.stocks, 'options').mockResolvedValue(fixture.options)
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse())
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+    closeTransactionModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('1')
+    wrapper.unmount()
+  })
+
+  // 驗證完整 options 尚無項目時，新增交易會回退目前持股列表首筆股票。
+  it('falls back to the first holding when stock options are empty', async () => {
+    const fixture = createTwoStockFixture()
+    const options = vi.spyOn(api.stocks, 'options').mockResolvedValue([])
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+    closeTransactionModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+
+    expect(options).toHaveBeenCalledTimes(1)
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('1')
+    wrapper.unmount()
+  })
+
+  // 驗證股票與 options 都沒有 ID 時，Ledger create event 不會開啟交易 Modal。
+  it('does not open a transaction modal without any stock id', async () => {
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(createEmptyStockListResponse())
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue({
+      ...createLedgerResponse(),
+      items: [],
+      total: 0,
+    })
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    wrapper.findComponent(StockTransactionLedger).vm.$emit('create')
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="stock-transaction-form"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="transaction-stock"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  // 驗證切回 Holdings 後頁首新增回復 options fallback，且不清空保留的 Ledger 股票篩選。
+  it('ignores the retained ledger filter for the holdings header entry', async () => {
+    const fixture = createTwoStockFixture()
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+    vi.spyOn(api.stocks, 'options').mockResolvedValue(fixture.options)
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse({
+      stockId: 2,
+      stockName: '聯發科',
+      symbol: '2454',
+      broker: '乙券商',
+    }))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-stock-filter"]').setValue('2')
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-holdings"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('1')
+    closeTransactionModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="ledger-stock-filter"]').element.value).toBe('2')
+    wrapper.unmount()
+  })
+
+  // 驗證持股列明確指定的股票與 Buy/Sell 型別優先於殘留 Ledger 篩選。
+  it('preserves explicit holding stock and transaction type after a ledger filter', async () => {
+    const fixture = createTwoStockFixture()
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+    vi.spyOn(api.stocks, 'options').mockResolvedValue(fixture.options)
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse({
+      stockId: 2,
+      stockName: '聯發科',
+      symbol: '2454',
+      broker: '乙券商',
+    }))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-stock-filter"]').setValue('2')
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-holdings"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="stock-buy-1"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('1')
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-type"]')?.value).toBe('Buy')
+    closeTransactionModal()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="stock-sell-1"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('1')
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-type"]')?.value).toBe('Sell')
+    wrapper.unmount()
+  })
+
+  // 驗證使用者手動改選股票後，非同步更新不會將選擇覆寫回 Ledger 篩選。
+  it('keeps a manually changed stock and submits its id', async () => {
+    const fixture = createTwoStockFixture()
+    const create = vi.spyOn(api.stocks.ledger, 'create').mockResolvedValue(createLedgerResponse().items[0])
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+    vi.spyOn(api.stocks, 'options').mockResolvedValue(fixture.options)
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse({
+      stockId: 2,
+      stockName: '聯發科',
+      symbol: '2454',
+      broker: '乙券商',
+    }))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-stock-filter"]').setValue('2')
+    await flushPromises()
+    await wrapper.get('[data-testid="new-stock-transaction"]').trigger('click')
+    await flushPromises()
+    const stockSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')
+    if (!stockSelect) throw new Error('Missing transaction stock select')
+    stockSelect.value = '1'
+    stockSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('1')
+    fillManualBuyTransaction()
+    const form = document.body.querySelector<HTMLFormElement>('[data-testid="stock-transaction-form"]')
+    if (!form) throw new Error('Missing transaction form')
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ stockId: 1, type: 'Buy' }))
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="ledger-stock-filter"]').element.value).toBe('2')
+    wrapper.unmount()
+  })
+
+  // 驗證 Ledger 篩選脈絡中的既有交易編輯仍使用交易自身的股票與型別。
+  it('keeps an edited transaction stock instead of applying the new default', async () => {
+    const fixture = createTwoStockFixture()
+    vi.spyOn(api.stocks, 'list').mockResolvedValue(fixture.stocks)
+    vi.spyOn(api.stocks, 'options').mockResolvedValue(fixture.options)
+    vi.spyOn(api.stocks.ledger, 'list').mockResolvedValue(createLedgerResponse({
+      stockId: 2,
+      stockName: '聯發科',
+      symbol: '2454',
+      broker: '乙券商',
+    }))
+
+    const wrapper = mountWithAppProviders(StocksPage, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="stock-tab-ledger"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-stock-filter"]').setValue('2')
+    await flushPromises()
+    // 保留真實 B 列表，再透過既有 edit event 注入 A 交易以區分新增預設與編輯資料。
+    wrapper.findComponent(StockTransactionLedger).vm.$emit('edit', createLedgerResponse({ stockId: 1, type: 'Sell' }).items[0])
+    await flushPromises()
+
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-stock"]')?.value).toBe('1')
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="transaction-type"]')?.value).toBe('Sell')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="ledger-stock-filter"]').element.value).toBe('2')
+    wrapper.unmount()
   })
 
   // 驗證持股列 Buy 快捷操作預選正確 StockId 與交易型別。

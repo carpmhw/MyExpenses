@@ -15,7 +15,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /app .
 EXPOSE 5000
-ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_HTTP_PORTS=5000
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV DataProtection__ApplicationName=MyExpenses
 ENV DataProtection__KeyDirectory=/app/keys
