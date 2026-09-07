@@ -160,7 +160,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
     mocked_page.route("**/api/transactions**", lambda route: route_json(route, {"items": [expense], "total": 1, "page": 1, "pageSize": 50}))
     mocked_page.route("**/api/installments**", lambda route: route_json(route, {"items": [installment], "total": 1, "page": 1, "pageSize": 50}))
 
-    for width, height in ((1920, 1080), (1440, 900), (1280, 800), (1279, 800), (1024, 768), (390, 844)):
+    for width, height in ((1920, 1080), (1536, 864), (1440, 900), (1366, 768), (1280, 800), (1279, 800), (1024, 768), (390, 844)):
         mocked_page.set_viewport_size({"width": width, "height": height})
         mocked_page.goto("/dashboard")
         expect(mocked_page.get_by_text("提款合計", exact=True)).to_be_visible()
@@ -189,6 +189,9 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             const creditSummary = creditRow.querySelector('div.flex-1');
             const periodLabel = creditRow.querySelector('span.bg-color-credit-bg');
             const periodCell = periodLabel.parentElement;
+            const creditTableHeader = [...credit.querySelectorAll('div')].find(element => element.classList.contains('uppercase'));
+            const creditHeaderNonSummaryCells = [...creditTableHeader.children].filter(child => child.textContent?.trim() !== '項目 / 摘要').map(box);
+            const creditNonSummaryCells = [...creditRow.children].filter(child => child !== creditSummary).map(box);
             const expenseDescription = cards[1].querySelector('div.cursor-pointer p.truncate');
             const headerChildren = headers.map(header => [...header.children].map(child => ({
                 ...box(child),
@@ -210,16 +213,25 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
                 creditTitle: box(creditTitle),
                 creditSubtitle: box(creditSubtitle),
                 creditSummary: box(creditSummary),
+                creditHeaderNonSummaryCells,
+                creditNonSummaryCells,
                 periodLabel: box(periodLabel),
                 periodCell: box(periodCell),
                 expenseDescription: box(expenseDescription),
                 expenseDescriptionClass: expenseDescription.className,
-                overflow: {document: document.documentElement.scrollWidth, body: document.body.scrollWidth},
+                overflow: {
+                    document: document.documentElement.scrollWidth,
+                    body: document.body.scrollWidth,
+                    container: (document.querySelector('main') ?? document.querySelector('div.flex-1.overflow-y-auto'))?.scrollWidth ?? 0,
+                    containerClientWidth: (document.querySelector('main') ?? document.querySelector('div.flex-1.overflow-y-auto'))?.clientWidth ?? 0,
+                },
             };
         }""")
         assert len(metrics["cards"]) == 3
         assert metrics["overflow"]["document"] <= width
         assert metrics["overflow"]["body"] <= width
+        assert metrics["overflow"]["containerClientWidth"] > 0
+        assert metrics["overflow"]["container"] <= metrics["overflow"]["containerClientWidth"]
         assert all(card["scrollWidth"] <= card["clientWidth"] for card in metrics["cards"])
         assert all(header["height"] >= 104 for header in metrics["headers"])
         assert metrics["headerOverlaps"] == [False, False, False], metrics
@@ -227,10 +239,19 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
         assert metrics["creditTitle"]["scrollWidth"] <= metrics["creditTitle"]["clientWidth"]
         assert metrics["creditSubtitle"]["scrollWidth"] <= metrics["creditSubtitle"]["clientWidth"]
         assert metrics["creditSummary"]["width"] > 0
+        assert len(metrics["creditHeaderNonSummaryCells"]) == 5
+        assert len(metrics["creditNonSummaryCells"]) == 5
+        assert all(abs(header_cell["left"] - row_cell["left"]) <= 1 for header_cell, row_cell in zip(metrics["creditHeaderNonSummaryCells"], metrics["creditNonSummaryCells"]))
         assert metrics["periodLabel"]["height"] <= 26, metrics
         assert metrics["periodLabel"]["right"] <= metrics["periodCell"]["right"] + 1, metrics
         assert "truncate" in metrics["expenseDescriptionClass"]
         assert metrics["expenseDescription"]["scrollWidth"] >= metrics["expenseDescription"]["clientWidth"]
+        non_summary_tops = {round(cell["top"], 1) for cell in metrics["creditNonSummaryCells"]}
+        if width < 640:
+            assert max(non_summary_tops) - min(non_summary_tops) <= 4, metrics
+            assert metrics["creditSummary"]["top"] >= max(cell["bottom"] for cell in metrics["creditNonSummaryCells"]), metrics
+        elif width >= 1280:
+            assert all(abs(header["height"] - 104) <= 1 for header in metrics["headers"]), metrics
         if width >= 1280:
             assert len({round(card["top"], 1) for card in metrics["cards"]}) == 1
             assert abs(metrics["cards"][0]["width"] - 340) < 1
