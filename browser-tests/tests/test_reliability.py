@@ -99,6 +99,148 @@ def test_dashboard_partial_failure(mocked_page: Page) -> None:
     expect(mocked_page.get_by_role("alert")).to_contain_text("Credit card transactions unavailable")
 
 
+# 驗證活動卡片在指定視窗、長摘要與大額金額下維持版面與內容可用性。
+def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
+    summary = {
+        "totalWithdrawals": 500000000,
+        "withdrawalCount": 1,
+        "totalExpenses": 500000000,
+        "expenseCount": 1,
+        "disposableBalance": 0,
+        "installmentDueAmount": 123456789,
+        "installmentDuePaymentCount": 1,
+        "activeInstallmentCount": 1,
+        "previousDisposableBalance": 0,
+        "baseCurrency": "TWD",
+        "exchangeRateUpdatedAt": None,
+        "exchangeRateIsStale": False,
+        "conversionAvailable": True,
+    }
+    withdrawal = {
+        "id": 1,
+        "amount": 500000000,
+        "date": "2026-08-01",
+        "description": "薪資",
+        "bankAccountId": 1,
+        "bankAccount": {
+            "id": 1,
+            "bankName": "測試銀行",
+            "accountNumber": "1234",
+            "accountType": "活期",
+            "balance": 500000000,
+            "currencyCode": "TWD",
+            "createdAt": "2026-08-01T00:00:00Z",
+            "updatedAt": "2026-08-01T00:00:00Z",
+        },
+    }
+    expense = {
+        "id": 2,
+        "type": "Expense",
+        "amount": 500000000,
+        "date": "2026-08-02",
+        "description": "大額支出",
+        "notes": None,
+        "categoryId": 1,
+        "paymentMethodId": None,
+        "createdAt": "2026-08-02T00:00:00Z",
+        "category": {"id": 1, "name": "餐飲", "type": "Expense", "icon": "", "color": "", "sortOrder": 1},
+        "paymentMethod": None,
+    }
+    installment = {
+        **INSTALLMENT,
+        "totalAmount": 123456789,
+        "periods": 1,
+        "perPeriod": 123456789,
+        "remainingPeriods": 1,
+        "description": "非常長的信用卡交易摘要",
+    }
+
+    mocked_page.route("**/api/reports/dashboard-summary**", lambda route: route_json(route, summary))
+    mocked_page.route("**/api/withdrawals**", lambda route: route_json(route, {"items": [withdrawal], "total": 1, "page": 1, "pageSize": 50}))
+    mocked_page.route("**/api/transactions**", lambda route: route_json(route, {"items": [expense], "total": 1, "page": 1, "pageSize": 50}))
+    mocked_page.route("**/api/installments**", lambda route: route_json(route, {"items": [installment], "total": 1, "page": 1, "pageSize": 50}))
+
+    for width, height in ((1920, 1080), (1440, 900), (1280, 800), (1279, 800), (1024, 768), (390, 844)):
+        mocked_page.set_viewport_size({"width": width, "height": height})
+        mocked_page.goto("/dashboard")
+        expect(mocked_page.get_by_text("提款合計", exact=True)).to_be_visible()
+        expect(mocked_page.get_by_text("1 期（一次付清）", exact=True)).to_be_visible()
+        metrics = mocked_page.evaluate("""() => {
+            const box = node => {
+                const rect = node.getBoundingClientRect();
+                return {
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    width: rect.width,
+                    height: rect.height,
+                    scrollWidth: node.scrollWidth,
+                    clientWidth: node.clientWidth,
+                };
+            };
+            const cards = [...document.querySelectorAll('[data-testid="dashboard-activity-card"]')];
+            const headers = cards.map(card => card.querySelector('[class*="from-color-"]'));
+            const creditHeader = headers[2];
+            const credit = cards[2];
+            const creditRow = credit.querySelector('div.cursor-pointer');
+            const creditTitle = [...creditHeader.querySelectorAll('p')].find(p => p.textContent?.trim() === '信用卡交易');
+            const creditSubtitle = [...creditHeader.querySelectorAll('p')].find(p => p.textContent?.trim() === 'Credit Card Transactions');
+            const creditSummary = creditRow.querySelector('div.flex-1');
+            const periodLabel = creditRow.querySelector('span.bg-color-credit-bg');
+            const periodCell = periodLabel.parentElement;
+            const expenseDescription = cards[1].querySelector('div.cursor-pointer p.truncate');
+            const headerChildren = headers.map(header => [...header.children].map(child => ({
+                ...box(child),
+                contentRight: child.getBoundingClientRect().left + child.scrollWidth,
+            })));
+            const overlaps = (first, second) => {
+                const firstRight = Math.max(first.right, first.contentRight ?? first.right);
+                const secondRight = Math.max(second.right, second.contentRight ?? second.right);
+                return firstRight > second.left && secondRight > first.left && first.bottom > second.top && second.bottom > first.top;
+            };
+            const headerOverlaps = headerChildren.map(children => children.some((child, index) => children.slice(index + 1).some(other => overlaps(child, other))));
+            const creditCells = [...creditRow.children].map(box);
+            const creditCellOverlaps = creditCells.some((cell, index) => creditCells.slice(index + 1).some(other => overlaps(cell, other)));
+            return {
+                cards: cards.map(box),
+                headers: headers.map(box),
+                headerOverlaps,
+                creditCellOverlaps,
+                creditTitle: box(creditTitle),
+                creditSubtitle: box(creditSubtitle),
+                creditSummary: box(creditSummary),
+                periodLabel: box(periodLabel),
+                periodCell: box(periodCell),
+                expenseDescription: box(expenseDescription),
+                expenseDescriptionClass: expenseDescription.className,
+                overflow: {document: document.documentElement.scrollWidth, body: document.body.scrollWidth},
+            };
+        }""")
+        assert len(metrics["cards"]) == 3
+        assert metrics["overflow"]["document"] <= width
+        assert metrics["overflow"]["body"] <= width
+        assert all(card["scrollWidth"] <= card["clientWidth"] for card in metrics["cards"])
+        assert all(header["height"] >= 104 for header in metrics["headers"])
+        assert metrics["headerOverlaps"] == [False, False, False], metrics
+        assert metrics["creditCellOverlaps"] is False, metrics
+        assert metrics["creditTitle"]["scrollWidth"] <= metrics["creditTitle"]["clientWidth"]
+        assert metrics["creditSubtitle"]["scrollWidth"] <= metrics["creditSubtitle"]["clientWidth"]
+        assert metrics["creditSummary"]["width"] > 0
+        assert metrics["periodLabel"]["height"] <= 26, metrics
+        assert metrics["periodLabel"]["right"] <= metrics["periodCell"]["right"] + 1, metrics
+        assert "truncate" in metrics["expenseDescriptionClass"]
+        assert metrics["expenseDescription"]["scrollWidth"] >= metrics["expenseDescription"]["clientWidth"]
+        if width >= 1280:
+            assert len({round(card["top"], 1) for card in metrics["cards"]}) == 1
+            assert abs(metrics["cards"][0]["width"] - 340) < 1
+            assert abs(metrics["cards"][1]["width"] / metrics["cards"][2]["width"] - 2 / 3) < 0.01
+            assert len({round(header["height"], 1) for header in metrics["headers"]}) == 1
+        else:
+            assert len({round(card["left"], 1) for card in metrics["cards"]}) == 1
+            assert metrics["cards"][0]["top"] < metrics["cards"][1]["top"] < metrics["cards"][2]["top"]
+
+
 # 驗證持股結構報表的延遲載入、組合篩選、空結果、快照缺少與行動版明細可存取。
 def test_stock_structure_report_filters_and_mobile_layout(mocked_page: Page) -> None:
     structure_requests: list[str] = []
