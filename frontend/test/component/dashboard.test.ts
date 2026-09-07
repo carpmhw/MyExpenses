@@ -5,6 +5,7 @@ import { api } from '../../src/api'
 import { createTestRouter } from '../support/render'
 import { deferred } from '../support/deferred'
 import type { Installment, Transaction, Withdrawal } from '../../src/types'
+import { formatMoney } from '../../src/utils/format'
 
 // 等待 Vue watcher 與非同步查詢完成目前排程。
 async function flushPromises(): Promise<void> {
@@ -320,16 +321,31 @@ describe('Dashboard reliability states', () => {
       expect(header.classes()).toContain('max-sm:flex-col')
       expect(header.classes()).toContain('max-sm:items-stretch')
       expect(header.classes()).toContain('max-sm:min-h-[148px]')
-      expect(header.classes()).toContain('xl:max-2xl:flex-col')
-      expect(header.classes()).toContain('xl:max-2xl:items-stretch')
-      expect(header.classes()).toContain('xl:max-2xl:min-h-[148px]')
+      expect(header.classes()).not.toContain('xl:max-2xl:flex-col')
+      expect(header.classes()).not.toContain('xl:max-2xl:items-stretch')
+      expect(header.classes()).not.toContain('xl:max-2xl:min-h-[148px]')
+      expect(header.element.children[0].classList.contains('flex-1')).toBe(true)
+      expect(header.element.children[0].classList.contains('min-w-0')).toBe(true)
+      expect(header.element.children[0].classList.contains('flex-none')).toBe(false)
+      expect(header.element.children[1].classList.contains('shrink-0')).toBe(true)
+      expect(header.element.children[1].classList.contains('text-right')).toBe(true)
+      expect(header.element.children[1].classList.contains('max-sm:self-end')).toBe(true)
+      expect(header.element.children[1].classList.contains('max-w-[35%]')).toBe(true)
+      expect(header.element.children[1].classList.contains('max-sm:max-w-full')).toBe(true)
+      expect(header.findAll('p').find(element => element.classes().includes('text-2xl'))?.classes()).toContain('leading-7')
     }
 
     const creditHeader = headers[2]
     const creditTitle = creditHeader.findAll('p').find(element => element.text() === '信用卡交易')
     const creditSubtitle = creditHeader.findAll('p').find(element => element.text() === 'Credit Card Transactions')
+    const creditDueLabel = creditHeader.findAll('p').find(element => element.text() === '本期應繳')
+    const creditDueAmount = creditHeader.findAll('p').find(element => element.text() === '$1,200.00')
     expect(creditTitle?.classes()).toContain('whitespace-nowrap')
     expect(creditSubtitle?.classes()).toContain('whitespace-nowrap')
+    expect(creditDueLabel).toBeDefined()
+    expect(creditDueLabel?.classes()).toContain('mt-1')
+    expect(creditDueAmount?.classes()).toContain('truncate')
+    expect(creditDueAmount?.attributes('title')).toBe('$1,200.00')
     expect(creditHeader.classes()).toContain('max-sm:flex-col')
     expect(creditHeader.classes()).toContain('max-sm:items-stretch')
     expect((creditHeader.element.children[1] as HTMLElement).classList.contains('shrink-0')).toBe(true)
@@ -337,18 +353,41 @@ describe('Dashboard reliability states', () => {
 
     const creditTableHeader = cards[2].findAll('div').find(element =>
       element.classes().includes('uppercase') && element.text().includes('項目 / 摘要'))
+    const creditGrid = 'grid-cols-[40px_minmax(0,1fr)_64px_96px_48px_64px]'
+    const compactCreditGrid = 'xl:max-2xl:grid-cols-[32px_minmax(0,1fr)_56px_96px_40px_56px]'
+    expect(creditTableHeader?.classes()).toContain('grid')
+    expect(creditTableHeader?.classes()).toContain(creditGrid)
+    expect(creditTableHeader?.classes()).toContain(compactCreditGrid)
+    expect(creditTableHeader?.classes()).toContain('max-sm:flex')
     expect(creditTableHeader?.classes()).toContain('max-sm:flex-wrap')
-    expect(creditTableHeader?.classes()).toContain('xl:max-2xl:flex-wrap')
+    expect(creditTableHeader?.classes()).not.toContain('xl:max-2xl:flex-wrap')
     const creditSummaryHeader = creditTableHeader?.findAll('span').find(element => element.text() === '項目 / 摘要')
     expect(creditSummaryHeader?.classes()).toContain('max-sm:order-last')
     expect(creditSummaryHeader?.classes()).toContain('max-sm:basis-full')
+    expect(creditTableHeader?.findAll('span').map(element => element.text())).toEqual(['日期', '項目 / 摘要', '總額', '期數', '已繳', '本期'])
 
     const creditRow = cards[2].find('div.cursor-pointer')
+    expect(creditRow.classes()).toContain('grid')
+    expect(creditRow.classes()).toContain(creditGrid)
+    expect(creditRow.classes()).toContain(compactCreditGrid)
+    expect(creditRow.classes()).toContain('max-sm:flex')
     expect(creditRow.classes()).toContain('max-sm:flex-wrap')
-    expect(creditRow.classes()).toContain('xl:max-2xl:flex-wrap')
-    const creditSummary = creditRow.findAll('div').find(element => element.classes().includes('flex-1'))
+    expect(creditRow.classes()).toContain('max-sm:gap-0.5')
+    expect(creditRow.classes()).not.toContain('xl:max-2xl:flex-wrap')
+    const creditSummary = creditRow.findAll('div').find(element => element.classes().includes('min-w-0'))
     expect(creditSummary?.classes()).toContain('max-sm:order-last')
     expect(creditSummary?.classes()).toContain('max-sm:basis-full')
+    expect(creditSummary?.find('p').attributes('title')).toBe('信用卡長摘要量測')
+    const expectedCreditAmount = formatMoney(activityInstallment.totalAmount)
+    const creditAmountCells = creditRow.findAll('span').filter(element => element.attributes('title') === expectedCreditAmount)
+    expect(creditAmountCells).toHaveLength(2)
+    for (const amountCell of creditAmountCells) {
+      expect(amountCell.classes()).toContain('truncate')
+    }
+
+    const expenseHeaderAmount = headers[1].findAll('p').find(element => element.text() === '$5,000.00')
+    expect(expenseHeaderAmount?.classes()).toContain('truncate')
+    expect(expenseHeaderAmount?.attributes('title')).toBe('$5,000.00')
   })
 
   // 驗證三張活動卡片的既有資料列導覽目標不受版面調整影響。
@@ -378,6 +417,10 @@ describe('Dashboard reliability states', () => {
     await cards[1].find('div.cursor-pointer').trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.path).toBe('/transactions')
+
+    await cards[2].find('div.cursor-pointer').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/installments')
 
     await cards[2].find('button').trigger('click')
     await flushPromises()
