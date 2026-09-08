@@ -160,7 +160,10 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
     mocked_page.route("**/api/transactions**", lambda route: route_json(route, {"items": [expense], "total": 1, "page": 1, "pageSize": 50}))
     mocked_page.route("**/api/installments**", lambda route: route_json(route, {"items": [installment], "total": 1, "page": 1, "pageSize": 50}))
 
-    for width, height in ((1920, 1080), (1536, 864), (1440, 900), (1366, 768), (1280, 800), (1279, 800), (1024, 768), (767, 800), (640, 800), (390, 844)):
+    credit_modes: set[bool] = set()
+    for theme, (width, height) in ((theme, viewport) for theme in ("light", "dark") for viewport in ((1920, 1080), (1704, 900), (1705, 900), (1605, 900), (1606, 900), (1536, 864), (1440, 900), (1366, 768), (1280, 800), (1279, 800), (1024, 768), (768, 800), (767, 800), (640, 800), (390, 844))):
+        mocked_page.goto("/login")
+        mocked_page.evaluate("theme => localStorage.setItem('darkMode', theme === 'dark' ? 'true' : 'false')", theme)
         mocked_page.set_viewport_size({"width": width, "height": height})
         mocked_page.goto("/dashboard")
         expect(mocked_page.get_by_text("提款合計", exact=True)).to_be_visible()
@@ -181,9 +184,20 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
         expect(credit_row_amounts).to_have_count(2)
         expect(credit_row_amounts.nth(0)).to_be_visible()
         expect(credit_row_amounts.nth(1)).to_be_visible()
-        expect(activity_cards.nth(2).get_by_text("項目 / 摘要", exact=True)).to_be_visible()
+        credit_card = activity_cards.nth(2)
+        credit_card_box = credit_card.bounding_box()
+        assert credit_card_box is not None
+        credit_table = credit_card.get_by_test_id("dashboard-credit-table")
+        credit_table_box = credit_table.bounding_box()
+        assert credit_table_box is not None
+        if credit_table_box["width"] <= 620:
+            expect(credit_card.locator(".dashboard-credit-cell-label").first).to_be_visible()
+        else:
+            expect(credit_card.get_by_test_id("dashboard-credit-header").get_by_text("項目 / 摘要", exact=True)).to_be_visible()
         metrics = mocked_page.evaluate("""() => {
+            // 讀取瀏覽器實際盒模型，讓視覺驗收不只依賴 DOM 文字存在。
             const box = node => {
+                if (!node) return null;
                 const rect = node.getBoundingClientRect();
                 return {
                     left: rect.left,
@@ -196,63 +210,176 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
                     clientWidth: node.clientWidth,
                 };
             };
+            // 讀取目標文字的 computed typography，避免舊的極小字級回歸。
+            const typography = node => {
+                if (!node) return null;
+                const computed = getComputedStyle(node);
+                return {
+                    fontSize: computed.fontSize,
+                    fontWeight: computed.fontWeight,
+                    lineHeight: computed.lineHeight,
+                };
+            };
+            // 解析瀏覽器實際回傳的十六進位或 rgb 色彩值。
+            const parseColor = value => {
+                const hex = value.trim().match(/^#([0-9a-f]{6})$/i);
+                if (hex) {
+                    return {
+                        red: Number.parseInt(hex[1].slice(0, 2), 16),
+                        green: Number.parseInt(hex[1].slice(2, 4), 16),
+                        blue: Number.parseInt(hex[1].slice(4, 6), 16),
+                        alpha: 1,
+                    };
+                }
+                const rgb = value.match(/rgba?\\(([^)]+)\\)/i);
+                if (!rgb) return null;
+                const channels = rgb[1].replaceAll(',', ' ').replaceAll('/', ' ').trim().split(/\\s+/);
+                return {
+                    red: Number.parseFloat(channels[0]),
+                    green: Number.parseFloat(channels[1]),
+                    blue: Number.parseFloat(channels[2]),
+                    alpha: channels[3] ? Number.parseFloat(channels[3]) : 1,
+                };
+            };
+            // 將半透明 gradient stop 合成到實際卡片背景上。
+            const compositeColor = (foreground, background) => ({
+                red: foreground.red * foreground.alpha + background.red * (1 - foreground.alpha),
+                green: foreground.green * foreground.alpha + background.green * (1 - foreground.alpha),
+                blue: foreground.blue * foreground.alpha + background.blue * (1 - foreground.alpha),
+                alpha: 1,
+            });
+            // 找到文字所在卡片的第一個不透明背景色。
+            const findSolidBackground = node => {
+                let current = node;
+                while (current) {
+                    const color = parseColor(getComputedStyle(current).backgroundColor);
+                    if (color && color.alpha > 0) return color;
+                    current = current.parentElement;
+                }
+                return parseColor(getComputedStyle(document.documentElement).getPropertyValue('--color-bg-app'));
+            };
+            // 使用相對亮度計算 WCAG 對比值。
+            const contrastRatio = (foreground, background) => {
+                const luminance = color => {
+                    const channels = [color.red, color.green, color.blue].map(channel => channel / 255).map(channel => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+                    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+                };
+                const foregroundLuminance = luminance(foreground);
+                const backgroundLuminance = luminance(background);
+                return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+            };
+            // 以文字的 solid ancestor 或 Header gradient 各 stop 計算最小實際對比。
+            const contrastFor = node => {
+                if (!node) return null;
+                const foreground = parseColor(getComputedStyle(node).color);
+                const header = node.closest('[data-testid="dashboard-activity-header"]');
+                if (header) {
+                    const base = findSolidBackground(header.parentElement);
+                    const stops = [...getComputedStyle(header).backgroundImage.matchAll(/rgba?\\([^)]*\\)/gi)].map(match => parseColor(match[0])).filter(Boolean);
+                    const backgrounds = stops.length ? stops.map(stop => compositeColor(stop, base)) : [base];
+                    return Math.min(...backgrounds.map(background => contrastRatio(foreground, background)));
+                }
+                return contrastRatio(foreground, findSolidBackground(node));
+            };
             const cards = [...document.querySelectorAll('[data-testid="dashboard-activity-card"]')];
-            const headers = cards.map(card => card.querySelector('[class*="from-color-"]'));
-            const creditHeader = headers[2];
+            const activityGrid = cards[0]?.parentElement;
+            const headers = cards.map(card => card.querySelector('[data-testid="dashboard-activity-header"]') ?? card.querySelector('[class*="from-color-"]'));
+            const headerAmounts = headers.map(header => header?.querySelector('[data-testid="dashboard-header-amount"]') ?? header?.querySelector('p[title]'));
             const credit = cards[2];
-            const creditRow = credit.querySelector('div.cursor-pointer');
-            const creditTitle = [...creditHeader.querySelectorAll('p')].find(p => p.textContent?.trim() === '信用卡交易');
-            const creditSubtitle = [...creditHeader.querySelectorAll('p')].find(p => p.textContent?.trim() === 'Credit Card Transactions');
-            const creditSummary = creditRow.querySelector('div.flex-1');
-            const creditSummaryText = creditSummary.querySelector('p');
-            const periodLabel = creditRow.querySelector('span.bg-color-credit-bg');
-            const periodCell = periodLabel.parentElement;
-            const creditTableHeader = [...credit.querySelectorAll('div')].find(element => element.classList.contains('uppercase'));
-            const creditHeaderSummary = [...creditTableHeader.children].find(child => child.textContent?.trim() === '項目 / 摘要');
-            const creditHeaderNonSummaryCells = [...creditTableHeader.children].filter(child => child.textContent?.trim() !== '項目 / 摘要').map(box);
-            const creditNonSummaryCells = [...creditRow.children].filter(child => child !== creditSummary).map(box);
-            const withdrawalRow = cards[0].querySelector('div.cursor-pointer');
-            const withdrawalAmount = [...withdrawalRow.querySelectorAll('span')].find(span => span.textContent?.trim() === '$500,000,000.00');
-            const withdrawalRowCells = [...withdrawalRow.children].map(box);
-            const expenseRow = cards[1].querySelector('div.cursor-pointer');
-            const expenseDescription = expenseRow.querySelector('p.truncate');
-            const expenseAmount = [...expenseRow.querySelectorAll('span')].find(span => span.textContent?.trim() === 'NT$ 500,000,000');
-            const expenseRowCells = [...expenseRow.children].map(box);
-            const headerChildren = headers.map(header => [...header.children].map(child => ({
+            const creditTable = credit?.querySelector('[data-testid="dashboard-credit-table"]') ?? credit;
+            const creditHeader = creditTable?.querySelector('[data-testid="dashboard-credit-header"]') ?? [...creditTable?.querySelectorAll('div') ?? []].find(element => element.classList.contains('uppercase'));
+            const creditRow = creditTable?.querySelector('[data-testid="dashboard-credit-row"]') ?? credit?.querySelector('div.cursor-pointer');
+            const creditTitle = [...headers[2]?.querySelectorAll('p') ?? []].find(p => p.textContent?.trim() === '信用卡交易');
+            const creditSubtitle = [...headers[2]?.querySelectorAll('p') ?? []].find(p => p.textContent?.trim() === 'Credit Card Transactions');
+            const creditSummary = creditRow?.querySelector('[data-credit-cell="description"]') ?? creditRow?.querySelector('div.flex-1');
+            const creditSummaryText = creditSummary?.querySelector('p');
+            const periodLabel = creditRow?.querySelector('[data-credit-value="period"]') ?? creditRow?.querySelector('span.bg-color-credit-bg');
+            const periodCell = periodLabel?.parentElement;
+            const creditDate = creditRow?.querySelector('[data-credit-role="date"]');
+            const creditPaid = creditRow?.querySelector('[data-credit-role="paid"]');
+            const creditTableHeader = creditHeader;
+            const creditHeaderSummary = [...creditTableHeader?.children ?? []].find(child => child.textContent?.trim() === '項目 / 摘要');
+            const creditHeaderNonSummaryCells = [...creditTableHeader?.children ?? []].filter(child => child.textContent?.trim() !== '項目 / 摘要').map(box);
+            const creditNonSummaryCells = [...creditRow?.children ?? []].filter(child => child !== creditSummary).map(box);
+            const withdrawalRow = cards[0]?.querySelector('div.cursor-pointer');
+            const withdrawalAmount = cards[0]?.querySelector('[data-testid="dashboard-withdrawal-amount"]') ?? [...withdrawalRow?.querySelectorAll('span') ?? []].find(span => span.textContent?.trim() === '$500,000,000.00');
+            const withdrawalRowCells = [...withdrawalRow?.children ?? []].map(box);
+            const expenseRow = cards[1]?.querySelector('div.cursor-pointer');
+            const expenseDescription = expenseRow?.querySelector('p.truncate');
+            const expenseCategory = [...expenseRow?.querySelectorAll('p') ?? []].find(p => p.textContent?.trim() === '餐飲');
+            const expenseAmount = cards[1]?.querySelector('[data-testid="dashboard-expense-amount"]') ?? [...expenseRow?.querySelectorAll('span') ?? []].find(span => span.textContent?.trim() === 'NT$ 500,000,000');
+            const expenseRowCells = [...expenseRow?.children ?? []].map(box);
+            const headerChildren = headers.map(header => [...header?.children ?? []].map(child => ({
                 ...box(child),
                 contentRight: child.getBoundingClientRect().left + child.scrollWidth,
             })));
-            const headerAmounts = headers.map(header => box([...header.querySelectorAll('p')].find(p => p.hasAttribute('title'))));
             const overlaps = (first, second) => {
                 const firstRight = Math.max(first.right, first.contentRight ?? first.right);
                 const secondRight = Math.max(second.right, second.contentRight ?? second.right);
                 return firstRight > second.left && secondRight > first.left && first.bottom > second.top && second.bottom > first.top;
             };
             const headerOverlaps = headerChildren.map(children => children.some((child, index) => children.slice(index + 1).some(other => overlaps(child, other))));
-            const creditCells = [...creditRow.children].map(box);
+            const creditCells = [...creditRow?.children ?? []].map(box);
             const creditCellOverlaps = creditCells.some((cell, index) => creditCells.slice(index + 1).some(other => overlaps(cell, other)));
             const withdrawalRowOverlaps = withdrawalRowCells.some((cell, index) => withdrawalRowCells.slice(index + 1).some(other => overlaps(cell, other)));
             const expenseRowOverlaps = expenseRowCells.some((cell, index) => expenseRowCells.slice(index + 1).some(other => overlaps(cell, other)));
+            const creditCellLabels = [...creditRow?.querySelectorAll('.dashboard-credit-cell-label') ?? []].map(label => ({
+                role: label.parentElement?.getAttribute('data-credit-cell'),
+                text: label.textContent?.trim(),
+                display: getComputedStyle(label).display,
+            }));
+            const creditDataOrder = [...creditRow?.querySelectorAll('[data-credit-role]') ?? []].map(cell => cell.getAttribute('data-credit-role'));
             return {
                 cards: cards.map(box),
                 headers: headers.map(box),
-                headerAmounts,
+                headerAmounts: headerAmounts.map(box),
+                headerTypography: headerAmounts.map(typography),
+                    withdrawalAmountTypography: typography(withdrawalAmount),
+                    expenseAmountTypography: typography(expenseAmount),
+                    expenseCategoryTypography: typography(expenseCategory),
+                    expenseDescriptionTypography: typography(expenseDescription),
+                    creditAmountTypography: {
+                        total: typography(creditRow?.querySelector('[data-credit-role="total"]') ?? creditRow?.children[2]),
+                        current: typography(creditRow?.querySelector('[data-credit-role="current"]') ?? creditRow?.children[5]),
+                    },
+                    creditDateTypography: typography(creditDate),
+                    creditMetaTypography: {
+                        label: typography(creditRow?.querySelector('.dashboard-credit-cell-label')),
+                        period: typography(periodLabel),
+                        paid: typography(creditPaid),
+                    },
+                    creditSummaryTypography: typography(creditSummaryText),
+                amountContrast: {
+                    headers: headerAmounts.map(contrastFor),
+                    withdrawal: contrastFor(withdrawalAmount),
+                    expense: contrastFor(expenseAmount),
+                    creditTotal: contrastFor(creditRow?.querySelector('[data-credit-role="total"]')),
+                    creditCurrent: contrastFor(creditRow?.querySelector('[data-credit-role="current"]')),
+                },
                 headerOverlaps,
                 creditCellOverlaps,
                 creditTitle: box(creditTitle),
                 creditSubtitle: box(creditSubtitle),
                 creditSummary: box(creditSummary),
                 creditSummaryText: box(creditSummaryText),
-                creditSummaryTextClass: creditSummaryText.className,
+                creditSummaryTextClass: creditSummaryText?.className ?? '',
                 creditHeaderSummary: box(creditHeaderSummary),
                 creditHeaderNonSummaryCells,
                 creditNonSummaryCells,
+                creditCellLabels,
+                creditDataOrder,
+                    creditHeaderDisplay: creditTableHeader ? getComputedStyle(creditTableHeader).display : '',
+                    creditRowDisplay: creditRow ? getComputedStyle(creditRow).display : '',
+                    creditNarrow: (creditTable?.getBoundingClientRect().width ?? 0) <= 620,
+                    creditTableWidth: creditTable?.getBoundingClientRect().width ?? 0,
+                    darkMode: document.documentElement.classList.contains('dark'),
+                    activityGridWidth: activityGrid?.getBoundingClientRect().width ?? 0,
                 withdrawalAmount: box(withdrawalAmount),
                 withdrawalRowOverlaps,
                 periodLabel: box(periodLabel),
                 periodCell: box(periodCell),
                 expenseDescription: box(expenseDescription),
-                expenseDescriptionClass: expenseDescription.className,
+                expenseDescriptionClass: expenseDescription?.className ?? '',
                 expenseAmount: box(expenseAmount),
                 expenseRowOverlaps,
                 overflow: {
@@ -264,6 +391,8 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             };
             }""")
         assert len(metrics["cards"]) == 3
+        assert metrics["darkMode"] == (theme == "dark"), metrics
+        credit_modes.add(metrics["creditNarrow"])
         assert metrics["overflow"]["document"] <= width
         assert metrics["overflow"]["body"] <= width
         assert metrics["overflow"]["containerClientWidth"] > 0
@@ -271,33 +400,91 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
         assert all(card["scrollWidth"] <= card["clientWidth"] for card in metrics["cards"])
         assert all(header["height"] >= 104 for header in metrics["headers"])
         assert all(amount["scrollWidth"] <= amount["clientWidth"] for amount in metrics["headerAmounts"]), metrics
+        assert all(float(amount["fontSize"].removesuffix("px")) == 18 for amount in metrics["headerTypography"]), metrics
+        assert all(int(amount["fontWeight"]) == 700 for amount in metrics["headerTypography"]), metrics
+        assert all(float(amount["lineHeight"].removesuffix("px")) == 22.5 for amount in metrics["headerTypography"]), metrics
+        assert float(metrics["withdrawalAmountTypography"]["fontSize"].removesuffix("px")) == 18, metrics
+        assert float(metrics["expenseAmountTypography"]["fontSize"].removesuffix("px")) == 18, metrics
+        assert float(metrics["creditAmountTypography"]["total"]["fontSize"].removesuffix("px")) == 16, metrics
+        assert float(metrics["creditAmountTypography"]["current"]["fontSize"].removesuffix("px")) == 16, metrics
+        assert int(metrics["withdrawalAmountTypography"]["fontWeight"]) == 600, metrics
+        assert int(metrics["expenseAmountTypography"]["fontWeight"]) == 600, metrics
+        assert int(metrics["creditAmountTypography"]["total"]["fontWeight"]) == 600, metrics
+        assert int(metrics["creditAmountTypography"]["current"]["fontWeight"]) == 600, metrics
+        assert float(metrics["withdrawalAmountTypography"]["lineHeight"].removesuffix("px")) == 22.5, metrics
+        assert float(metrics["expenseAmountTypography"]["lineHeight"].removesuffix("px")) == 22.5, metrics
+        assert float(metrics["creditAmountTypography"]["total"]["lineHeight"].removesuffix("px")) == 20, metrics
+        assert float(metrics["creditAmountTypography"]["current"]["lineHeight"].removesuffix("px")) == 20, metrics
+        assert float(metrics["creditDateTypography"]["fontSize"].removesuffix("px")) == 14, metrics
+        assert int(metrics["creditDateTypography"]["fontWeight"]) == 400, metrics
+        assert float(metrics["creditDateTypography"]["lineHeight"].removesuffix("px")) == 20, metrics
+        assert float(metrics["expenseCategoryTypography"]["fontSize"].removesuffix("px")) == 14, metrics
+        assert int(metrics["expenseCategoryTypography"]["fontWeight"]) == 400, metrics
+        assert float(metrics["expenseCategoryTypography"]["lineHeight"].removesuffix("px")) == 20, metrics
+        assert float(metrics["expenseDescriptionTypography"]["fontSize"].removesuffix("px")) == 16, metrics
+        assert int(metrics["expenseDescriptionTypography"]["fontWeight"]) == 600, metrics
+        assert float(metrics["expenseDescriptionTypography"]["lineHeight"].removesuffix("px")) == 24, metrics
+        assert float(metrics["creditSummaryTypography"]["fontSize"].removesuffix("px")) == 16, metrics
+        assert int(metrics["creditSummaryTypography"]["fontWeight"]) == 600, metrics
+        assert float(metrics["creditSummaryTypography"]["lineHeight"].removesuffix("px")) == 24, metrics
+        for meta_typography in (metrics["creditMetaTypography"]["period"], metrics["creditMetaTypography"]["paid"]):
+            assert float(meta_typography["fontSize"].removesuffix("px")) == 13, metrics
+            assert int(meta_typography["fontWeight"]) == 500, metrics
+            assert float(meta_typography["lineHeight"].removesuffix("px")) == 18.2, metrics
+        if metrics["creditNarrow"]:
+            assert float(metrics["creditMetaTypography"]["label"]["fontSize"].removesuffix("px")) == 13, metrics
+            assert int(metrics["creditMetaTypography"]["label"]["fontWeight"]) == 500, metrics
+            assert float(metrics["creditMetaTypography"]["label"]["lineHeight"].removesuffix("px")) == 18.2, metrics
+        assert all(contrast >= 4.5 for contrast in metrics["amountContrast"]["headers"]), metrics["amountContrast"]
+        assert metrics["amountContrast"]["withdrawal"] >= 4.5, metrics["amountContrast"]
+        assert metrics["amountContrast"]["expense"] >= 4.5, metrics["amountContrast"]
+        assert metrics["amountContrast"]["creditTotal"] >= 4.5, metrics["amountContrast"]
+        assert metrics["amountContrast"]["creditCurrent"] >= 4.5, metrics["amountContrast"]
         assert metrics["headerOverlaps"] == [False, False, False], metrics
         assert metrics["creditCellOverlaps"] is False, metrics
         assert metrics["creditTitle"]["scrollWidth"] <= metrics["creditTitle"]["clientWidth"]
         assert metrics["creditSubtitle"]["scrollWidth"] <= metrics["creditSubtitle"]["clientWidth"]
         assert metrics["creditSummary"]["width"] >= 32, metrics
         assert "truncate" in metrics["creditSummaryTextClass"]
-        assert metrics["creditHeaderSummary"]["width"] >= 48, metrics
-        assert metrics["creditHeaderSummary"]["scrollWidth"] <= metrics["creditHeaderSummary"]["clientWidth"], metrics
-        assert all(cell["scrollWidth"] <= cell["clientWidth"] for cell in metrics["creditHeaderNonSummaryCells"] + metrics["creditNonSummaryCells"]), metrics
+        assert [label["role"] for label in metrics["creditCellLabels"]] == ["date", "description", "total", "period", "paid", "current"], metrics
+        assert [label["text"] for label in metrics["creditCellLabels"]] == ["日期", "項目 / 摘要", "總額", "期數", "已繳", "本期"], metrics
+        if metrics["creditNarrow"]:
+            assert all(cell["scrollWidth"] <= cell["clientWidth"] for cell in metrics["creditNonSummaryCells"]), metrics
+        else:
+            assert metrics["creditHeaderSummary"]["width"] >= 48, metrics
+            assert metrics["creditHeaderSummary"]["scrollWidth"] <= metrics["creditHeaderSummary"]["clientWidth"], metrics
+            assert all(cell["scrollWidth"] <= cell["clientWidth"] for cell in metrics["creditHeaderNonSummaryCells"] + metrics["creditNonSummaryCells"]), metrics
         assert metrics["withdrawalAmount"]["scrollWidth"] <= metrics["withdrawalAmount"]["clientWidth"], metrics
         assert metrics["withdrawalRowOverlaps"] is False, metrics
         assert metrics["expenseAmount"]["scrollWidth"] <= metrics["expenseAmount"]["clientWidth"], metrics
         assert metrics["expenseRowOverlaps"] is False, metrics
         assert len(metrics["creditHeaderNonSummaryCells"]) == 5
         assert len(metrics["creditNonSummaryCells"]) == 5
-        assert all(abs(header_cell["left"] - row_cell["left"]) <= 1 for header_cell, row_cell in zip(metrics["creditHeaderNonSummaryCells"], metrics["creditNonSummaryCells"]))
+        if not metrics["creditNarrow"]:
+            assert all(abs(header_cell["left"] - row_cell["left"]) <= 1 for header_cell, row_cell in zip(metrics["creditHeaderNonSummaryCells"], metrics["creditNonSummaryCells"])), metrics
+        assert metrics["creditDataOrder"] == ["date", "description", "total", "period", "paid", "current"], metrics
+        if metrics["creditNarrow"]:
+            assert metrics["creditHeaderDisplay"] == "none", metrics
+            assert len(metrics["creditCellLabels"]) == 6, metrics
+            assert all(label["display"] != "none" for label in metrics["creditCellLabels"]), metrics
+        else:
+            assert metrics["creditHeaderDisplay"] == "grid", metrics
+            assert all(label["display"] == "none" for label in metrics["creditCellLabels"]), metrics
         assert metrics["periodLabel"]["height"] <= 26, metrics
         assert metrics["periodLabel"]["right"] <= metrics["periodCell"]["right"] + 1, metrics
         assert "truncate" in metrics["expenseDescriptionClass"]
         if width != 1279:
             assert metrics["expenseDescription"]["scrollWidth"] > metrics["expenseDescription"]["clientWidth"], metrics
-        non_summary_tops = {round(cell["top"], 1) for cell in metrics["creditNonSummaryCells"]}
         if width < 640:
-            assert max(non_summary_tops) - min(non_summary_tops) <= 4, metrics
-            assert metrics["creditSummary"]["top"] >= max(cell["bottom"] for cell in metrics["creditNonSummaryCells"]), metrics
+            non_summary_cells = metrics["creditNonSummaryCells"]
+            assert abs(non_summary_cells[0]["top"] - non_summary_cells[1]["top"]) <= 4, metrics
+            assert abs(non_summary_cells[3]["top"] - non_summary_cells[4]["top"]) <= 4, metrics
+            assert metrics["creditSummary"]["top"] >= max(non_summary_cells[0]["bottom"], non_summary_cells[1]["bottom"]), metrics
+            assert non_summary_cells[2]["top"] >= metrics["creditSummary"]["bottom"], metrics
+            assert min(non_summary_cells[3]["top"], non_summary_cells[4]["top"]) >= non_summary_cells[2]["bottom"], metrics
         elif width >= 1280:
-            assert all(abs(header["height"] - 104) <= 1 for header in metrics["headers"]), metrics
+            expected_header_height = 148 if metrics["activityGridWidth"] <= 1100 else 104
+            assert all(abs(header["height"] - expected_header_height) <= 1 for header in metrics["headers"]), metrics
         if width >= 1280:
             assert len({round(card["top"], 1) for card in metrics["cards"]}) == 1
             assert abs(metrics["cards"][0]["width"] - 340) < 1
@@ -306,6 +493,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
         else:
             assert len({round(card["left"], 1) for card in metrics["cards"]}) == 1
             assert metrics["cards"][0]["top"] < metrics["cards"][1]["top"] < metrics["cards"][2]["top"]
+    assert credit_modes == {True, False}
 
 
 # 驗證持股結構報表的延遲載入、組合篩選、空結果、快照缺少與行動版明細可存取。
