@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { api } from '../../src/api'
 import WithdrawalsPage from '../../src/pages/withdrawals/index.vue'
 import ConfirmDialog from '../../src/components/ui/ConfirmDialog.vue'
+import Icon from '../../src/components/ui/Icon.vue'
 import type { BankAccountListResponse, Withdrawal, WithdrawalListResponse } from '../../src/types'
 import { createTestRouter, mountWithAppProviders } from '../support/render'
 
@@ -190,7 +191,12 @@ describe('withdrawal query reliability', () => {
     })
     await flushPromises()
 
-    await wrapper.findAll('button').find(button => button.find('svg.lucide-trash-2').exists())!.trigger('click')
+    const deleteButton = wrapper.findAll('button').find(button => {
+      const icon = button.findComponent(Icon)
+      return icon.exists() && icon.props('name') === 'trash-2'
+    })
+    expect(deleteButton, 'withdrawal delete button should be rendered').toBeDefined()
+    await deleteButton!.trigger('click')
     wrapper.findComponent(ConfirmDialog).vm.$emit('confirm')
     await flushPromises()
 
