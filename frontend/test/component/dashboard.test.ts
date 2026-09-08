@@ -352,11 +352,11 @@ describe('Dashboard reliability states', () => {
       expect(header.element.children[1].classList.contains('max-sm:max-w-full')).toBe(false)
       const headerAmount = header.findAll('p').find(element => element.attributes('title'))
       expect(headerAmount?.classes()).toContain('whitespace-nowrap')
-      expect(headerAmount?.classes()).toContain('text-xl')
-      expect(headerAmount?.classes()).toContain('leading-7')
-      expect(headerAmount?.classes()).toContain('font-bold')
+      expect(headerAmount?.classes()).toContain('text-amount-total')
+      expect(headerAmount?.classes()).toContain('font-amount-total')
       expect(headerAmount?.classes()).toContain('tabular-nums')
-      expect(headerAmount?.classes()).not.toContain('text-2xl')
+      expect(headerAmount?.classes()).not.toContain('text-xl')
+      expect(headerAmount?.classes()).not.toContain('xl:max-2xl:text-[10px]')
       expect(headerAmount?.classes()).not.toContain('truncate')
     }
 
@@ -370,79 +370,56 @@ describe('Dashboard reliability states', () => {
     expect(creditDueLabel).toBeDefined()
     expect(creditDueLabel?.classes()).toContain('mt-1')
     expect(creditDueAmount?.classes()).toContain('whitespace-nowrap')
+    expect(creditDueAmount?.classes()).toContain('text-amount-total')
+    expect(creditDueAmount?.classes()).toContain('font-amount-total')
     expect(creditDueAmount?.classes()).toContain('tabular-nums')
     expect(creditDueAmount?.classes()).not.toContain('truncate')
     expect(creditDueAmount?.attributes('title')).toBe('$1,855.00')
     expect(creditHeader.classes()).toContain('max-sm:flex-col')
     expect(creditHeader.classes()).toContain('max-sm:items-stretch')
-    expect((creditHeader.element.children[1] as HTMLElement).classList.contains('shrink-0')).toBe(true)
+    const creditHeaderSummary = creditHeader.element.children[1] as HTMLElement
+    expect(creditHeaderSummary.classList.contains('shrink-0')).toBe(true)
     expect((creditHeader.element.children[1] as HTMLElement).classList.contains('max-sm:self-end')).toBe(true)
+    const creditViewAll = creditHeader.find('button')
+    expect(creditViewAll.classes()).toContain('min-w-max')
+    expect(creditViewAll.classes()).toContain('whitespace-nowrap')
     expect(creditHeader.text()).toContain('$1,855.00')
 
-    const creditTableHeader = cards[2].findAll('div').find(element =>
-      element.classes().includes('uppercase') && element.text().includes('項目 / 摘要'))
-    const creditGrid = 'grid-cols-[44px_minmax(0,1fr)_80px_112px_48px_80px]'
+    const creditTable = cards[2].find('[data-testid="dashboard-credit-table"]')
+    expect(creditTable.exists()).toBe(true)
+    const creditTableHeader = creditTable.find('[data-testid="dashboard-credit-header"]')
+    const creditGrid = 'dashboard-credit-grid'
     expect(creditTableHeader?.classes()).toContain('grid')
     expect(creditTableHeader?.classes()).toContain(creditGrid)
-    expect(creditTableHeader?.classes()).toContain('gap-2')
-    expect(creditTableHeader?.classes()).toContain('px-5')
-    expect(creditTableHeader?.classes()).toContain('max-sm:flex')
-    expect(creditTableHeader?.classes()).toContain('max-sm:flex-wrap')
-    expect(creditTableHeader?.classes()).not.toContain('xl:max-2xl:flex-wrap')
-    expect(creditTableHeader?.classes()).not.toContain('xl:max-2xl:grid-cols-[32px_minmax(0,1fr)_56px_96px_40px_56px]')
     const creditSummaryHeader = creditTableHeader?.findAll('span').find(element => element.text() === '項目 / 摘要')
     expect(creditSummaryHeader?.classes()).toContain('whitespace-nowrap')
-    expect(creditSummaryHeader?.classes()).toContain('max-sm:order-last')
-    expect(creditSummaryHeader?.classes()).toContain('max-sm:basis-full')
     expect(creditTableHeader?.findAll('span').map(element => element.text())).toEqual(['日期', '項目 / 摘要', '總額', '期數', '已繳', '本期'])
 
-    const creditRow = cards[2].find('div.cursor-pointer')
+    const creditRow = creditTable.find('[data-testid="dashboard-credit-row"]')
     expect(creditRow.classes()).toContain('grid')
     expect(creditRow.classes()).toContain(creditGrid)
-    expect(creditRow.classes()).toContain('gap-2')
-    expect(creditRow.classes()).toContain('px-5')
-    expect(creditRow.classes()).toContain('max-sm:flex')
-    expect(creditRow.classes()).toContain('max-sm:flex-wrap')
-    expect(creditRow.classes()).toContain('max-sm:gap-0.5')
-    expect(creditRow.classes()).not.toContain('xl:max-2xl:flex-wrap')
-    expect(creditRow.classes()).not.toContain('xl:max-2xl:grid-cols-[32px_minmax(0,1fr)_56px_96px_40px_56px]')
-    const responsiveCreditClasses = [
-      'sm:max-md:grid-cols-[44px_minmax(0,1fr)_96px_112px_48px_120px]',
-      'sm:max-md:gap-1',
-      'md:grid-cols-[44px_minmax(0,1fr)_96px_112px_48px_120px]',
-      'xl:max-2xl:grid-cols-[32px_minmax(0,1fr)_68px_88px_32px_72px]',
-      'xl:max-2xl:gap-px',
-      'xl:max-2xl:px-2',
-      '2xl:grid-cols-[44px_minmax(0,1fr)_96px_112px_48px_120px]',
-      '2xl:gap-0.5',
-      '2xl:px-2',
-    ]
-    for (const className of responsiveCreditClasses) {
-      expect(creditTableHeader?.classes()).toContain(className)
-      expect(creditRow.classes()).toContain(className)
-    }
-    expect(creditRow.classes()).toEqual(expect.arrayContaining(
-      creditTableHeader?.classes().filter(className => ['grid', creditGrid, 'gap-2', 'px-5'].includes(className)) ?? [],
-    ))
-    const creditSummary = creditRow.findAll('div').find(element => element.classes().includes('min-w-0'))
-    expect(creditSummary?.classes()).toContain('max-sm:order-last')
-    expect(creditSummary?.classes()).toContain('max-sm:basis-full')
+    expect(creditTableHeader?.classes()).not.toContain('xl:max-2xl:grid-cols-[32px_minmax(0,1fr)_56px_96px_40px_56px]')
+    const creditSummary = creditRow.find('[data-credit-cell="description"]')
+    expect(creditSummary?.classes()).toContain('dashboard-credit-cell')
     expect(creditSummary?.find('p').classes()).toContain('truncate')
     expect(creditSummary?.find('p').attributes('title')).toBe(activityInstallment.description)
     const expectedCreditAmount = formatMoney(activityInstallment.totalAmount)
-    const creditAmountCells = creditRow.findAll('span').filter(element => element.attributes('title') === expectedCreditAmount)
+    const creditAmountCells = creditRow.findAll('[data-credit-role="total"], [data-credit-role="current"]').filter(element => element.attributes('title') === expectedCreditAmount)
     expect(creditAmountCells).toHaveLength(2)
     for (const amountCell of creditAmountCells) {
       expect(amountCell.classes()).toContain('whitespace-nowrap')
+      expect(amountCell.classes()).toContain('text-amount-secondary')
+      expect(amountCell.classes()).toContain('font-amount-secondary')
       expect(amountCell.classes()).toContain('tabular-nums')
       expect(amountCell.classes()).not.toContain('truncate')
     }
-    const creditDate = creditRow.findAll('span').find(element => element.text() === '08/03')
+    const creditDate = creditRow.find('[data-credit-value="date"]')
     expect(creditDate?.classes()).toContain('whitespace-nowrap')
     expect(creditDate?.classes()).toContain('tabular-nums')
     expect(creditDate?.classes()).not.toContain('truncate')
-    const creditPeriod = creditRow.findAll('span').find(element => element.text() === '1 期（一次付清）')
+    const creditPeriod = creditRow.find('[data-credit-value="period"]')
     expect(creditPeriod).toBeDefined()
+    expect(creditPeriod?.classes()).toContain('text-amount-meta')
     const creditProgress = creditRow.findAll('span').find(element => element.text() === '0/1')
     expect(creditProgress?.classes()).toContain('whitespace-nowrap')
     expect(creditProgress?.classes()).toContain('tabular-nums')
@@ -460,9 +437,12 @@ describe('Dashboard reliability states', () => {
     expect(expenseDescription?.classes()).toContain('truncate')
     const expenseAmount = expenseRow.findAll('span').find(element => element.text() === formatMoney(activityExpense.amount))
     expect(expenseAmount?.classes()).toContain('shrink-0')
-    expect(expenseAmount?.classes()).toContain('w-32')
+    expect(expenseAmount?.classes()).toContain('min-w-max')
+    expect(expenseAmount?.classes()).toContain('text-amount-primary')
+    expect(expenseAmount?.classes()).toContain('font-amount-primary')
     expect(expenseAmount?.classes()).toContain('whitespace-nowrap')
     expect(expenseAmount?.classes()).toContain('tabular-nums')
+    expect(expenseAmount?.classes()).not.toContain('w-32')
     expect(expenseAmount?.classes()).not.toContain('truncate')
   })
 
