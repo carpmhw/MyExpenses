@@ -138,7 +138,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
         "type": "Expense",
         "amount": 500000000,
         "date": "2026-08-02",
-        "description": "大額支出",
+        "description": "非常長的支出摘要用於驗證描述可以截斷但金額必須完整顯示且不會推擠相鄰欄位這是一段額外文字",
         "notes": None,
         "categoryId": 1,
         "paymentMethodId": None,
@@ -160,11 +160,28 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
     mocked_page.route("**/api/transactions**", lambda route: route_json(route, {"items": [expense], "total": 1, "page": 1, "pageSize": 50}))
     mocked_page.route("**/api/installments**", lambda route: route_json(route, {"items": [installment], "total": 1, "page": 1, "pageSize": 50}))
 
-    for width, height in ((1920, 1080), (1536, 864), (1440, 900), (1366, 768), (1280, 800), (1279, 800), (1024, 768), (390, 844)):
+    for width, height in ((1920, 1080), (1536, 864), (1440, 900), (1366, 768), (1280, 800), (1279, 800), (1024, 768), (767, 800), (640, 800), (390, 844)):
         mocked_page.set_viewport_size({"width": width, "height": height})
         mocked_page.goto("/dashboard")
         expect(mocked_page.get_by_text("提款合計", exact=True)).to_be_visible()
         expect(mocked_page.get_by_text("1 期（一次付清）", exact=True)).to_be_visible()
+        activity_cards = mocked_page.get_by_test_id("dashboard-activity-card")
+        expect(activity_cards.nth(0).locator('p[title="$500,000,000.00"]')).to_be_visible()
+        expect(activity_cards.nth(1).locator('p[title="$500,000,000.00"]')).to_be_visible()
+        expect(activity_cards.nth(2).locator('p[title="$123,456,789.00"]')).to_be_visible()
+        expect(activity_cards.nth(0).locator('p[title="$500,000,000.00"]')).to_have_text("$500,000,000.00")
+        expect(activity_cards.nth(1).locator('p[title="$500,000,000.00"]')).to_have_text("$500,000,000.00")
+        expect(activity_cards.nth(2).locator('p[title="$123,456,789.00"]')).to_have_text("$123,456,789.00")
+        withdrawal_row = activity_cards.nth(0).locator("div.cursor-pointer")
+        expect(withdrawal_row.get_by_text("$500,000,000.00", exact=True)).to_be_visible()
+        expense_row = activity_cards.nth(1).locator("div.cursor-pointer")
+        expect(expense_row.get_by_text("NT$ 500,000,000", exact=True)).to_be_visible()
+        credit_row = activity_cards.nth(2).locator("div.cursor-pointer")
+        credit_row_amounts = credit_row.get_by_text("NT$ 123,456,789", exact=True)
+        expect(credit_row_amounts).to_have_count(2)
+        expect(credit_row_amounts.nth(0)).to_be_visible()
+        expect(credit_row_amounts.nth(1)).to_be_visible()
+        expect(activity_cards.nth(2).get_by_text("項目 / 摘要", exact=True)).to_be_visible()
         metrics = mocked_page.evaluate("""() => {
             const box = node => {
                 const rect = node.getBoundingClientRect();
@@ -187,16 +204,25 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             const creditTitle = [...creditHeader.querySelectorAll('p')].find(p => p.textContent?.trim() === '信用卡交易');
             const creditSubtitle = [...creditHeader.querySelectorAll('p')].find(p => p.textContent?.trim() === 'Credit Card Transactions');
             const creditSummary = creditRow.querySelector('div.flex-1');
+            const creditSummaryText = creditSummary.querySelector('p');
             const periodLabel = creditRow.querySelector('span.bg-color-credit-bg');
             const periodCell = periodLabel.parentElement;
             const creditTableHeader = [...credit.querySelectorAll('div')].find(element => element.classList.contains('uppercase'));
+            const creditHeaderSummary = [...creditTableHeader.children].find(child => child.textContent?.trim() === '項目 / 摘要');
             const creditHeaderNonSummaryCells = [...creditTableHeader.children].filter(child => child.textContent?.trim() !== '項目 / 摘要').map(box);
             const creditNonSummaryCells = [...creditRow.children].filter(child => child !== creditSummary).map(box);
-            const expenseDescription = cards[1].querySelector('div.cursor-pointer p.truncate');
+            const withdrawalRow = cards[0].querySelector('div.cursor-pointer');
+            const withdrawalAmount = [...withdrawalRow.querySelectorAll('span')].find(span => span.textContent?.trim() === '$500,000,000.00');
+            const withdrawalRowCells = [...withdrawalRow.children].map(box);
+            const expenseRow = cards[1].querySelector('div.cursor-pointer');
+            const expenseDescription = expenseRow.querySelector('p.truncate');
+            const expenseAmount = [...expenseRow.querySelectorAll('span')].find(span => span.textContent?.trim() === 'NT$ 500,000,000');
+            const expenseRowCells = [...expenseRow.children].map(box);
             const headerChildren = headers.map(header => [...header.children].map(child => ({
                 ...box(child),
                 contentRight: child.getBoundingClientRect().left + child.scrollWidth,
             })));
+            const headerAmounts = headers.map(header => box([...header.querySelectorAll('p')].find(p => p.hasAttribute('title'))));
             const overlaps = (first, second) => {
                 const firstRight = Math.max(first.right, first.contentRight ?? first.right);
                 const secondRight = Math.max(second.right, second.contentRight ?? second.right);
@@ -205,20 +231,30 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             const headerOverlaps = headerChildren.map(children => children.some((child, index) => children.slice(index + 1).some(other => overlaps(child, other))));
             const creditCells = [...creditRow.children].map(box);
             const creditCellOverlaps = creditCells.some((cell, index) => creditCells.slice(index + 1).some(other => overlaps(cell, other)));
+            const withdrawalRowOverlaps = withdrawalRowCells.some((cell, index) => withdrawalRowCells.slice(index + 1).some(other => overlaps(cell, other)));
+            const expenseRowOverlaps = expenseRowCells.some((cell, index) => expenseRowCells.slice(index + 1).some(other => overlaps(cell, other)));
             return {
                 cards: cards.map(box),
                 headers: headers.map(box),
+                headerAmounts,
                 headerOverlaps,
                 creditCellOverlaps,
                 creditTitle: box(creditTitle),
                 creditSubtitle: box(creditSubtitle),
                 creditSummary: box(creditSummary),
+                creditSummaryText: box(creditSummaryText),
+                creditSummaryTextClass: creditSummaryText.className,
+                creditHeaderSummary: box(creditHeaderSummary),
                 creditHeaderNonSummaryCells,
                 creditNonSummaryCells,
+                withdrawalAmount: box(withdrawalAmount),
+                withdrawalRowOverlaps,
                 periodLabel: box(periodLabel),
                 periodCell: box(periodCell),
                 expenseDescription: box(expenseDescription),
                 expenseDescriptionClass: expenseDescription.className,
+                expenseAmount: box(expenseAmount),
+                expenseRowOverlaps,
                 overflow: {
                     document: document.documentElement.scrollWidth,
                     body: document.body.scrollWidth,
@@ -226,7 +262,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
                     containerClientWidth: (document.querySelector('main') ?? document.querySelector('div.flex-1.overflow-y-auto'))?.clientWidth ?? 0,
                 },
             };
-        }""")
+            }""")
         assert len(metrics["cards"]) == 3
         assert metrics["overflow"]["document"] <= width
         assert metrics["overflow"]["body"] <= width
@@ -234,18 +270,28 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
         assert metrics["overflow"]["container"] <= metrics["overflow"]["containerClientWidth"]
         assert all(card["scrollWidth"] <= card["clientWidth"] for card in metrics["cards"])
         assert all(header["height"] >= 104 for header in metrics["headers"])
+        assert all(amount["scrollWidth"] <= amount["clientWidth"] for amount in metrics["headerAmounts"]), metrics
         assert metrics["headerOverlaps"] == [False, False, False], metrics
         assert metrics["creditCellOverlaps"] is False, metrics
         assert metrics["creditTitle"]["scrollWidth"] <= metrics["creditTitle"]["clientWidth"]
         assert metrics["creditSubtitle"]["scrollWidth"] <= metrics["creditSubtitle"]["clientWidth"]
-        assert metrics["creditSummary"]["width"] > 0
+        assert metrics["creditSummary"]["width"] >= 32, metrics
+        assert "truncate" in metrics["creditSummaryTextClass"]
+        assert metrics["creditHeaderSummary"]["width"] >= 48, metrics
+        assert metrics["creditHeaderSummary"]["scrollWidth"] <= metrics["creditHeaderSummary"]["clientWidth"], metrics
+        assert all(cell["scrollWidth"] <= cell["clientWidth"] for cell in metrics["creditHeaderNonSummaryCells"] + metrics["creditNonSummaryCells"]), metrics
+        assert metrics["withdrawalAmount"]["scrollWidth"] <= metrics["withdrawalAmount"]["clientWidth"], metrics
+        assert metrics["withdrawalRowOverlaps"] is False, metrics
+        assert metrics["expenseAmount"]["scrollWidth"] <= metrics["expenseAmount"]["clientWidth"], metrics
+        assert metrics["expenseRowOverlaps"] is False, metrics
         assert len(metrics["creditHeaderNonSummaryCells"]) == 5
         assert len(metrics["creditNonSummaryCells"]) == 5
         assert all(abs(header_cell["left"] - row_cell["left"]) <= 1 for header_cell, row_cell in zip(metrics["creditHeaderNonSummaryCells"], metrics["creditNonSummaryCells"]))
         assert metrics["periodLabel"]["height"] <= 26, metrics
         assert metrics["periodLabel"]["right"] <= metrics["periodCell"]["right"] + 1, metrics
         assert "truncate" in metrics["expenseDescriptionClass"]
-        assert metrics["expenseDescription"]["scrollWidth"] >= metrics["expenseDescription"]["clientWidth"]
+        if width != 1279:
+            assert metrics["expenseDescription"]["scrollWidth"] > metrics["expenseDescription"]["clientWidth"], metrics
         non_summary_tops = {round(cell["top"], 1) for cell in metrics["creditNonSummaryCells"]}
         if width < 640:
             assert max(non_summary_tops) - min(non_summary_tops) <= 4, metrics
