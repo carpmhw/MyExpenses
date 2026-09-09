@@ -5,21 +5,34 @@ import MobileHeader from '../components/ui/MobileHeader.vue'
 import ExchangeRateDialog from '../components/exchange-rate/ExchangeRateDialog.vue'
 import { useSidebar } from '../composables/useSidebar'
 
-const { isMobile, isTablet, isSidebarOpen, openSidebar, closeSidebar } = useSidebar()
+const {
+  isMobile,
+  isTablet,
+  isSidebarOpen,
+  isSidebarCollapsed,
+  openSidebar,
+  closeSidebar,
+  toggleSidebarCollapsed,
+} = useSidebar()
 const exchangeRateOpen = ref(false)
 </script>
 
 <template>
   <div class="flex h-screen overflow-hidden">
     <MobileHeader v-if="isMobile" :on-menu-click="openSidebar" />
-    <div v-if="isMobile" class="flex-1 flex flex-col overflow-hidden">
+    <div v-if="isMobile" class="flex-1 min-w-0 flex flex-col overflow-hidden">
       <div class="flex-1 overflow-y-auto bg-bg-app">
         <router-view />
       </div>
     </div>
     <template v-else>
-      <Sidebar :is-tablet="isTablet" @open-exchange-rate="exchangeRateOpen = true" />
-      <main class="flex-1 overflow-y-auto bg-bg-app">
+      <Sidebar
+        :is-tablet="isTablet"
+        :is-collapsed="isSidebarCollapsed"
+        @toggle-collapse="toggleSidebarCollapsed"
+        @open-exchange-rate="exchangeRateOpen = true"
+      />
+      <main class="min-w-0 flex-1 overflow-y-auto bg-bg-app">
         <router-view />
       </main>
     </template>
