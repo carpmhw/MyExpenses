@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import time
-import urllib.error
-import urllib.request
+import sys
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urlparse
@@ -15,7 +12,13 @@ from playwright.sync_api import Page, Route
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
-VITE_PORT = "5199"
+if str(ROOT / "browser-tests") not in sys.path:
+    sys.path.insert(0, str(ROOT / "browser-tests"))
+
+from server_lifecycle import create_vite_server
+
+
+VITE_PORT = 5199
 VITE_URL = f"http://127.0.0.1:{VITE_PORT}"
 
 
@@ -157,38 +160,8 @@ def mocked_page(page: Page) -> Page:
 # 啟動 Vite 開發伺服器，並在測試 session 結束時完整回收子程序。
 @pytest.fixture(scope="session", autouse=True)
 def vite_server() -> Iterator[None]:
-    process = subprocess.Popen(
-        ["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", VITE_PORT],
-        cwd=FRONTEND,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    deadline = time.monotonic() + 30
-    last_error: Exception | None = None
-    try:
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                output = process.stdout.read() if process.stdout else ""
-                raise RuntimeError(f"Vite exited before startup:\n{output}")
-            try:
-                with urllib.request.urlopen(f"{VITE_URL}/login", timeout=1) as response:
-                    if response.status < 500:
-                        break
-            except (urllib.error.URLError, TimeoutError) as error:
-                last_error = error
-            time.sleep(0.25)
-        else:
-            raise RuntimeError(f"Vite did not start within 30 seconds: {last_error}")
+    with create_vite_server(FRONTEND, port=VITE_PORT):
         yield
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
 
 
 # 只在明確要求 real-stack 時保留 Docker backend smoke test。
