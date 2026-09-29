@@ -1,0 +1,16 @@
+# Compose 以 frontend 為建置 context，不會套用 repository 根目錄的排除規則。
+# 避免 COPY . . 覆寫容器內 npm ci 安裝的依賴及平台原生套件。
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+
+.git
+.gitignore
+*.log
+.DS_Store
+.vscode
+.idea
+
+.env
+.env.*
+!.env.example
