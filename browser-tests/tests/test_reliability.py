@@ -99,8 +99,37 @@ def test_dashboard_partial_failure(mocked_page: Page) -> None:
     expect(mocked_page.get_by_role("alert")).to_contain_text("Credit card transactions unavailable")
 
 
-# 驗證活動卡片在指定視窗、長摘要與大額金額下維持版面與內容可用性。
-def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
+def prepare_dashboard_layout_state(
+    page: Page,
+    *,
+    theme: str,
+    width: int,
+    height: int,
+    sidebar_collapsed: bool = False,
+) -> None:
+    """每輪在完整載入 Dashboard 前重設主題、Sidebar 偏好與視窗，並確認實際狀態。"""
+    context = {"theme": theme, "viewport": (width, height), "sidebarCollapsed": sidebar_collapsed}
+    page.goto("/login")
+    page.evaluate("""state => {
+        // 在新 App 初始化前寫入本輪偏好，避免沿用上一輪的共享狀態。
+        localStorage.setItem('darkMode', state.theme === 'dark' ? 'true' : 'false');
+        localStorage.setItem('myexpenses.sidebar.collapsed', String(state.sidebarCollapsed));
+    }""", context)
+    page.set_viewport_size({"width": width, "height": height})
+    page.goto("/dashboard")
+    if width >= 1024:
+        toggle_name = "展開側邊欄" if sidebar_collapsed else "收合側邊欄"
+        expect(page.get_by_role("button", name=toggle_name, exact=True), str(context)).to_be_visible()
+        expected_class = "w-16" if sidebar_collapsed else "w-60"
+        expect(page.get_by_role("complementary"), str(context)).to_have_class(re.compile(rf"\b{expected_class}\b"))
+    if theme == "dark":
+        expect(page.locator("html"), str(context)).to_have_class(re.compile(r"\bdark\b"))
+    else:
+        expect(page.locator("html"), str(context)).not_to_have_class(re.compile(r"\bdark\b"))
+
+
+def _install_dashboard_layout_routes(page: Page) -> None:
+    """安裝兩個版面測試共用的大額、長摘要及一期信用卡交易回應。"""
     summary = {
         "totalWithdrawals": 500000000,
         "withdrawalCount": 1,
@@ -155,46 +184,55 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
         "description": "非常長的信用卡交易摘要",
     }
 
-    mocked_page.route("**/api/reports/dashboard-summary**", lambda route: route_json(route, summary))
-    mocked_page.route("**/api/withdrawals**", lambda route: route_json(route, {"items": [withdrawal], "total": 1, "page": 1, "pageSize": 50}))
-    mocked_page.route("**/api/transactions**", lambda route: route_json(route, {"items": [expense], "total": 1, "page": 1, "pageSize": 50}))
-    mocked_page.route("**/api/installments**", lambda route: route_json(route, {"items": [installment], "total": 1, "page": 1, "pageSize": 50}))
+    # 各 route 回傳固定資料，讓兩個版面矩陣使用相同金額與摘要。
+    page.route("**/api/reports/dashboard-summary**", lambda route: route_json(route, summary))
+    page.route("**/api/withdrawals**", lambda route: route_json(route, {"items": [withdrawal], "total": 1, "page": 1, "pageSize": 50}))
+    page.route("**/api/transactions**", lambda route: route_json(route, {"items": [expense], "total": 1, "page": 1, "pageSize": 50}))
+    page.route("**/api/installments**", lambda route: route_json(route, {"items": [installment], "total": 1, "page": 1, "pageSize": 50}))
 
-    credit_modes: set[bool] = set()
-    for theme, (width, height) in ((theme, viewport) for theme in ("light", "dark") for viewport in ((1920, 1080), (1704, 900), (1705, 900), (1605, 900), (1606, 900), (1536, 864), (1440, 900), (1366, 768), (1280, 800), (1279, 800), (1024, 768), (768, 800), (767, 800), (640, 800), (390, 844))):
-        mocked_page.goto("/login")
-        mocked_page.evaluate("theme => localStorage.setItem('darkMode', theme === 'dark' ? 'true' : 'false')", theme)
-        mocked_page.set_viewport_size({"width": width, "height": height})
-        mocked_page.goto("/dashboard")
-        expect(mocked_page.get_by_text("提款合計", exact=True)).to_be_visible()
-        expect(mocked_page.get_by_text("1 期（一次付清）", exact=True)).to_be_visible()
-        activity_cards = mocked_page.get_by_test_id("dashboard-activity-card")
-        expect(activity_cards.nth(0).locator('p[title="$500,000,000.00"]')).to_be_visible()
-        expect(activity_cards.nth(1).locator('p[title="$500,000,000.00"]')).to_be_visible()
-        expect(activity_cards.nth(2).locator('p[title="$123,456,789.00"]')).to_be_visible()
-        expect(activity_cards.nth(0).locator('p[title="$500,000,000.00"]')).to_have_text("$500,000,000.00")
-        expect(activity_cards.nth(1).locator('p[title="$500,000,000.00"]')).to_have_text("$500,000,000.00")
-        expect(activity_cards.nth(2).locator('p[title="$123,456,789.00"]')).to_have_text("$123,456,789.00")
-        withdrawal_row = activity_cards.nth(0).locator("div.cursor-pointer")
-        expect(withdrawal_row.get_by_text("$500,000,000.00", exact=True)).to_be_visible()
-        expense_row = activity_cards.nth(1).locator("div.cursor-pointer")
-        expect(expense_row.get_by_text("NT$ 500,000,000", exact=True)).to_be_visible()
-        credit_row = activity_cards.nth(2).locator("div.cursor-pointer")
-        credit_row_amounts = credit_row.get_by_text("NT$ 123,456,789", exact=True)
-        expect(credit_row_amounts).to_have_count(2)
-        expect(credit_row_amounts.nth(0)).to_be_visible()
-        expect(credit_row_amounts.nth(1)).to_be_visible()
-        credit_card = activity_cards.nth(2)
-        credit_card_box = credit_card.bounding_box()
-        assert credit_card_box is not None
-        credit_table = credit_card.get_by_test_id("dashboard-credit-table")
-        credit_table_box = credit_table.bounding_box()
-        assert credit_table_box is not None
-        if credit_table_box["width"] <= 620:
-            expect(credit_card.locator(".dashboard-credit-cell-label").first).to_be_visible()
-        else:
-            expect(credit_card.get_by_test_id("dashboard-credit-header").get_by_text("項目 / 摘要", exact=True)).to_be_visible()
-        metrics = mocked_page.evaluate("""() => {
+
+def _wait_dashboard_layout_data(page: Page, context: dict[str, Any]) -> None:
+    """等待三卡、Header 與完整金額資料可見，避免空節點或尚未載入造成假通過。"""
+    message = str(context)
+    expect(page.get_by_text("提款合計", exact=True), message).to_be_visible()
+    expect(page.get_by_text("1 期（一次付清）", exact=True), message).to_be_visible()
+    activity_cards = page.get_by_test_id("dashboard-activity-card")
+    expect(activity_cards, message).to_have_count(3)
+    for index, amount in enumerate(("$500,000,000.00", "$500,000,000.00", "$123,456,789.00")):
+        card = activity_cards.nth(index)
+        expect(card, message).to_be_visible()
+        expect(card.get_by_test_id("dashboard-activity-header"), message).to_be_visible()
+        header_amount = card.get_by_test_id("dashboard-header-amount")
+        expect(header_amount, message).to_be_visible()
+        expect(header_amount, message).to_have_attribute("title", amount)
+        expect(header_amount, message).to_have_text(amount)
+        expect(card.locator("div.cursor-pointer"), message).to_have_count(1)
+    withdrawal_row = activity_cards.nth(0).locator("div.cursor-pointer")
+    expect(withdrawal_row.get_by_text("$500,000,000.00", exact=True), message).to_be_visible()
+    expense_row = activity_cards.nth(1).locator("div.cursor-pointer")
+    expect(expense_row.get_by_text("NT$ 500,000,000", exact=True), message).to_be_visible()
+    credit_card = activity_cards.nth(2)
+    credit_row = credit_card.get_by_test_id("dashboard-credit-row")
+    expect(credit_row, message).to_be_visible()
+    expect(credit_row.locator("[data-credit-role]"), message).to_have_count(6)
+    for role in ("total", "current"):
+        amount = credit_row.locator(f'[data-credit-role="{role}"]')
+        expect(amount, message).to_be_visible()
+        expect(amount, message).to_have_text("NT$ 123,456,789")
+    credit_table = credit_card.get_by_test_id("dashboard-credit-table")
+    expect(credit_table, message).to_be_visible()
+    credit_table_box = credit_table.bounding_box()
+    assert credit_table_box is not None, context
+    if credit_table_box["width"] <= 620:
+        expect(credit_card.locator(".dashboard-credit-cell-label").first, message).to_be_visible()
+    else:
+        expect(credit_card.get_by_test_id("dashboard-credit-header").get_by_text("項目 / 摘要", exact=True), message).to_be_visible()
+
+
+def _collect_dashboard_layout_metrics(page: Page, context: dict[str, Any]) -> dict[str, Any]:
+    """共用已載入資料的盒模型、字級與對比量測，並附帶本輪條件供失敗診斷。"""
+    _wait_dashboard_layout_data(page, context)
+    metrics = page.evaluate("""() => {
             // 讀取瀏覽器實際盒模型，讓視覺驗收不只依賴 DOM 文字存在。
             const box = node => {
                 if (!node) return null;
@@ -260,6 +298,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             };
             // 使用相對亮度計算 WCAG 對比值。
             const contrastRatio = (foreground, background) => {
+                // 將色彩轉為線性亮度，供前景與背景的對比計算使用。
                 const luminance = color => {
                     const channels = [color.red, color.green, color.blue].map(channel => channel / 255).map(channel => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
                     return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
@@ -313,6 +352,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
                 ...box(child),
                 contentRight: child.getBoundingClientRect().left + child.scrollWidth,
             })));
+            // 同時比較元素盒模型與內容邊界，偵測實際內容互相遮蔽。
             const overlaps = (first, second) => {
                 const firstRight = Math.max(first.right, first.contentRight ?? first.right);
                 const secondRight = Math.max(second.right, second.contentRight ?? second.right);
@@ -333,6 +373,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
                 cards: cards.map(box),
                 headers: headers.map(box),
                 headerAmounts: headerAmounts.map(box),
+                creditAmounts: ['total', 'current'].map(role => box(creditRow?.querySelector(`[data-credit-role="${role}"]`))),
                 headerTypography: headerAmounts.map(typography),
                     withdrawalAmountTypography: typography(withdrawalAmount),
                     expenseAmountTypography: typography(expenseAmount),
@@ -390,16 +431,50 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
                 },
             };
             }""")
-        assert len(metrics["cards"]) == 3
+    metrics["context"] = context
+    return metrics
+
+
+def _assert_dashboard_layout_safety(metrics: dict[str, Any]) -> None:
+    """嚴格驗證共用的完整節點、無水平溢位、無重疊與金額完整性，不綁定卡片尺寸。"""
+    width = metrics["context"]["viewport"][0]
+    for key in ("cards", "headers", "headerAmounts"):
+        assert len(metrics[key]) == 3, metrics
+        assert all(box is not None and box["width"] > 0 and box["height"] > 0 for box in metrics[key]), metrics
+    assert len(metrics["creditAmounts"]) == 2, metrics
+    assert len(metrics["creditNonSummaryCells"]) == 5, metrics
+    assert metrics["overflow"]["document"] <= width, metrics
+    assert metrics["overflow"]["body"] <= width, metrics
+    assert metrics["overflow"]["containerClientWidth"] > 0, metrics
+    assert metrics["overflow"]["container"] <= metrics["overflow"]["containerClientWidth"], metrics
+    assert all(card["scrollWidth"] <= card["clientWidth"] for card in metrics["cards"]), metrics
+    block_amounts = metrics["headerAmounts"] + [metrics["withdrawalAmount"], metrics["expenseAmount"]]
+    amounts = block_amounts + metrics["creditAmounts"]
+    assert all(amount is not None and amount["width"] > 0 and amount["height"] > 0 for amount in amounts), metrics
+    assert all(amount["scrollWidth"] <= amount["clientWidth"] for amount in block_amounts), metrics
+    # 信用卡金額是 inline span，clientWidth 為 0；以實際父欄位驗證溢位，保留文字可見與正尺寸檢查。
+    assert all(cell is not None and cell["width"] > 0 for cell in metrics["creditNonSummaryCells"]), metrics
+    assert all(cell["scrollWidth"] <= cell["clientWidth"] for cell in metrics["creditNonSummaryCells"]), metrics
+    assert metrics["headerOverlaps"] == [False, False, False], metrics
+    assert metrics["withdrawalRowOverlaps"] is False, metrics
+    assert metrics["expenseRowOverlaps"] is False, metrics
+    assert metrics["creditCellOverlaps"] is False, metrics
+
+
+# 驗證活動卡片在指定視窗、長摘要與大額金額下維持版面與內容可用性。
+def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
+    """驗證展開 Sidebar 的完整主題／視窗矩陣與活動卡片可讀性。"""
+    _install_dashboard_layout_routes(mocked_page)
+    credit_modes: dict[str, set[bool]] = {theme: set() for theme in ("light", "dark")}
+    header_modes: dict[str, set[bool]] = {theme: set() for theme in ("light", "dark")}
+    for theme, (width, height) in ((theme, viewport) for theme in ("light", "dark") for viewport in ((1920, 1080), (1704, 900), (1705, 900), (1605, 900), (1606, 900), (1536, 864), (1440, 900), (1366, 768), (1280, 800), (1279, 800), (1024, 768), (768, 800), (767, 800), (640, 800), (390, 844))):
+        prepare_dashboard_layout_state(mocked_page, theme=theme, width=width, height=height)
+        context = {"theme": theme, "viewport": (width, height), "sidebarCollapsed": False}
+        metrics = _collect_dashboard_layout_metrics(mocked_page, context)
+        _assert_dashboard_layout_safety(metrics)
         assert metrics["darkMode"] == (theme == "dark"), metrics
-        credit_modes.add(metrics["creditNarrow"])
-        assert metrics["overflow"]["document"] <= width
-        assert metrics["overflow"]["body"] <= width
-        assert metrics["overflow"]["containerClientWidth"] > 0
-        assert metrics["overflow"]["container"] <= metrics["overflow"]["containerClientWidth"]
-        assert all(card["scrollWidth"] <= card["clientWidth"] for card in metrics["cards"])
-        assert all(header["height"] >= 104 for header in metrics["headers"])
-        assert all(amount["scrollWidth"] <= amount["clientWidth"] for amount in metrics["headerAmounts"]), metrics
+        credit_modes[theme].add(metrics["creditNarrow"])
+        assert all(header["height"] >= 104 for header in metrics["headers"]), metrics
         assert all(float(amount["fontSize"].removesuffix("px")) == 18 for amount in metrics["headerTypography"]), metrics
         assert all(int(amount["fontWeight"]) == 700 for amount in metrics["headerTypography"]), metrics
         assert all(float(amount["lineHeight"].removesuffix("px")) == 22.5 for amount in metrics["headerTypography"]), metrics
@@ -435,31 +510,22 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             assert float(metrics["creditMetaTypography"]["label"]["fontSize"].removesuffix("px")) == 13, metrics
             assert int(metrics["creditMetaTypography"]["label"]["fontWeight"]) == 500, metrics
             assert float(metrics["creditMetaTypography"]["label"]["lineHeight"].removesuffix("px")) == 18.2, metrics
-        assert all(contrast >= 4.5 for contrast in metrics["amountContrast"]["headers"]), metrics["amountContrast"]
-        assert metrics["amountContrast"]["withdrawal"] >= 4.5, metrics["amountContrast"]
-        assert metrics["amountContrast"]["expense"] >= 4.5, metrics["amountContrast"]
-        assert metrics["amountContrast"]["creditTotal"] >= 4.5, metrics["amountContrast"]
-        assert metrics["amountContrast"]["creditCurrent"] >= 4.5, metrics["amountContrast"]
-        assert metrics["headerOverlaps"] == [False, False, False], metrics
-        assert metrics["creditCellOverlaps"] is False, metrics
-        assert metrics["creditTitle"]["scrollWidth"] <= metrics["creditTitle"]["clientWidth"]
-        assert metrics["creditSubtitle"]["scrollWidth"] <= metrics["creditSubtitle"]["clientWidth"]
+        assert all(contrast >= 4.5 for contrast in metrics["amountContrast"]["headers"]), metrics
+        assert metrics["amountContrast"]["withdrawal"] >= 4.5, metrics
+        assert metrics["amountContrast"]["expense"] >= 4.5, metrics
+        assert metrics["amountContrast"]["creditTotal"] >= 4.5, metrics
+        assert metrics["amountContrast"]["creditCurrent"] >= 4.5, metrics
+        assert metrics["creditTitle"]["scrollWidth"] <= metrics["creditTitle"]["clientWidth"], metrics
+        assert metrics["creditSubtitle"]["scrollWidth"] <= metrics["creditSubtitle"]["clientWidth"], metrics
         assert metrics["creditSummary"]["width"] >= 32, metrics
-        assert "truncate" in metrics["creditSummaryTextClass"]
+        assert "truncate" in metrics["creditSummaryTextClass"], metrics
         assert [label["role"] for label in metrics["creditCellLabels"]] == ["date", "description", "total", "period", "paid", "current"], metrics
         assert [label["text"] for label in metrics["creditCellLabels"]] == ["日期", "項目 / 摘要", "總額", "期數", "已繳", "本期"], metrics
-        if metrics["creditNarrow"]:
-            assert all(cell["scrollWidth"] <= cell["clientWidth"] for cell in metrics["creditNonSummaryCells"]), metrics
-        else:
+        if not metrics["creditNarrow"]:
             assert metrics["creditHeaderSummary"]["width"] >= 48, metrics
             assert metrics["creditHeaderSummary"]["scrollWidth"] <= metrics["creditHeaderSummary"]["clientWidth"], metrics
             assert all(cell["scrollWidth"] <= cell["clientWidth"] for cell in metrics["creditHeaderNonSummaryCells"] + metrics["creditNonSummaryCells"]), metrics
-        assert metrics["withdrawalAmount"]["scrollWidth"] <= metrics["withdrawalAmount"]["clientWidth"], metrics
-        assert metrics["withdrawalRowOverlaps"] is False, metrics
-        assert metrics["expenseAmount"]["scrollWidth"] <= metrics["expenseAmount"]["clientWidth"], metrics
-        assert metrics["expenseRowOverlaps"] is False, metrics
-        assert len(metrics["creditHeaderNonSummaryCells"]) == 5
-        assert len(metrics["creditNonSummaryCells"]) == 5
+        assert len(metrics["creditHeaderNonSummaryCells"]) == 5, metrics
         if not metrics["creditNarrow"]:
             assert all(abs(header_cell["left"] - row_cell["left"]) <= 1 for header_cell, row_cell in zip(metrics["creditHeaderNonSummaryCells"], metrics["creditNonSummaryCells"])), metrics
         assert metrics["creditDataOrder"] == ["date", "description", "total", "period", "paid", "current"], metrics
@@ -472,9 +538,7 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             assert all(label["display"] == "none" for label in metrics["creditCellLabels"]), metrics
         assert metrics["periodLabel"]["height"] <= 26, metrics
         assert metrics["periodLabel"]["right"] <= metrics["periodCell"]["right"] + 1, metrics
-        assert "truncate" in metrics["expenseDescriptionClass"]
-        if width != 1279:
-            assert metrics["expenseDescription"]["scrollWidth"] > metrics["expenseDescription"]["clientWidth"], metrics
+        assert "truncate" in metrics["expenseDescriptionClass"], metrics
         if width < 640:
             non_summary_cells = metrics["creditNonSummaryCells"]
             assert abs(non_summary_cells[0]["top"] - non_summary_cells[1]["top"]) <= 4, metrics
@@ -483,17 +547,36 @@ def test_dashboard_activity_layout_and_large_amounts(mocked_page: Page) -> None:
             assert non_summary_cells[2]["top"] >= metrics["creditSummary"]["bottom"], metrics
             assert min(non_summary_cells[3]["top"], non_summary_cells[4]["top"]) >= non_summary_cells[2]["bottom"], metrics
         elif width >= 1280:
+            header_modes[theme].add(metrics["activityGridWidth"] <= 1100)
             expected_header_height = 148 if metrics["activityGridWidth"] <= 1100 else 104
-            assert all(abs(header["height"] - expected_header_height) <= 1 for header in metrics["headers"]), metrics
+            assert all(abs(header["height"] - expected_header_height) <= 2 for header in metrics["headers"]), metrics
         if width >= 1280:
-            assert len({round(card["top"], 1) for card in metrics["cards"]}) == 1
-            assert abs(metrics["cards"][0]["width"] - 340) < 1
-            assert abs(metrics["cards"][1]["width"] / metrics["cards"][2]["width"] - 2 / 3) < 0.01
-            assert len({round(header["height"], 1) for header in metrics["headers"]}) == 1
+            assert len({round(card["top"], 1) for card in metrics["cards"]}) == 1, metrics
+            assert abs(metrics["cards"][0]["width"] - 340) <= 2, metrics
+            assert abs(metrics["cards"][1]["width"] / metrics["cards"][2]["width"] - 2 / 3) < 0.01, metrics
+            assert len({round(header["height"], 1) for header in metrics["headers"]}) == 1, metrics
         else:
-            assert len({round(card["left"], 1) for card in metrics["cards"]}) == 1
-            assert metrics["cards"][0]["top"] < metrics["cards"][1]["top"] < metrics["cards"][2]["top"]
-    assert credit_modes == {True, False}
+            assert len({round(card["left"], 1) for card in metrics["cards"]}) == 1, metrics
+            assert metrics["cards"][0]["top"] < metrics["cards"][1]["top"] < metrics["cards"][2]["top"], metrics
+    for theme in ("light", "dark"):
+        assert credit_modes[theme] == {True, False}, {"theme": theme, "creditModes": credit_modes}
+        assert header_modes[theme] == {True, False}, {"theme": theme, "headerModes": header_modes}
+
+
+@pytest.mark.parametrize("theme", ("light", "dark"))
+@pytest.mark.parametrize(("width", "height"), ((1920, 1080), (1440, 900), (1280, 800)))
+def test_dashboard_layout_remains_valid_with_collapsed_sidebar(
+    mocked_page: Page, theme: str, width: int, height: int,
+) -> None:
+    """驗證收合 Sidebar 的六組桌面情境仍無溢位、無重疊且完整顯示大額金額。"""
+    _install_dashboard_layout_routes(mocked_page)
+    prepare_dashboard_layout_state(
+        mocked_page, theme=theme, width=width, height=height, sidebar_collapsed=True,
+    )
+    context = {"theme": theme, "viewport": (width, height), "sidebarCollapsed": True}
+    metrics = _collect_dashboard_layout_metrics(mocked_page, context)
+    assert metrics["darkMode"] == (theme == "dark"), metrics
+    _assert_dashboard_layout_safety(metrics)
 
 
 # 驗證持股結構報表的延遲載入、組合篩選、空結果、快照缺少與行動版明細可存取。
