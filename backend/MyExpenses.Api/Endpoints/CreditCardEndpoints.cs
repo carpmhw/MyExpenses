@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyExpenses.Api.Data;
 using MyExpenses.Api.Models;
@@ -8,9 +9,19 @@ namespace MyExpenses.Api.Endpoints;
 
 public static class CreditCardEndpoints
 {
+    /// <summary>註冊信用卡 CRUD 與僅限 owner 登入的固定預設操作。</summary>
     public static void MapCreditCardEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/credit-cards");
+
+        // 預設操作獨立於一般卡片編輯，且不開放既有 API token scopes 使用。
+        group.MapPut("/{id:int}/default", async Task<IResult> (
+            int id, [FromServices] TransactionDefaultsService defaults, CancellationToken cancellationToken) =>
+        {
+            if (id <= 0) return Results.BadRequest(new { error = "信用卡 ID 必須大於零" });
+            var result = await defaults.SetCreditCardAsync(id, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).RequireAuthorization();
 
         group.MapGet("/", async (int? page, int? pageSize, AppDbContext db) =>
         {

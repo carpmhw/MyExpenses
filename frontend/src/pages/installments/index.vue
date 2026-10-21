@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, inject, onMounted, watch } from 'vue'
-import { ApiError, api } from '../../api'
+import { ApiError, api, isRequestCancelled } from '../../api'
 import type { Installment, CreditCard, CreditCardBill } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
@@ -18,6 +18,8 @@ import { addCalendarDays, formatDateOnly, getCurrentMonthRange, isDateOnlyBefore
 import { createIdempotencyKeyState } from '../../utils/idempotency'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { useAsyncMutation } from '../../composables/useAsyncMutation'
+import { useFormDefault } from '../../composables/useFormDefault'
+import { createLatestRequestGuard } from '../../utils/latestRequest'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
@@ -25,6 +27,7 @@ const timeZone = useTimeZone()
 const creditCards = ref<CreditCard[]>([])
 const creditCardLoading = ref(false)
 const creditCardError = ref<string | null>(null)
+const creditCardGuard = createLatestRequestGuard()
 const pagination = usePagination(1, 15)
 
 const filterCardId = ref<number | ''>('')
@@ -117,6 +120,18 @@ const form = ref({
   purchaseDate: timeZone.getToday(),
   description: '',
 })
+
+const formDefault = useFormDefault({
+  resource: 'creditCards',
+  items: creditCards,
+  loadOptions: fetchCreditCards,
+  get: api.creditCards.get,
+  // 只預選新增交易的卡片，保留原有付款時程與冪等流程。
+  apply: id => { form.value.cardId = id },
+  canApply: () => modalOpen.value && !editingItem.value && !saving.value,
+})
+// 即使由儲存成功或其他途徑關閉，也不得再接受舊預設回應。
+watch(modalOpen, open => { if (!open) formDefault.close() }, { flush: 'sync' })
 
 const scheduleOpen = ref(false)
 
@@ -262,16 +277,23 @@ watch([filterCardId, filterStatus, startDate, endDate], () => {
 })
 
 // 載入信用卡交易篩選與表單使用的信用卡選項。
-async function fetchCreditCards(): Promise<void> {
+async function fetchCreditCards(signal?: AbortSignal): Promise<boolean> {
+  const generation = creditCardGuard.next()
   creditCardLoading.value = true
   creditCardError.value = null
   try {
-    const result = await api.creditCards.list({ pageSize: 999 })
+    const result = await api.creditCards.list({ pageSize: 100 }, { signal })
+    if (!creditCardGuard.isLatest(generation)) return false
+    // 僅保留當前表單的明確選擇，避免分頁重讀使其看似被清空。
+    const selected = modalOpen.value ? creditCards.value.find(card => card.id === form.value.cardId) : undefined
     creditCards.value = result.items
+    if (selected && !creditCards.value.some(card => card.id === selected.id)) creditCards.value.push(selected)
+    return true
   } catch (error) {
-    creditCardError.value = error instanceof ApiError ? error.userMessage : '信用卡選項載入失敗，請重試。'
+    if (creditCardGuard.isLatest(generation) && !isRequestCancelled(error)) creditCardError.value = error instanceof ApiError ? error.userMessage : '信用卡選項載入失敗，請重試。'
+    return false
   } finally {
-    creditCardLoading.value = false
+    if (creditCardGuard.isLatest(generation)) creditCardLoading.value = false
   }
 }
 
@@ -289,6 +311,7 @@ function openCreate(): void {
     description: '',
   }
   modalOpen.value = true
+  formDefault.begin()
 }
 
 // 關閉信用卡交易表單時捨棄本次開啟期間的冪等命令狀態。
@@ -297,8 +320,12 @@ function handleModalOpenChange(open: boolean): void {
   if (!open) standaloneInstallmentIdempotency.clear()
 }
 
-// 將伺服器信用卡交易載入編輯表單，不先進行 optimistic 變更。
+// 補齊歷史卡片選項與付款預覽，再載入編輯表單，不先進行 optimistic 變更。
 function openEdit(item: Installment): void {
+  formDefault.close()
+  if (item.card?.id === item.cardId && !creditCards.value.some(card => card.id === item.cardId)) {
+    creditCards.value.push(item.card)
+  }
   editingItem.value = item
   form.value = {
     transactionId: item.transactionId,
@@ -315,8 +342,9 @@ function openEdit(item: Installment): void {
 // 以單一冪等命令建立或原子更新信用卡交易付款時程。
 async function save(): Promise<void> {
   const errs = formErrors.value
-  if (Object.keys(errs).length > 0) return
+  if (saving.value || creditCardLoading.value || creditCardError.value || Object.keys(errs).length > 0) return
 
+  formDefault.freeze()
   let mutationSucceeded = false
   try {
     if (editingItem.value) {
@@ -564,7 +592,7 @@ onMounted(async () => {
         </div>
         <div v-else role="alert" class="flex items-center justify-between gap-3 text-sm text-color-warning-text">
           <span>{{ creditCardError }}</span>
-          <Button type="button" variant="ghost" @click="fetchCreditCards">重試信用卡選項</Button>
+          <Button type="button" variant="ghost" @click="fetchCreditCards()">重試信用卡選項</Button>
         </div>
       </Card>
     </div>
@@ -730,10 +758,14 @@ onMounted(async () => {
             :options="cardOptions"
             placeholder="選擇信用卡"
             :disabled="hasPaidPayments || creditCardLoading || Boolean(creditCardError)"
-            @update:model-value="form.cardId = Number($event) || null"
+            @update:model-value="formDefault.touch(); form.cardId = Number($event) || null"
           />
           <p v-if="hasPaidPayments" class="mt-1 text-xs text-color-warning-text">已有繳款記錄，不可修改</p>
           <p v-else-if="formErrors.cardId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.cardId }}</p>
+          <div v-if="!editingItem && formDefault.errorMessage.value" role="status" class="mt-1 text-xs text-color-warning-text">
+            {{ formDefault.errorMessage.value }}
+            <Button type="button" variant="ghost" :disabled="formDefault.loading.value || saving" @click="formDefault.retry">重試預設設定</Button>
+          </div>
         </div>
         <div>
           <label for="credit-card-transaction-date" class="block text-sm font-medium text-text-primary mb-1">刷卡日期</label>

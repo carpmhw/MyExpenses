@@ -12,6 +12,7 @@ namespace MyExpenses.Api.Migrations
     [DbContext(typeof(AppDbContext))]
     partial class AppDbContextModelSnapshot : ModelSnapshot
     {
+        /// <summary>建立目前資料庫模型快照，供後續 migration 比對。</summary>
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
@@ -748,12 +749,22 @@ namespace MyExpenses.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("DefaultBankAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DefaultCreditCardId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("TimeZoneId")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DefaultBankAccountId");
+
+                    b.HasIndex("DefaultCreditCardId");
 
                     b.ToTable("SystemSettings", (string)null);
                 });
@@ -1054,6 +1065,19 @@ namespace MyExpenses.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Stock");
+                });
+
+            modelBuilder.Entity("MyExpenses.Api.Models.SystemSetting", b =>
+                {
+                    b.HasOne("MyExpenses.Api.Models.BankAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultBankAccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("MyExpenses.Api.Models.CreditCard", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultCreditCardId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("MyExpenses.Api.Models.Transaction", b =>

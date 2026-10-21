@@ -15,6 +15,15 @@ public static class BankAccountEndpoints
     {
         var group = app.MapGroup("/api/bank-accounts");
 
+        // 明確設定目標狀態，不將一般帳戶編輯或 API token 授權擴大成偏好設定寫入。
+        group.MapPut("/{id:int}/default", async Task<IResult> (
+            int id, [FromServices] TransactionDefaultsService defaults, CancellationToken cancellationToken) =>
+        {
+            if (id <= 0) return Results.BadRequest(new { error = "銀行帳戶 ID 必須大於零" });
+            var result = await defaults.SetBankAccountAsync(id, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).RequireAuthorization();
+
         group.MapGet("/", async (
             int? page,
             int? pageSize,

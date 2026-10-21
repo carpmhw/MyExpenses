@@ -16,9 +16,11 @@ import { createBankAccountForm, hasCurrencyChanged, type BankAccountForm } from 
 import { createLatestRequestGuard } from '../../utils/latestRequest'
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
+import { useTransactionDefaults } from '../../composables/useTransactionDefaults'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
+const defaultState = useTransactionDefaults('bankAccounts')
 
 const accounts = ref<BankAccountListItem[]>([])
 const totalBalanceInBaseCurrency = ref<number | null>(null)
@@ -169,6 +171,7 @@ async function doDelete() {
       confirmOpen.value = false
       deletingId.value = null
       toast.success('帳戶已刪除')
+      await defaultState.refresh()
       await fetchList()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '刪除失敗')
@@ -240,6 +243,10 @@ watch([bankNameFilter, currencyCodeFilter], () => {
     </div>
 
     <Card>
+      <div v-if="defaultState.message.value" role="status" class="mb-4 text-sm text-color-warning-text">
+        {{ defaultState.message.value }}
+        <Button variant="ghost" :disabled="defaultState.isSaving.value" @click="defaultState.refresh">重試預設設定</Button>
+      </div>
       <div class="flex flex-wrap items-end gap-3 mb-4">
         <div class="w-full sm:w-64">
           <label class="block text-sm font-medium text-text-primary mb-1" for="bank-account-bank-name-filter">銀行名稱</label>
@@ -290,6 +297,27 @@ watch([bankNameFilter, currencyCodeFilter], () => {
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />
+              </button>
+              <span
+                v-if="defaultState.defaultId.value === item.id"
+                data-testid="default-indicator"
+                role="img"
+                title="目前預設"
+                :aria-label="`${item.bankName}帳號${item.accountNumber}，目前預設`"
+                class="inline-flex h-11 w-11 shrink-0 items-center justify-center text-accent-primary"
+              >
+                <Icon name="star" :size="16" fill="currentColor" aria-hidden="true" />
+              </span>
+              <button
+                v-else
+                type="button"
+                title="設為預設"
+                :disabled="defaultState.isSaving.value"
+                :aria-label="`將${item.bankName}帳號${item.accountNumber}設為預設`"
+                class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-text-secondary cursor-pointer transition-colors hover:bg-bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                @click="defaultState.setDefault(item.id)"
+              >
+                <Icon name="star" :size="16" fill="none" aria-hidden="true" />
               </button>
             </div>
           </td>

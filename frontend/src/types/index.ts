@@ -1,3 +1,9 @@
+/** 伺服器保存的固定預設；兩類獨立且允許未設定。 */
+export interface TransactionDefaults {
+  defaultBankAccountId: number | null
+  defaultCreditCardId: number | null
+}
+
 export interface Category {
   id: number
   name: string

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ApiError, api } from '../../api'
-import type { Withdrawal, BankAccountListItem, WithdrawalListResponse } from '../../types'
+import { ApiError, api, isRequestCancelled } from '../../api'
+import type { Withdrawal, BankAccount, WithdrawalListResponse } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
@@ -16,6 +16,8 @@ import { formatCurrency } from '../../utils/format'
 import { addCalendarDays, getCurrentMonthRange } from '../../utils/timezone'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
+import { useFormDefault } from '../../composables/useFormDefault'
+import { createLatestRequestGuard } from '../../utils/latestRequest'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
@@ -24,7 +26,10 @@ const route = useRoute()
 const router = useRouter()
 const pagination = usePagination(1, 15)
 
-const bankAccounts = ref<BankAccountListItem[]>([])
+const bankAccounts = ref<BankAccount[]>([])
+const bankAccountLoading = ref(false)
+const bankAccountError = ref<string | null>(null)
+const bankAccountGuard = createLatestRequestGuard()
 const saving = ref(false)
 
 const startDate = ref((route.query.startDate as string) || getDefaultStartDate())
@@ -79,6 +84,18 @@ const form = ref({
   bankAccountId: 0,
   description: '',
 })
+
+const formDefault = useFormDefault({
+  resource: 'bankAccounts',
+  items: bankAccounts,
+  loadOptions: fetchBankAccounts,
+  get: api.bankAccounts.get,
+  // 預設只寫入目前新增表單，不回寫伺服器偏好。
+  apply: id => { form.value.bankAccountId = id },
+  canApply: () => modalOpen.value && !editingItem.value && !saving.value,
+})
+// 任何關閉途徑均讓本次新增查詢失效。
+watch(modalOpen, open => { if (!open) formDefault.close() }, { flush: 'sync' })
 
 const confirmOpen = ref(false)
 const deletingId = ref<number | null>(null)
@@ -145,20 +162,25 @@ function syncQueryString() {
   })
 }
 
-// 開啟使用預設日期與第一個帳戶的新增提款表單。
+// 建立空白的新增提款表單，再安全載入伺服器固定預設。
 function openCreate() {
   editingItem.value = null
   form.value = {
     amount: 0,
     date: timeZone.getToday(),
-    bankAccountId: bankAccounts.value[0]?.id || 0,
+    bankAccountId: 0,
     description: '',
   }
   modalOpen.value = true
+  formDefault.begin()
 }
 
-// 將指定提款資料帶入編輯表單。
+// 保留歷史帳戶的可見選項，再將指定提款資料帶入編輯表單。
 function openEdit(item: Withdrawal) {
+  formDefault.close()
+  if (item.bankAccount?.id === item.bankAccountId && !bankAccounts.value.some(account => account.id === item.bankAccountId)) {
+    bankAccounts.value.push(item.bankAccount)
+  }
   editingItem.value = item
   form.value = {
     amount: item.amount,
@@ -172,8 +194,9 @@ function openEdit(item: Withdrawal) {
 // 儲存提款 command，並在確認成功後獨立重新整理列表。
 async function save(): Promise<void> {
   const errs = formErrors.value
-  if (Object.keys(errs).length > 0) return
+  if (saving.value || bankAccountLoading.value || bankAccountError.value || Object.keys(errs).length > 0) return
 
+  formDefault.freeze()
   saving.value = true
   try {
     if (editingItem.value) {
@@ -216,9 +239,24 @@ async function doDelete(): Promise<void> {
 }
 
 // 取得提款表單可選的銀行帳戶與其原幣資訊。
-async function fetchBankAccounts() {
-  const result = await api.bankAccounts.list({ pageSize: 999 })
-  bankAccounts.value = result.items
+async function fetchBankAccounts(signal?: AbortSignal): Promise<boolean> {
+  const generation = bankAccountGuard.next()
+  bankAccountLoading.value = true
+  bankAccountError.value = null
+  try {
+    const result = await api.bankAccounts.list({ pageSize: 100 }, { signal })
+    if (!bankAccountGuard.isLatest(generation)) return false
+    // 候選分頁刷新不可讓已選的分頁外帳戶從表單消失。
+    const selected = modalOpen.value ? bankAccounts.value.find(account => account.id === form.value.bankAccountId) : undefined
+    bankAccounts.value = result.items
+    if (selected && !bankAccounts.value.some(account => account.id === selected.id)) bankAccounts.value.push(selected)
+    return true
+  } catch (error) {
+    if (bankAccountGuard.isLatest(generation) && !isRequestCancelled(error)) bankAccountError.value = '銀行帳戶選項載入失敗，請重試。'
+    return false
+  } finally {
+    if (bankAccountGuard.isLatest(generation)) bankAccountLoading.value = false
+  }
 }
 
 // 在已確認 mutation 成功後重新整理列表，並獨立回報 refresh failure。
@@ -402,13 +440,22 @@ onMounted(async () => {
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1">銀行帳戶</label>
+          <label for="withdrawal-bank-account" class="block text-sm font-medium text-text-primary mb-1">銀行帳戶</label>
           <Select
+            id="withdrawal-bank-account"
             :model-value="form.bankAccountId || ''"
             :options="bankAccountOptions"
+            placeholder="選擇銀行帳戶"
+            :disabled="bankAccountLoading || Boolean(bankAccountError) || saving"
             :error="formErrors.bankAccountId"
-            @update:model-value="form.bankAccountId = Number($event)"
+            @update:model-value="formDefault.touch(); form.bankAccountId = Number($event)"
           />
+          <p v-if="bankAccountError" role="alert" class="mt-1 text-xs text-color-warning-text">{{ bankAccountError }}</p>
+          <div v-if="!editingItem && formDefault.errorMessage.value" role="status" class="mt-1 text-xs text-color-warning-text">
+            {{ formDefault.errorMessage.value }}
+            <Button type="button" variant="ghost" :disabled="formDefault.loading.value || saving" @click="formDefault.retry">重試預設設定</Button>
+          </div>
+          <Button v-if="editingItem && bankAccountError" type="button" variant="ghost" @click="fetchBankAccounts()">重試帳戶選項</Button>
           <p v-if="formErrors.bankAccountId" class="mt-1 text-xs text-color-expense-text">{{ formErrors.bankAccountId }}</p>
         </div>
         <div>
