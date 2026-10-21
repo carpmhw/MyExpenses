@@ -117,7 +117,9 @@ describe('withdrawal query reliability', () => {
     expect(wrapper.text()).toContain('2026/08/01 08:00')
   })
 
+  // 驗證明確選擇帳戶後，金融寫入成功與後續重新整理失敗仍分開回報。
   it('reports create success separately when the following refresh fails', async () => {
+    vi.spyOn(api.settings, 'getTransactionDefaults').mockResolvedValue({ defaultBankAccountId: null, defaultCreditCardId: null })
     const toast = { success: vi.fn(), error: vi.fn() }
     vi.spyOn(api.bankAccounts, 'list').mockResolvedValue(createBankAccountResponse())
     vi.spyOn(api.withdrawals, 'list')
@@ -155,7 +157,9 @@ describe('withdrawal query reliability', () => {
     await flushPromises()
 
     await wrapper.findAll('button').find(button => button.text() === '+ 新增提款')!.trigger('click')
+    await flushPromises()
     const dialog = wrapper.get('[role="dialog"]')
+    await dialog.get('select').setValue('1')
     await dialog.get('input[type="number"]').setValue('200')
     await dialog.get('form').trigger('submit')
     await flushPromises()

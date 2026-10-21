@@ -1,5 +1,5 @@
 import type {
-  Category, Transaction, Installment, CreditCard, CreditCardBill,
+  Category, Transaction, TransactionDefaults, Installment, CreditCard, CreditCardBill,
   BankAccount, BankAccountListResponse, Stock, StockListResponse, Withdrawal, WithdrawalListResponse, PaymentMethod, PaginatedResponse,
   StockInstrumentType, StockMarket,
   StockMetadataUpdateRequest,
@@ -333,6 +333,9 @@ export const api = {
   },
 
   creditCards: {
+    // 僅更新固定預設信用卡，不修改卡片內容或建立金融紀錄。
+    setDefault: (id: number, context?: ApiRequestContext) =>
+      request<TransactionDefaults>(`/credit-cards/${id}/default`, withRequestContext({ method: 'PUT' }, context)),
     list: (params?: { page?: number; pageSize?: number }, context?: ApiRequestContext) => {
       const q = new URLSearchParams()
       if (params?.page) q.set('page', String(params.page))
@@ -362,6 +365,9 @@ export const api = {
   },
 
   bankAccounts: {
+    // 僅更新固定預設銀行帳戶，保留另一類別與時區設定。
+    setDefault: (id: number, context?: ApiRequestContext) =>
+      request<TransactionDefaults>(`/bank-accounts/${id}/default`, withRequestContext({ method: 'PUT' }, context)),
     list: (params?: { page?: number; pageSize?: number; bankName?: string }, context?: ApiRequestContext) => {
       const q = buildBankAccountsQuery(params)
       return request<BankAccountListResponse>(`/bank-accounts?${q}`, withRequestContext({}, context))
@@ -579,6 +585,9 @@ export const api = {
       request<{ message: string }>('/auth/logout-all', withRequestContext({ method: 'POST' }, context)),
   },
   settings: {
+    // 每次由伺服器讀取固定預設，不使用瀏覽器本機偏好快取。
+    getTransactionDefaults: (context?: ApiRequestContext) =>
+      request<TransactionDefaults>('/settings/transaction-defaults', withRequestContext({}, context)),
     getTimeZone: (context?: ApiRequestContext) => request<SystemTimeZoneSettings>('/settings/timezone', withRequestContext({}, context)),
     updateTimeZone: (timeZoneId: string, context?: ApiRequestContext) =>
       request<SystemTimeZoneSettings>('/settings/timezone', withRequestContext({

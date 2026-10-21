@@ -424,6 +424,12 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("SystemSettings");
             entity.Property(e => e.TimeZoneId).HasMaxLength(100).IsRequired();
+            entity.HasOne<BankAccount>().WithMany()
+                .HasForeignKey(e => e.DefaultBankAccountId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<CreditCard>().WithMany()
+                .HasForeignKey(e => e.DefaultCreditCardId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<ScheduledJobExecution>(entity =>

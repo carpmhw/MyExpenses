@@ -215,6 +215,7 @@ builder.Services.Configure<TimeZoneOptions>(
 builder.Services.Configure<BootstrapOptions>(
     builder.Configuration.GetSection(BootstrapOptions.SectionName));
 builder.Services.AddSingleton<TimeZoneService>();
+builder.Services.AddScoped<TransactionDefaultsService>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 // 匯率 provider 與服務使用 singleton 共享一小時記憶體快取及更新鎖。
 builder.Services.AddSingleton<IExchangeRateProvider>(services =>

@@ -33,6 +33,7 @@ def route_json(route: Route, payload: Any, status: int = 200) -> None:
 
 # 建立認證成功時所有頁面共用的最小 API 回應。
 def _default_api_response(route: Route) -> None:
+    """提供認證、參考資料與未設定偏好的共用 deterministic API 回應。"""
     request = route.request
     path = urlparse(request.url).path
     if not path.startswith("/api/"):
@@ -48,6 +49,9 @@ def _default_api_response(route: Route) -> None:
         return
     if path.endswith("/settings/timezone"):
         route_json(route, {"timeZoneId": "Asia/Taipei"})
+        return
+    if path.endswith("/settings/transaction-defaults"):
+        route_json(route, {"defaultBankAccountId": None, "defaultCreditCardId": None})
         return
     if path.endswith("/categories"):
         route_json(route, {"items": [], "total": 0, "page": 1, "pageSize": 999})

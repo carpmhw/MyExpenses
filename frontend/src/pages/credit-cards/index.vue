@@ -14,9 +14,11 @@ import { formatMoney } from '../../utils/format'
 import { CARD_NETWORK_OPTIONS, formatOptionalCreditCardText, normalizeOptionalCreditCardField } from '../../utils/creditCard'
 import { usePagination } from '../../composables/usePagination'
 import { useTimeZone } from '../../composables/useTimeZone'
+import { useTransactionDefaults } from '../../composables/useTransactionDefaults'
 
 const toast = inject<{ success: (m: string) => void; error: (m: string) => void }>('toast')!
 const timeZone = useTimeZone()
+const defaultState = useTransactionDefaults('creditCards')
 
 const cards = ref<CreditCard[]>([])
 const loading = ref(false)
@@ -122,6 +124,7 @@ function confirmDelete(id: number) {
   confirmOpen.value = true
 }
 
+// 刪除成功後重新讀取預設；刪除失敗不預先清空伺服器已保存的標示。
 async function doDelete() {
   if (deletingId.value !== null) {
     try {
@@ -129,6 +132,7 @@ async function doDelete() {
       confirmOpen.value = false
       deletingId.value = null
       toast.success('信用卡已刪除')
+      await defaultState.refresh()
       await fetchList()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '刪除失敗')
@@ -161,6 +165,10 @@ watch(() => pagination.page.value, () => fetchList())
     </div>
 
     <Card>
+      <div v-if="defaultState.message.value" role="status" class="mb-4 text-sm text-color-warning-text">
+        {{ defaultState.message.value }}
+        <Button variant="ghost" :disabled="defaultState.isSaving.value" @click="defaultState.refresh">重試預設設定</Button>
+      </div>
       <DataTable :columns="columns" :loading="loading" :items="cards">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無信用卡資料</div>
@@ -203,6 +211,27 @@ watch(() => pagination.page.value, () => fetchList())
                 @click="confirmDelete(item.id)"
               >
                 <Icon name="trash-2" :size="16" />
+              </button>
+              <span
+                v-if="defaultState.defaultId.value === item.id"
+                data-testid="default-indicator"
+                role="img"
+                title="目前預設"
+                :aria-label="`${item.bankName}卡號${item.lastFourDigits}，目前預設`"
+                class="inline-flex h-11 w-11 shrink-0 items-center justify-center text-accent-primary"
+              >
+                <Icon name="star" :size="16" fill="currentColor" aria-hidden="true" />
+              </span>
+              <button
+                v-else
+                type="button"
+                title="設為預設"
+                :disabled="defaultState.isSaving.value"
+                :aria-label="`將${item.bankName}卡號${item.lastFourDigits}設為預設`"
+                class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-text-secondary cursor-pointer transition-colors hover:bg-bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                @click="defaultState.setDefault(item.id)"
+              >
+                <Icon name="star" :size="16" fill="none" aria-hidden="true" />
               </button>
             </div>
           </td>
