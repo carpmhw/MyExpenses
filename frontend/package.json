@@ -17,7 +17,7 @@
   "dependencies": {
     "@lucide/vue": "^1.61.0",
     "@tailwindcss/vite": "^4.3.3",
-    "chart.js": "^4.5.1",
+    "chart.js": "^4.6.1",
     "qrcode": "^1.5.4",
     "radix-vue": "^1.9.17",
     "tailwindcss": "^4.3.3",
