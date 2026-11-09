@@ -15,7 +15,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@lucide/vue": "^1.65.0",
+    "@lucide/vue": "^1.70.0",
     "@tailwindcss/vite": "^4.3.3",
     "chart.js": "^4.6.1",
     "qrcode": "^1.5.4",
