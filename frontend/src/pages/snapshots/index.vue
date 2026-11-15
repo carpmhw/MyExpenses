@@ -402,7 +402,7 @@ watch([dateStart, dateEnd], refreshSnapshotsForDateRange)
     </Card>
 
     <Card>
-      <DataTable
+      <DataTable caption="財務快照"
         :columns="columns"
         :loading="snapshotsQuery.status.value === 'loading'"
         :items="snapshots"

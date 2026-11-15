@@ -268,7 +268,7 @@ watch([bankNameFilter, currencyCodeFilter], () => {
           />
         </div>
       </div>
-      <DataTable :columns="columns" :loading="loading" :items="accounts" :error="listError" :retry="fetchList">
+      <DataTable caption="銀行帳戶" :columns="columns" :loading="loading" :items="accounts" :error="listError" :retry="fetchList">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無符合篩選條件的銀行帳戶資料</div>
         </template>

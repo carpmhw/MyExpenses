@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   DialogRoot, DialogPortal, DialogOverlay,
   DialogContent, DialogTitle, DialogDescription, DialogClose,
@@ -14,13 +15,15 @@ const props = withDefaults(defineProps<{
   closeDisabled?: boolean
 }>(), {
   size: 'md',
-  description: '對話框內容',
   mobileFullScreen: false,
   scrollBody: false,
   closeDisabled: false,
 })
 
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
+
+// 沒有說明文字時明確移除 aria-describedby，避免螢幕閱讀器朗讀無意義的預設描述。
+const contentDescriptionAttrs = computed(() => props.description ? {} : { 'aria-describedby': undefined })
 
 // 在送出期間拒絕由 Escape、遮罩或關閉按鈕觸發的關閉事件。
 function handleOpenUpdate(value: boolean) {
@@ -34,16 +37,17 @@ function handleOpenUpdate(value: boolean) {
     <DialogPortal>
       <DialogOverlay class="fixed inset-0 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50" />
       <DialogContent
+        v-bind="contentDescriptionAttrs"
         :class="[
           'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100vw-2rem)] bg-bg-card border border-border-overlay rounded-2xl shadow-lg p-6 z-50',
           'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-          'max-h-[85vh]',
+          'max-h-[85dvh] overscroll-contain',
            props.scrollBody ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
            props.size === 'sm' ? 'max-w-sm' : props.size === 'lg' ? 'max-w-2xl' : props.size === 'xl' ? 'max-w-5xl' : 'max-w-md',
            props.mobileFullScreen ? 'max-md:inset-0 max-md:translate-x-0 max-md:translate-y-0 max-md:w-screen max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:max-w-none max-md:rounded-none max-md:p-4' : '',
         ]"
       >
-        <DialogDescription class="sr-only">{{ props.description }}</DialogDescription>
+        <DialogDescription v-if="props.description" class="sr-only">{{ props.description }}</DialogDescription>
         <div class="flex items-center justify-between gap-3 mb-4 shrink-0">
           <DialogTitle class="min-w-0 flex-1 break-words text-lg font-semibold text-text-primary">{{ props.title }}</DialogTitle>
           <DialogClose
@@ -60,7 +64,7 @@ function handleOpenUpdate(value: boolean) {
             </svg>
           </DialogClose>
         </div>
-        <div v-if="props.scrollBody" class="min-h-0 flex-1 overflow-y-auto">
+        <div v-if="props.scrollBody" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <slot />
         </div>
         <slot v-else />

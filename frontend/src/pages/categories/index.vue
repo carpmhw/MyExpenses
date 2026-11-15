@@ -147,7 +147,7 @@ watch(() => pagination.page.value, () => fetchList())
     </div>
 
     <Card>
-      <DataTable :columns="columns" :loading="loading" :items="categories">
+      <DataTable caption="分類" :columns="columns" :loading="loading" :items="categories">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無分類資料</div>
         </template>

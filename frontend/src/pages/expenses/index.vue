@@ -517,7 +517,7 @@ onMounted(() => {
         />
       </div>
 
-      <DataTable
+      <DataTable caption="交易明細"
         :columns="columns"
         :loading="loading"
         :items="transactions"
