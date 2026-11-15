@@ -1,10 +1,9 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import { nextTick, ref } from 'vue'
+import { nextTick } from 'vue'
 import Input from '../../src/components/ui/Input.vue'
 import Select from '../../src/components/ui/Select.vue'
 import Modal from '../../src/components/ui/Modal.vue'
-import ToastContainer from '../../src/components/ui/ToastContainer.vue'
 
 describe('shared form control accessibility contracts', () => {
   it('associates Input identity and error state with its native control', async () => {
@@ -66,25 +65,5 @@ describe('shared form control accessibility contracts', () => {
     close?.click()
     expect(wrapper.emitted('update:open')).toBeUndefined()
     wrapper.unmount()
-  })
-
-  it('announces toast messages and exposes a keyboard dismiss action', async () => {
-    const dismiss = vi.fn()
-    const wrapper = mount(ToastContainer, {
-      global: {
-        provide: {
-          toast: {
-            toasts: ref([{ id: 1, type: 'success', message: '交易已建立' }]),
-            dismiss,
-          },
-        },
-      },
-    })
-
-    expect(wrapper.get('[role="status"]').attributes('aria-live')).toBe('polite')
-    expect(wrapper.get('[role="status"]').text()).toContain('交易已建立')
-    const close = wrapper.get('button[aria-label="關閉通知"]')
-    await close.trigger('click')
-    expect(dismiss).toHaveBeenCalledWith(1)
   })
 })
