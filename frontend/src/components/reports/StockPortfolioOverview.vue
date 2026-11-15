@@ -6,6 +6,7 @@ import { api } from '../../api'
 import type { StockMarketRiskMetric, StockMarketRiskReport, StockMarketRiskUnavailableReason, StockPerformanceReport, StockPerformanceUnavailableReason, StockStructureReport, StockValueTrendPoint } from '../../types'
 import Card from '../ui/Card.vue'
 import QueryState from '../ui/QueryState.vue'
+import ChartFigure from '../ui/ChartFigure.vue'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { formatMoney } from '../../utils/format'
 import { getThemeColor } from '../../utils/themeColor'
@@ -274,7 +275,7 @@ onMounted(loadInitialData)
 
     <Card>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 class="text-sm font-semibold text-text-primary">全部持股價值趨勢</h3><p class="mt-1 text-xs text-text-tertiary">歷史快照資產價值，不等同投資報酬率</p></div><div class="flex rounded-lg bg-bg-raised p-1" role="group" aria-label="總覽持股價值趨勢期間"><button v-for="months in [6, 12, 24, 36, 60] as const" :key="months" :data-testid="`overview-value-trend-period-${months}`" type="button" class="rounded-md px-2 py-1 text-xs text-text-secondary" :class="valueTrendMonths === months ? 'bg-bg-active text-text-primary shadow-sm' : ''" :aria-pressed="valueTrendMonths === months" @click="valueTrendMonths = months">{{ months }}M</button></div></div>
-      <QueryState :status="valueTrendQuery.status.value" :error-message="queryErrorMessage(valueTrendQuery.error.value)" :empty-message="'尚無全部持股價值歷史'" :last-success-at="valueTrendQuery.lastSuccessAt.value" :retry="valueTrendQuery.retry"><div v-if="valueTrendData.length === 1" class="flex h-[280px] items-center justify-center text-sm text-text-tertiary">目前只有 1 筆全部持股價值快照</div><div v-else class="h-[280px]"><Line :data="valueTrendChartData" :options="valueTrendChartOptions" /></div></QueryState>
+      <QueryState :status="valueTrendQuery.status.value" :error-message="queryErrorMessage(valueTrendQuery.error.value)" :empty-message="'尚無全部持股價值歷史'" :last-success-at="valueTrendQuery.lastSuccessAt.value" :retry="valueTrendQuery.retry"><div v-if="valueTrendData.length === 1" class="flex h-[280px] items-center justify-center text-sm text-text-tertiary">目前只有 1 筆全部持股價值快照</div><ChartFigure v-else v-slot="{ chartA11y }" label="全部持股價值趨勢" :data="valueTrendChartData"><div class="h-[280px]"><Line v-bind="chartA11y" :data="valueTrendChartData" :options="valueTrendChartOptions" /></div></ChartFigure></QueryState>
     </Card>
 
     <QueryState :status="riskQuery.status.value" :error-message="queryErrorMessage(riskQuery.error.value)" :empty-message="'尚無目前持股風險資料'" :last-success-at="riskQuery.lastSuccessAt.value" :retry="riskQuery.retry">

@@ -633,7 +633,7 @@ onMounted(async () => {
           <option value="PaidOff">已結清</option>
         </select>
       </div>
-      <DataTable
+      <DataTable caption="信用卡交易"
         :columns="columns"
         :loading="loading"
         :items="installments"

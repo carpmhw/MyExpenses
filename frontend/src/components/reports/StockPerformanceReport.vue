@@ -5,6 +5,7 @@ import type { StockPerformanceMetric, StockPerformanceReport as StockPerformance
 import { api } from '../../api'
 import Card from '../ui/Card.vue'
 import QueryState from '../ui/QueryState.vue'
+import ChartFigure from '../ui/ChartFigure.vue'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { addCalendarYears } from '../../utils/timezone'
@@ -185,9 +186,18 @@ const monthlyChartOptions = computed(() => ({
                 </div>
                 <span class="text-xs text-text-tertiary">{{ report.terminalValuationSource }}</span>
               </div>
-              <div v-if="report.monthlyPoints.length > 0" data-testid="performance-monthly-chart" class="h-[280px]">
-                <Line :data="monthlyChartData" :options="monthlyChartOptions" />
-              </div>
+              <ChartFigure
+                v-if="report.monthlyPoints.length > 0"
+                v-slot="{ chartA11y }"
+                label="每月累積 TWR"
+                value-label="累積 TWR"
+                :data="monthlyChartData"
+                :format="(value: number) => `${value.toFixed(2)}%`"
+              >
+                <div data-testid="performance-monthly-chart" class="h-[280px]">
+                  <Line v-bind="chartA11y" :data="monthlyChartData" :options="monthlyChartOptions" />
+                </div>
+              </ChartFigure>
               <div v-else class="flex h-[280px] items-center justify-center text-sm text-text-tertiary">尚無每月績效資料</div>
             </Card>
             <Card>

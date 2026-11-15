@@ -7,6 +7,7 @@ import { useAuth } from '../../composables/useAuth'
 import { useTimeZone } from '../../composables/useTimeZone'
 import { copyTextToClipboard } from '../../utils/clipboard'
 import QRCode from 'qrcode'
+import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 
 const router = useRouter()
 const auth = useAuth()
@@ -49,6 +50,7 @@ const newTokenName = ref('')
 const creatingToken = ref(false)
 const newlyCreatedToken = ref<{ id: number; name: string; prefix: string; createdAt: string; scopes: string[] | null; token: string } | null>(null)
 const revokingToken = ref<ApiToken | null>(null)
+const revokeDialogOpen = ref(false)
 const revoking = ref(false)
 const scopeOptionsExpanded = ref(false)
 
@@ -131,15 +133,16 @@ async function copyToken() {
   }
 }
 
+// 確認對話框送出後撤銷選取的 API 金鑰；目標在開啟對話框時記下，不受對話框關閉順序影響。
 async function revoke() {
-  if (!revokingToken.value) return
+  const target = revokingToken.value
+  if (!target || revoking.value) return
   revoking.value = true
   try {
-    await api.apiTokens.revoke(revokingToken.value.id)
+    await api.apiTokens.revoke(target.id)
     tokens.value = tokens.value.map(t =>
-      t.id === revokingToken.value!.id ? { ...t, isRevoked: true } : t
+      t.id === target.id ? { ...t, isRevoked: true } : t
     )
-    revokingToken.value = null
     toast.success('金鑰已撤銷')
   } catch (e: any) {
     toast.error(e.message || '撤銷失敗')
@@ -522,7 +525,7 @@ watch(() => timeZone.timeZoneId.value, value => {
               <td class="py-2 pr-4 text-text-secondary whitespace-nowrap">{{ formatDate(token.createdAt) }}</td>
               <td class="py-2 pr-4 text-text-secondary whitespace-nowrap">{{ token.lastUsedAt ? formatDate(token.lastUsedAt) : '從未使用' }}</td>
               <td class="py-2">
-                <button @click="revokingToken = token"
+                <button type="button" @click="revokingToken = token; revokeDialogOpen = true"
                    class="text-color-expense-text hover:text-color-expense-text text-sm cursor-pointer bg-transparent border-none">
                   撤銷
                 </button>
@@ -533,21 +536,15 @@ watch(() => timeZone.timeZoneId.value, value => {
       </div>
       <p v-else class="text-sm text-text-secondary">尚無 API 金鑰。</p>
 
-      <div v-if="revokingToken" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="revokingToken = null">
-        <div class="bg-bg-card border border-border-default rounded-xl p-6 shadow-xl max-w-sm mx-4 space-y-4">
-          <p class="text-text-primary">確定要撤銷「{{ revokingToken.name }}」嗎？此操作無法復原。</p>
-          <div class="flex justify-end gap-2">
-            <button @click="revokingToken = null"
-              class="px-4 py-2 bg-bg-raised hover:bg-bg-active text-text-primary rounded-lg text-sm transition-colors cursor-pointer">
-              取消
-            </button>
-            <button @click="revoke" :disabled="revoking"
-              class="px-4 py-2 bg-color-expense-action hover:bg-color-expense-action/90 disabled:opacity-50 text-color-expense-action-text rounded-lg text-sm transition-colors cursor-pointer">
-              {{ revoking ? '撤銷中...' : '確認撤銷' }}
-            </button>
-          </div>
-        </div>
-      </div>
+      <ConfirmDialog
+        :open="revokeDialogOpen"
+        title="撤銷 API 金鑰"
+        :description="revokingToken ? `確定要撤銷「${revokingToken.name}」嗎？此操作無法復原。` : ''"
+        confirm-text="確認撤銷"
+        variant="danger"
+        @update:open="revokeDialogOpen = $event"
+        @confirm="revoke"
+      />
     </section>
 
     <section class="bg-bg-card rounded-xl p-6 shadow-sm border border-border-default space-y-4">

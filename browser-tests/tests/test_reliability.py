@@ -1067,7 +1067,7 @@ def test_transaction_entry_keyboard_and_accessibility(mocked_page: Page) -> None
     form.locator("#transaction-payment-method").select_option("11")
     form.get_by_role("button", name="建立支出").press("Enter")
 
-    expect(mocked_page.get_by_role("status").last).to_contain_text("交易已建立")
+    expect(mocked_page.get_by_role("region", name="通知")).to_contain_text("交易已建立")
 
 
 # 驗證普通交易入口不顯示信用卡控制項，也不載入信用卡參考資料。

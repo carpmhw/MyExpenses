@@ -443,6 +443,7 @@ docs
 !/docs/
 /docs/*
 !/docs/image-provenance-query-10103.md
+.agents
 
 # OS files
 .DS_Store

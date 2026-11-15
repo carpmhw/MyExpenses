@@ -192,6 +192,26 @@ body {
   color-scheme: dark;
 }
 
+/*
+ * 觸控裝置上的文字類表單控制項至少 16px，避免 iOS Safari 聚焦時自動放大頁面。
+ * 沒有字級 utility 的控制項由 base 層處理（utility 仍可覆寫）；
+ * text-xs／text-sm utility 讀取 theme 變數，因此在控制項本身覆寫變數，較大的字級（如 text-lg）不受影響。
+ */
+@layer base {
+  @media (pointer: coarse) {
+    :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), select, textarea) {
+      font-size: max(1rem, 1em);
+    }
+  }
+}
+
+@media (pointer: coarse) {
+  :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), select, textarea) {
+    --text-xs: 1rem;
+    --text-sm: 1rem;
+  }
+}
+
 @utility text-amount-total {
   font-size: var(--text-amount-total);
   line-height: var(--text-amount-total--line-height);

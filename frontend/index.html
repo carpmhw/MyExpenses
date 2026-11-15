@@ -1,20 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant-TW">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MyExpenses</title>
-  </head>
-  <body>
+    <meta name="color-scheme" content="light dark" />
     <script>
-      (function() {
+      // 防止配色閃爍：在 CSS 與 Vue 載入前套用已保存的覆寫（'darkMode'，與 useDarkMode 共用），否則跟隨系統。
+      (function () {
         var stored = localStorage.getItem('darkMode');
+        if (stored !== null) {
+          document.querySelector('meta[name="color-scheme"]').content = stored === 'true' ? 'dark' : 'light';
+        }
         if (stored === 'true' || (stored === null && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
         }
       })();
     </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyExpenses</title>
+  </head>
+  <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

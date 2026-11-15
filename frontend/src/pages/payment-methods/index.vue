@@ -139,7 +139,7 @@ watch(() => pagination.page.value, () => fetchList())
     </div>
 
     <Card>
-      <DataTable :columns="columns" :loading="loading" :items="items">
+      <DataTable caption="支付方式" :columns="columns" :loading="loading" :items="items">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無支付方式資料</div>
         </template>

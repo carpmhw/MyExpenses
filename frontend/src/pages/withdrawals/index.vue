@@ -362,7 +362,7 @@ onMounted(async () => {
         <span class="text-xs text-text-tertiary">（最多 1 年）</span>
       </div>
 
-      <DataTable
+      <DataTable caption="提款紀錄"
         :columns="columns"
         :loading="withdrawalQuery.status.value === 'loading'"
         :items="withdrawals"

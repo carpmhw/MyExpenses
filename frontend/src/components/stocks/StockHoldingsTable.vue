@@ -50,7 +50,7 @@ function priceFreshness(lastUpdate: string | null): 'fresh' | 'warning' | 'stale
 </script>
 
 <template>
-  <DataTable :columns="columns" :loading="props.loading" :items="props.items">
+  <DataTable caption="股票持倉" :columns="columns" :loading="props.loading" :items="props.items">
     <template #empty>
       <div class="py-4 text-center text-text-tertiary">尚無股票資料</div>
     </template>

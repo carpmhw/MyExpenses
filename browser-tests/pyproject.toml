@@ -4,7 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
   "pytest>=8.0",
-  "pytest-playwright>=0.7",
+  # 與其他專案對齊同一 Playwright 瀏覽器 revision（Chromium 1255／Firefox 1572），精確固定版本。
+  "playwright==1.65.2",
+  "pytest-playwright==0.8.0",
 ]
 
 [tool.pytest.ini_options]

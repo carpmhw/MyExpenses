@@ -169,7 +169,7 @@ watch(() => pagination.page.value, () => fetchList())
         {{ defaultState.message.value }}
         <Button variant="ghost" :disabled="defaultState.isSaving.value" @click="defaultState.refresh">重試預設設定</Button>
       </div>
-      <DataTable :columns="columns" :loading="loading" :items="cards">
+      <DataTable caption="信用卡" :columns="columns" :loading="loading" :items="cards">
         <template #empty>
           <div class="text-center text-text-tertiary py-4">尚無信用卡資料</div>
         </template>
