@@ -4,6 +4,7 @@ import { api } from '../../api'
 import type { MonthlyTrend, CategoryDistribution, NetWorth, MonthlyForecast, NetWorthTrendPoint } from '../../types'
 import Card from '../../components/ui/Card.vue'
 import QueryState from '../../components/ui/QueryState.vue'
+import ChartFigure from '../../components/ui/ChartFigure.vue'
 import { formatCurrency, formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
 import { addCalendarDays, getCurrentYearRange } from '../../utils/timezone'
@@ -406,21 +407,27 @@ function selectCategory(item: CategoryDistribution) {
             <h2 class="text-base font-semibold text-text-primary">每月收支趨勢</h2>
             <div class="flex gap-1 bg-bg-raised rounded-lg p-0.5">
               <button
+                type="button"
                 class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
                 :class="chartType === 'bar' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+                :aria-pressed="chartType === 'bar'"
                 @click="chartType = 'bar'"
               >長條圖</button>
               <button
+                type="button"
                 class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer"
                 :class="chartType === 'line' ? 'bg-bg-active text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+                :aria-pressed="chartType === 'line'"
                 @click="chartType = 'line'"
               >折線圖</button>
             </div>
           </div>
-          <div class="h-[360px]">
-            <Bar v-if="chartType === 'bar'" :data="trendChartData" :options="trendChartOptions" />
-            <Line v-else :data="trendChartData" :options="trendChartOptions" />
-          </div>
+          <ChartFigure v-slot="{ chartA11y }" label="每月收支趨勢" :data="trendChartData">
+            <div class="h-[360px]">
+              <Bar v-if="chartType === 'bar'" v-bind="chartA11y" :data="trendChartData" :options="trendChartOptions" />
+              <Line v-else v-bind="chartA11y" :data="trendChartData" :options="trendChartOptions" />
+            </div>
+          </ChartFigure>
         </QueryState>
       </Card>
     </div>
@@ -437,9 +444,11 @@ function selectCategory(item: CategoryDistribution) {
         >
           <h2 class="text-base font-semibold text-text-primary mb-4">支出類別分布</h2>
           <div class="flex gap-8">
-            <div class="h-[360px] w-[400px] flex-shrink-0">
-              <Doughnut :data="categoryChartData" :options="categoryChartOptions" />
-            </div>
+            <ChartFigure v-slot="{ chartA11y }" class="w-[400px] flex-shrink-0" label="支出類別分布" category-label="類別" :data="categoryChartData">
+              <div class="h-[360px]">
+                <Doughnut v-bind="chartA11y" :data="categoryChartData" :options="categoryChartOptions" />
+              </div>
+            </ChartFigure>
             <div class="flex-1 space-y-1.5 overflow-y-auto max-h-[360px]">
               <button
                 v-for="item in categoryData"
@@ -581,9 +590,11 @@ function selectCategory(item: CategoryDistribution) {
             <span>目前只有 1 筆完整快照</span>
             <span>尚不足以形成趨勢</span>
           </div>
-          <div v-else class="h-[300px]">
-            <Line :data="netWorthTrendData" :options="netWorthTrendOptions" />
-          </div>
+          <ChartFigure v-else v-slot="{ chartA11y }" label="近 6 個月淨值趨勢" :data="netWorthTrendData">
+            <div class="h-[300px]">
+              <Line v-bind="chartA11y" :data="netWorthTrendData" :options="netWorthTrendOptions" />
+            </div>
+          </ChartFigure>
         </QueryState>
       </Card>
     </div>
@@ -600,9 +611,11 @@ function selectCategory(item: CategoryDistribution) {
         >
           <h2 class="text-base font-semibold text-text-primary mb-4">未來 6 個月信用卡應繳預測</h2>
           <template>
-            <div class="h-[360px]">
-              <Bar :data="forecastChartData" :options="forecastChartOptions" />
-            </div>
+            <ChartFigure v-slot="{ chartA11y }" label="未來 6 個月信用卡應繳預測" :data="forecastChartData">
+              <div class="h-[360px]">
+                <Bar v-bind="chartA11y" :data="forecastChartData" :options="forecastChartOptions" />
+              </div>
+            </ChartFigure>
             <div v-for="month in forecastData.filter(f => f.totalAmount > 0)" :key="month.month" class="mt-6 pt-4 border-t border-border-default">
               <h3 class="text-sm font-semibold text-text-primary mb-2">{{ month.month }} - 共 {{ formatMoney(month.totalAmount) }}</h3>
               <table class="w-full text-sm">

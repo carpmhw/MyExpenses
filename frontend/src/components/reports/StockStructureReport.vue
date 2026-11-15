@@ -23,6 +23,7 @@ import type {
 } from '../../types'
 import Card from '../ui/Card.vue'
 import QueryState from '../ui/QueryState.vue'
+import ChartFigure from '../ui/ChartFigure.vue'
 import { useAsyncQuery } from '../../composables/useAsyncQuery'
 import { formatMoney, formatShares } from '../../utils/format'
 import { formatStockInstrumentType } from '../../utils/stock'
@@ -311,27 +312,35 @@ onMounted(loadInitialData)
         <div v-if="canRenderAllocations" class="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <Card>
             <h3 class="text-sm font-semibold text-text-primary">商品類型配置</h3>
-            <div class="mt-3 h-[280px]">
-              <Doughnut :data="instrumentChartData" :options="createDoughnutOptions(structureData.instrumentTypeAllocations)" />
-            </div>
+            <ChartFigure v-slot="{ chartA11y }" class="mt-3" label="商品類型配置" category-label="商品類型" :data="instrumentChartData">
+              <div class="h-[280px]">
+                <Doughnut v-bind="chartA11y" :data="instrumentChartData" :options="createDoughnutOptions(structureData.instrumentTypeAllocations)" />
+              </div>
+            </ChartFigure>
           </Card>
           <Card>
             <h3 class="text-sm font-semibold text-text-primary">標的集中度 Top 10</h3>
-            <div class="mt-3 h-[280px]">
-              <Bar :data="symbolChartData" :options="chartOptions" />
-            </div>
+            <ChartFigure v-slot="{ chartA11y }" class="mt-3" label="標的集中度 Top 10" category-label="標的" :data="symbolChartData">
+              <div class="h-[280px]">
+                <Bar v-bind="chartA11y" :data="symbolChartData" :options="chartOptions" />
+              </div>
+            </ChartFigure>
           </Card>
           <Card>
             <h3 class="text-sm font-semibold text-text-primary">券商分布</h3>
-            <div class="mt-3 h-[280px]">
-              <Doughnut :data="brokerChartData" :options="createDoughnutOptions(structureData.brokerAllocations)" />
-            </div>
+            <ChartFigure v-slot="{ chartA11y }" class="mt-3" label="券商分布" category-label="券商" :data="brokerChartData">
+              <div class="h-[280px]">
+                <Doughnut v-bind="chartA11y" :data="brokerChartData" :options="createDoughnutOptions(structureData.brokerAllocations)" />
+              </div>
+            </ChartFigure>
           </Card>
           <Card>
             <h3 class="text-sm font-semibold text-text-primary">市場配置</h3>
-            <div class="mt-3 h-[280px]">
-              <Doughnut :data="marketChartData" :options="createDoughnutOptions(structureData.marketAllocations)" />
-            </div>
+            <ChartFigure v-slot="{ chartA11y }" class="mt-3" label="市場配置" category-label="市場" :data="marketChartData">
+              <div class="h-[280px]">
+                <Doughnut v-bind="chartA11y" :data="marketChartData" :options="createDoughnutOptions(structureData.marketAllocations)" />
+              </div>
+            </ChartFigure>
           </Card>
         </div>
         <Card v-else>
@@ -444,9 +453,11 @@ onMounted(loadInitialData)
           <span>目前只有 1 筆全部持股價值快照</span>
           <span>尚不足以形成趨勢</span>
         </div>
-        <div v-else class="h-[280px]">
-          <Line :data="valueTrendChartData" :options="chartOptions" />
-        </div>
+        <ChartFigure v-else v-slot="{ chartA11y }" label="全部持股價值趨勢" :data="valueTrendChartData">
+          <div class="h-[280px]">
+            <Line v-bind="chartA11y" :data="valueTrendChartData" :options="chartOptions" />
+          </div>
+        </ChartFigure>
       </QueryState>
     </Card>
     <button

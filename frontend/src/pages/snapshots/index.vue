@@ -7,6 +7,7 @@ import Card from '../../components/ui/Card.vue'
 import Button from '../../components/ui/Button.vue'
 import DataTable from '../../components/ui/DataTable.vue'
 import QueryState from '../../components/ui/QueryState.vue'
+import ChartFigure from '../../components/ui/ChartFigure.vue'
 import Modal from '../../components/ui/Modal.vue'
 import SnapshotDetailModal from '../../components/snapshots/SnapshotDetailModal.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
@@ -391,9 +392,11 @@ watch([dateStart, dateEnd], refreshSnapshotsForDateRange)
           :retry="trendQuery.retry"
         >
           <h2 class="text-sm font-semibold text-text-primary mb-3">資產/淨值趨勢</h2>
-          <div class="h-64">
-            <Line :data="trendChartData" :options="trendChartOptions" />
-          </div>
+          <ChartFigure v-slot="{ chartA11y }" label="資產/淨值趨勢" category-label="日期" :data="trendChartData">
+            <div class="h-64">
+              <Line v-bind="chartA11y" :data="trendChartData" :options="trendChartOptions" />
+            </div>
+          </ChartFigure>
           <p v-if="trendData.length > 0 && !hasCompleteTrend" class="mt-3 text-xs text-text-secondary">
              尚無完整淨值歷史，目前僅顯示資產總額
           </p>
