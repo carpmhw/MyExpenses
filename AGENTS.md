@@ -34,7 +34,7 @@ MyExpenses 是單一 owner、自架式的個人財務管理系統，涵蓋收支
 - C# 沿用 nullable、file-scoped namespace、非同步 I/O 與既有 DI 模式；TypeScript／Vue 沿用 `<script setup lang="ts">`、Composition API 及周邊格式。
 - API 契約變更須一起檢查 backend DTO／endpoint、`frontend/src/types/index.ts`、`frontend/src/api/index.ts`，以及受影響的 MCP schema／client／測試。
 - 依賴變更同步更新所屬 `package-lock.json` 或 `browser-tests/uv.lock`。兩個 Node.js 專案各有自己的依賴與指令，根目錄沒有共用 `package.json`。
-- `backend/myexpenses-mcp-server/dist/` 目前有納入 Git；應修改 `src/` 並由 build 產生對應結果，不直接手改編譯輸出。
+- `backend/myexpenses-mcp-server/dist/` 目前有納入 Git；應修改 `src/` 並由 build 產生對應結果，不直接手改編譯輸出。`npm test` 會先執行 build，修改 `src/` 後須將對應的 `dist/` 變更一併提交，避免兩者不同步。
 - `.opencode/`、`.superpowers/`、`openspec/` 與多數 `docs/` 內容目前被忽略；不要假設其中的本機規格已受版本控制。新增文件前確認 `.gitignore`，避免無意使用強制加入。
 
 ## 必須維持的領域契約
@@ -61,7 +61,7 @@ MyExpenses 是單一 owner、自架式的個人財務管理系統，涵蓋收支
 - 區分業務日期與時間點：日期沿用 `DateOnly`／日期字串契約，時間點以 UTC 保存；本地日期、顯示及排程透過 `TimeZoneService` 與前端共用 timezone 工具轉換。
 - 系統時區以資料庫設定為準，`TZ`／`Asia/Taipei` 用於初始設定；不要改成依賴瀏覽器或主機的本地時區。可測試的目前時間沿用 `TimeProvider`。
 - 本地日期篩選 UTC 時間點時，沿用 `ConvertLocalDateRangeToUtc` 的半開區間 `[start, endExclusive)`，避免自行組出一天最後一秒。
-- schema 變更新增 EF Core migration，並同步 model snapshot；不要靠修改已套用的 migration 或重建資料庫來升級。
+- schema 變更新增 EF Core migration，並同步 model snapshot；不要靠修改已套用的 migration 或重建資料庫來升級。repository 沒有 dotnet tool manifest，需全域安裝與 EF Core 同版本的 `dotnet-ef`（目前 10.0.x），在根目錄執行 `dotnet ef migrations add <Name> --project backend/MyExpenses.Api`。
 - 保留 `DatabaseStartupCoordinator` 的 migration 前 verified backup、完整性檢查與 readiness 流程；測試資料庫行為使用隔離的 SQLite 資料庫。
 - `AppDbContext` 有字串 allowlist 正規化及 UTC conversion；新增欄位時檢查是否需要納入，而非對所有字串直接 Trim。
 - 非 Production 的 EF Core Query 10103 會升級為例外。查詢應表達正確的條件、唯一性或排序，不以關閉警告解決問題。
@@ -78,8 +78,11 @@ MyExpenses 是單一 owner、自架式的個人財務管理系統，涵蓋收支
 ### Frontend
 
 - API 呼叫集中於 `src/api/index.ts`，沿用 `ApiError`、取消請求與 session 過期協調；頁面不要自行實作另一套 fetch／401 處理。
-- 查詢／寫入優先使用 `useAsyncQuery`、`useAsyncMutation` 與 `QueryState`。保留 loading、empty、refreshing、stale、error 的差異，以及過期回應保護和防止重複送出的行為。
+- 查詢／寫入優先使用 `useAsyncQuery`、`useAsyncMutation` 與 `QueryState`。保留 loading、empty、refreshing、stale、error 的差異，以及過期回應保護和防止重複送出的行為；細節見 `frontend/README.md` 的「非同步資料可靠性」。
 - 重用 `components/ui/`、`style.css` 的語意色彩與共用 `Icon`／icon registry；維持暗色模式、行動版與可存取的表單操作。
+- Chart.js 圖表一律包在 `components/ui/ChartFigure.vue` 內，提供可存取名稱及文字替代資料表；新增圖表時傳入與圖表相同的 data，數值格式與 tooltip 一致。
+- `style.css` 在 `@layer base` 的 `@media (pointer: coarse)` 讓文字類表單控制項至少 1rem，避免 iOS Safari 聚焦縮放；此規則由 `test/form-control-touch-size.test.ts` 保護，不要移出 base 層或以 utility 壓回更小字級。
+- 暗色模式由 `index.html` 的 inline 防閃爍 script 與 `composables/useDarkMode.ts` 共用 localStorage `darkMode` key；調整任一邊時同步修改另一邊。
 - 路由沿用 lazy import。build 已包含設定檢查及入口大小預算，不要以放寬門檻取代解決 bundle 回歸。
 
 ### MCP Server
@@ -93,7 +96,7 @@ MyExpenses 是單一 owner、自架式的個人財務管理系統，涵蓋收支
 
 本機完整開發使用 .NET 10 SDK、Node.js 24、Python 3.12+、uv 與 OpenSSL；部署驗證另需 Docker Compose。MCP package 的最低 Node.js 版本為 20，但前端開發及 CI 以 24 為準。
 
-以下指令除另有註明外，都在 repository 根目錄執行。
+以下指令除另有註明外，都在 repository 根目錄執行。`README.md` 的「開發與驗證」提供相同的核心指令給人閱讀；調整任一邊的指令、port 或工具需求時同步更新另一邊。
 
 ### 安裝與啟動
 
@@ -123,11 +126,14 @@ dotnet run --urls http://localhost:5000
 | Frontend production build／入口大小 | `npm --prefix frontend run build` |
 | MCP 編譯及測試 | `npm --prefix backend/myexpenses-mcp-server test` |
 | 瀏覽器互動 | `npm --prefix frontend run test:e2e` |
+| Browser test 程序生命週期（`browser-tests/server_lifecycle.py`、fixture） | `uv run --directory browser-tests --project . pytest lifecycle-tests -q` |
 | 部署設定 | `sh scripts/test-deployment-config.sh` |
 | Smoke script 回歸 | `sh scripts/test-smoke-deployment.sh` |
 
 - `frontend test` 包含 `test:node`（`test/*.test.ts`）與 `test:vitest`（`test/unit/`、`test/component/`）；只執行其中一個不等於通過全部前端測試。目前沒有 `npm run lint`。
-- 前端 CI 另執行 `npm audit --audit-level=high`；修改前端依賴時一併檢查。
+- 只驗證局部時可先執行單一測試，例如 `dotnet test backend/MyExpenses.Api.Tests/MyExpenses.Api.Tests.csproj --filter "FullyQualifiedName~StockLedger"`、`npm --prefix frontend run test:vitest -- test/component/<name>.test.ts`、`node --test frontend/test/<name>.test.ts`；完成前仍須執行該範圍的完整指令。
+- 前端與 MCP 的 CI 都執行 `npm audit --audit-level=moderate`；修改任一 Node.js 專案的依賴時，在該專案執行相同檢查。
+- 本專案 E2E 使用 Playwright Firefox，版本精確固定於 `browser-tests/pyproject.toml`；不要依其他專案或全域慣例改裝 Chromium，升級時同步 `uv.lock` 並重新執行 `playwright install firefox`。
 - 一般 E2E 使用 `127.0.0.1:5199` 的 Vite 與攔截 API，不需 backend。Real-stack 需另行啟動 Docker backend，並以 `E2E_REAL=1 npm --prefix frontend run test:e2e:real` 明確啟用；詳見 `browser-tests/README.md`。
 - Browser test lifecycle、port 占用與程序清理依 `browser-tests/README.md` 處理，避免終止其他開發程序。
 - 完整部署 smoke 使用 `sh scripts/smoke-deployment.sh local`、`lan` 或 `remote`，先確認所選模式的環境設定；已有映像可設定 `SMOKE_SKIP_BUILD=1`。
