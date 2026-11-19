@@ -1,8 +1,6 @@
-# Vue 3 + TypeScript + Vite
+# MyExpenses Frontend
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
-
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+Vue 3、TypeScript、Vite 與 Tailwind CSS 4 建置的 MyExpenses 前端。安裝、啟動與驗證指令見根目錄 [`README.md`](../README.md) 的「開發與驗證」；開發代理規範見 [`AGENTS.md`](../AGENTS.md)。
 
 ## 非同步資料可靠性
 
